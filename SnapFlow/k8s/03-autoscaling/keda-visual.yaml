@@ -1,0 +1,19 @@
+# Deploy-ready mode for current code: CPU-based KEDA.
+# Scale-to-zero is intentionally disabled until queue/event trigger path is implemented.
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: v3-visual-scaledobject
+  namespace: snapflow-prod
+spec:
+  scaleTargetRef:
+    name: v3-visual-regression
+  pollingInterval: 30
+  cooldownPeriod: 300
+  minReplicaCount: 1
+  maxReplicaCount: 3
+  triggers:
+  - type: cpu
+    metricType: Utilization
+    metadata:
+      value: "75"

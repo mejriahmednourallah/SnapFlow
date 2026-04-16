@@ -1,0 +1,35 @@
+FROM snapflow/v3-python-fastapi-base:latest
+
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libpango-1.0-0 \
+    libcairo2 \
+    libgdk-pixbuf-2.0-0 \
+    libatk1.0-0 \
+    libatk-bridge2.0-0 \
+    libnss3 \
+    libnspr4 \
+    libgbm1 \
+    libasound2 \
+    libxrandr2 \
+    libxss1 \
+    libcups2 \
+    libxcomposite1 \
+    libxdamage1 \
+    libx11-xcb1 \
+    libxcb-dri3-0 \
+    libdrm2 \
+    libxfixes3 \
+    libxkbcommon0 \
+    fonts-liberation \
+    wget \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /opt/base
+COPY requirements.heavy.txt .
+RUN pip install --no-cache-dir --default-timeout=300 --retries=10 -r requirements.heavy.txt \
+    && python -m playwright install chromium webkit firefox
+
+WORKDIR /app

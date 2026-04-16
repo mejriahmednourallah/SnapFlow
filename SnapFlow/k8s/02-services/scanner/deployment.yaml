@@ -1,0 +1,79 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: v3-scanner-go
+  namespace: snapflow-prod
+  labels:
+    app: v3-scanner-go
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: v3-scanner-go
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: v3-scanner-go
+    spec:
+      terminationGracePeriodSeconds: 180
+      containers:
+      - name: scanner
+        image: snapflow/v3-scanner-go:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8081
+          name: http
+        env:
+        - name: PORT
+          value: "8081"
+        - name: DB_HOST
+          valueFrom:
+            secretKeyRef:
+              name: snapflow-secrets
+              key: db_host
+        - name: DB_PORT
+          valueFrom:
+            secretKeyRef:
+              name: snapflow-secrets
+              key: db_port
+        - name: DB_NAME
+          valueFrom:
+            secretKeyRef:
+              name: snapflow-secrets
+              key: db_name
+        - name: DB_USER
+          valueFrom:
+            secretKeyRef:
+              name: snapflow-secrets
+              key: db_user
+        - name: DB_PASS
+          valueFrom:
+            secretKeyRef:
+              name: snapflow-secrets
+              key: db_pass
+        - name: SCANNER_PARALLELISM
+          value: "50"
+        resources:
+          requests:
+            cpu: 500m
+            memory: 512Mi
+          limits:
+            cpu: "2"
+            memory: 2Gi
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8081
+          initialDelaySeconds: 15
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8081
+          initialDelaySeconds: 30
+          periodSeconds: 15

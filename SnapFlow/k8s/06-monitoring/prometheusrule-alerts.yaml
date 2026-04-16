@@ -1,0 +1,41 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: snapflow-alerts
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+spec:
+  groups:
+  - name: snapflow.infra
+    rules:
+    - alert: PostgresConnectionsSaturated
+      expr: pg_stat_activity_count > 80
+      for: 2m
+      labels:
+        severity: critical
+      annotations:
+        summary: "Postgres at {{ $value }} connections"
+    - alert: RedisDown
+      expr: up{job=~".*redis.*"} == 0
+      for: 2m
+      labels:
+        severity: critical
+      annotations:
+        summary: "Redis target is down"
+  - name: snapflow.node
+    rules:
+    - alert: NodeMemoryPressure
+      expr: (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) < 0.15
+      for: 5m
+      labels:
+        severity: warning
+      annotations:
+        summary: "Node memory below 15% free"
+    - alert: NodeDiskPressure
+      expr: (node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"}) < 0.20
+      for: 5m
+      labels:
+        severity: warning
+      annotations:
+        summary: "Node disk below 20% free"

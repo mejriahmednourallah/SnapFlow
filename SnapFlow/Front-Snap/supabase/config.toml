@@ -1,0 +1,52 @@
+project_id = "local-dev"
+
+[functions.ai-assistant]
+verify_jwt = false
+
+[functions.create-user]
+verify_jwt = false
+
+[functions.delete-user]
+verify_jwt = false
+
+[functions.execute-scheduled-reports]
+verify_jwt = false
+
+[functions.fetch-audit-api]
+verify_jwt = false
+
+[functions.fetch-redmine]
+verify_jwt = false
+
+[functions.form-workflows]
+verify_jwt = false
+
+[functions.form-workflows-approve]
+verify_jwt = false
+
+[functions.form-workflows-detect]
+verify_jwt = false
+
+[functions.form-workflows-execute]
+verify_jwt = false
+
+[functions.form-workflows-suggest]
+verify_jwt = false
+
+[functions.generate-audit]
+verify_jwt = false
+
+[functions.poll-audit-job]
+verify_jwt = false
+
+[functions.seed-users]
+verify_jwt = false
+
+[functions.simulate-audit]
+verify_jwt = false
+
+[functions.update-role]
+verify_jwt = false
+
+[functions.detect-logo]
+verify_jwt = false

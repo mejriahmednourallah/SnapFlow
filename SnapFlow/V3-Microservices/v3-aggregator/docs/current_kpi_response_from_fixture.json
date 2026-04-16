@@ -1,0 +1,1303 @@
+{
+  "scan_id": "scan_7f8bc347b7a1",
+  "domain": "https://www.biat.com.tn",
+  "pages_scanned": 100,
+  "axes": {
+    "Audit Technique": {
+      "Version CMS/Framework": {
+        "info": "CMS détecté: Drupal",
+        "impact": "Risque de sécurité si version obsolète ou non maintenue",
+        "pages_affected": 1,
+        "pages_affected_urls": [
+          "https://www.biat.com.tn"
+        ],
+        "status": "passing",
+        "type": null,
+        "severity": null,
+        "data": {
+          "cms_name": "Drupal",
+          "cms_version": "10",
+          "cms_eol": false
+        }
+      },
+      "Version Modules Installés": {
+        "info": "5 modules détectés avec versions",
+        "impact": "Modules obsolètes = vulnérabilités potentielles non corrigées",
+        "pages_affected": 1,
+        "pages_affected_urls": [
+          "https://www.biat.com.tn"
+        ],
+        "status": "passing",
+        "type": null,
+        "severity": null,
+        "data": {
+          "module_count": 5,
+          "modules": [
+            {
+              "name": "jQuery",
+              "source": "script_src",
+              "version": "3.7.1"
+            },
+            {
+              "name": "Bootstrap",
+              "source": "script_src",
+              "version": "4.1.1"
+            },
+            {
+              "name": "jQuery",
+              "source": "script_src",
+              "version": "0.7.2"
+            },
+            {
+              "name": "jQuery",
+              "source": "script_src",
+              "version": "10.6.2"
+            },
+            {
+              "name": "Bootstrap",
+              "source": "script_src",
+              "version": "10.6.2"
+            }
+          ]
+        }
+      },
+      "Version Langage de Programmation": {
+        "info": "Serveur: Apache 2.4.62",
+        "impact": "Versions obsolètes exposent à des vulnérabilités connues",
+        "pages_affected": 1,
+        "pages_affected_urls": [
+          "https://www.biat.com.tn"
+        ],
+        "status": "passing",
+        "type": null,
+        "severity": null,
+        "data": {
+          "server_tech": "Apache",
+          "server_version": "2.4.62"
+        }
+      },
+      "Vérification du Code": {
+        "info": "CVE détectées: Critique=0, Haute=0, Moyenne=0, Basse=0",
+        "impact": "Vulnérabilités connues exposent l'application à des attaques",
+        "pages_affected": 1,
+        "pages_affected_urls": [
+          "https://www.biat.com.tn"
+        ],
+        "status": "passing",
+        "type": null,
+        "severity": null,
+        "data": {
+          "critical": 0,
+          "high": 0,
+          "medium": 0,
+          "low": 0
+        }
+      }
+    },
+    "Check Sécurité": {
+      "SSL": {
+        "info": "Certificat SSL: Valide",
+        "impact": "Certificat invalide = risque de sécurité élevé et perte de confiance utilisateur",
+        "pages_affected": 1,
+        "pages_affected_urls": [
+          "https://www.biat.com.tn"
+        ],
+        "status": "passing",
+        "type": null,
+        "severity": null,
+        "data": {
+          "valid": true,
+          "expiry": "2026-06-27",
+          "issuer": "DigiCert Global G2 TLS RSA SHA256 2020 CA1",
+          "protocol": "TLS 3.3"
+        }
+      },
+      "Sécurité des En-têtes HTTP": {
+        "info": "6 en-têtes de sécurité configurés",
+        "impact": "En-têtes manquants = surface d'attaque accrue (XSS, clickjacking, MIME sniffing)",
+        "pages_affected": 0,
+        "pages_affected_urls": [],
+        "status": "passing",
+        "type": null,
+        "severity": null,
+        "data": {
+          "headers_present": 6,
+          "missing_headers": null,
+          "headers": [
+            {
+              "value": "max-age=31536000; includeSubDomains",
+              "header": "Strict-Transport-Security",
+              "present": true
+            },
+            {
+              "value": "default-src 'self' https: data:; script-src 'self' 'unsafe-inline' https:; script-src-elem 'self' https: 'unsafe-inline'; style-src 'self' https: 'unsafe-inline'; style-src-attr 'self' 'unsafe-inline' 'unsafe-hashes'; img-src 'self' https: http://www.biat.com.tn;",
+              "header": "Content-Security-Policy",
+              "present": true
+            },
+            {
+              "value": "nosniff",
+              "header": "X-Content-Type-Options",
+              "present": true
+            },
+            {
+              "value": "SAMEORIGIN",
+              "header": "X-Frame-Options",
+              "present": true
+            },
+            {
+              "value": "strict-origin-when-cross-origin",
+              "header": "Referrer-Policy",
+              "present": true
+            },
+            {
+              "value": "camera=(), microphone=(), geolocation=(self), display-capture=(self), fullscreen=(self)",
+              "header": "Permissions-Policy",
+              "present": true
+            }
+          ]
+        }
+      },
+      "Gestion des Sessions": {
+        "info": "Cookies manquant flags: 0",
+        "impact": "Cookies sans HttpOnly/Secure exposent à des exploitations XSS et MITM",
+        "pages_affected": 0,
+        "pages_affected_urls": [],
+        "status": "passing",
+        "type": null,
+        "severity": null,
+        "data": {
+          "missing_count": 0,
+          "cookies": null
+        }
+      },
+      "SQL Injection et DDoS": {
+        "info": "Signaux détectés: SQLi=0, XSS=0, DDoS=0",
+        "impact": "Vulnérabilités d'injection = compromission applicative et perte de données critiques",
+        "pages_affected": 0,
+        "pages_affected_urls": [],
+        "status": "passing",
+        "type": null,
+        "severity": null,
+        "data": {
+          "sqli_tests": [],
+          "xss_tests": [],
+          "ddos_indicators": {},
+          "sqli_vulnerable_count": 0,
+          "xss_vulnerable_count": 0,
+          "ddos_signal_count": 0,
+          "passed": true
+        }
+      },
+      "Pages Admin Exposées": {
+        "info": "Endpoints admin/sensibles trouvés: 0 (200/403/500)",
+        "impact": "Pages admin accessibles ou instables = surface d'attaque et risque de compromission",
+        "pages_affected": 0,
+        "pages_affected_urls": [],
+        "status": "passing",
+        "type": null,
+        "severity": null,
+        "data": {}
+      },
+      "Divulgation de Version CMS": {
+        "info": "Fichiers version CMS détectés: 0 (200/403/500)",
+        "impact": "Divulgation/versioning facilite la reconnaissance et l'exploitation de vulnérabilités",
+        "pages_affected": 0,
+        "pages_affected_urls": [],
+        "status": "passing",
+        "type": null,
+        "severity": null,
+        "data": {}
+      },
+      "Divulgation d'Information via robots.txt": {
+        "info": "Chemins sensibles dans robots.txt: 0 révélés",
+        "impact": "Chemins sensibles exposés via robots.txt = reconnaissance facilitée pour attaquants",
+        "pages_affected": 0,
+        "pages_affected_urls": [],
+        "status": "passing",
+        "type": null,
+        "severity": null,
+        "data": {}
+      },
+      "Fuite d'Information Page d'Erreur": {
+        "info": "Indicateurs de fuite dans page d'erreur: 0 détectés",
+        "impact": "Page d'erreur révélant infos sensibles (stack trace, chemin fichier) = reconnaissance d'attaquant",
+        "pages_affected": 0,
+        "pages_affected_urls": [],
+        "status": "passing",
+        "type": null,
+        "severity": null,
+        "data": {}
+      },
+      "Fichiers Sensibles Exposés": {
+        "info": "Fichiers sensibles détectés: 0 (200/403/500)",
+        "impact": "Fichiers sensibles accessibles ou instables peuvent exposer secrets, configs et données",
+        "pages_affected": 0,
+        "pages_affected_urls": [],
+        "status": "passing",
+        "type": null,
+        "severity": null,
+        "data": {}
+      },
+      "Méthodes HTTP TRACE/TRACK": {
+        "info": "Méthodes TRACE/TRACK activées: NON",
+        "impact": "Méthodes TRACE/TRACK activées = accès aux en-têtes de requête sensibles (XST)",
+        "pages_affected": 0,
+        "pages_affected_urls": [],
+        "status": "passing",
+        "type": null,
+        "severity": null,
+        "data": {}
+      },
+      "Misconfiguration CORS": {
+        "info": "CORS misconfigurée: NON - ",
+        "impact": "CORS mal configurée (wildcard + credentials, Origin reflect) = vol de données cross-origin",
+        "pages_affected": 0,
+        "pages_affected_urls": [],
+        "status": "passing",
+        "type": null,
+        "severity": null,
+        "data": {}
+      },
+      "Protection Brute Force Login": {
+        "info": "Protection brute force sur login: NON - ",
+        "impact": "Pas de protection brute force = facilite attaques par dictionnaire sur credentials",
+        "pages_affected": 1,
+        "pages_affected_urls": [
+          "https://www.biat.com.tn"
+        ],
+        "status": "failing",
+        "type": "bug",
+        "severity": "high",
+        "data": {}
+      },
+      "Contrôle d'Extension Upload Fichier": {
+        "info": "Restrictions upload fichier: NON - 0 problèmes",
+        "impact": "Pas de restriction upload = RCE, malware upload, défacement",
+        "pages_affected": 0,
+        "pages_affected_urls": [],
+        "status": "passing",
+        "type": null,
+        "severity": null,
+        "data": {}
+      },
+      "Dépendances JS Vulnérables (CVE)": {
+        "info": "Librairies JS vulnérables: 0 détectées",
+        "impact": "Dépendances vulnérables = exploitation via CVEs connus (RCE, XSS, DoS)",
+        "pages_affected": 0,
+        "pages_affected_urls": [],
+        "status": "passing",
+        "type": null,
+        "severity": null,
+        "data": {}
+      }
+    },
+    "Audit Fonctionnel": {
+      "Les Formulaires": {
+        "info": "1 formulaires détectés, 0 tests exécutés",
+        "impact": "Formulaires avec anomalies = perte de conversions et problèmes de saisie utilisateur",
+        "pages_affected": 0,
+        "pages_affected_urls": [],
+        "status": "passing",
+        "type": null,
+        "severity": null,
+        "data": {
+          "total_forms": 1,
+          "forms_tested": 0,
+          "tests_run": 0,
+          "anomalies": 0,
+          "anomalies_by_type": {}
+        }
+      },
+      "Liens": {
+        "info": "Liens cassés détectés: 2 liens (4xx/5xx)",
+        "impact": "Liens cassés dégradent l'UX, le crawl SEO et les conversions",
+        "pages_affected": 2,
+        "pages_affected_urls": [
+          "https://www.biat.com.tn/biat-la-une/press-media/la-biat-lance-sa-nouvelle-solution-digitale-mybiat-corporate",
+          "https://www.biat.com.tn/"
+        ],
+        "status": "failing",
+        "type": "bug",
+        "severity": "medium",
+        "data": {
+          "broken_link_count": 2,
+          "broken_links": [
+            {
+              "url": "https://www.biat.com.tn/biat-la-une/press-media/www.mybiat-corporate.tn",
+              "error": "Not Found",
+              "found_on": "https://www.biat.com.tn/biat-la-une/press-media/la-biat-lance-sa-nouvelle-solution-digitale-mybiat-corporate",
+              "anchor_text": "www.mybiat-corporate.tn",
+              "status_code": 404
+            },
+            {
+              "url": "https://www.biat.com.tn/recherches-et-analyses/daily",
+              "error": "Forbidden",
+              "found_on": "https://www.biat.com.tn/",
+              "anchor_text": "Recherches et analyses",
+              "status_code": 403
+            }
+          ],
+          "passed": false
+        }
+      },
+      "Boutons": {
+        "info": "Boutons non-fonctionnels: 10 pages affectées",
+        "impact": "Boutons non-fonctionnels = abandon de parcours utilisateur et baisse de conversion",
+        "pages_affected": 10,
+        "pages_affected_urls": [
+          {
+            "url": "https://www.biat.com.tn/",
+            "fcp_ms": 2977.7,
+            "lcp_ms": 7804.5,
+            "cls": 0.284,
+            "speed_index_ms": 7273,
+            "eco_score": "E",
+            "eco_index": 37.47,
+            "mobile_overflow": false,
+            "tablet_overflow": false,
+            "invisible_links": 93,
+            "unused_js_kb": 0.0,
+            "unused_css_kb": 0.0
+          },
+          {
+            "url": "https://www.biat.com.tn/la-biat/le-mot-du-president",
+            "fcp_ms": 648.8,
+            "lcp_ms": 821.9000000059605,
+            "cls": 0.001,
+            "speed_index_ms": 840,
+            "eco_score": "E",
+            "eco_index": 47.93,
+            "mobile_overflow": false,
+            "tablet_overflow": false,
+            "invisible_links": 93,
+            "unused_js_kb": 0.0,
+            "unused_css_kb": 0.0
+          },
+          {
+            "url": "https://www.biat.com.tn/biat-la-une/communiques-de-presse?page=5",
+            "fcp_ms": 1182.8,
+            "lcp_ms": 1339.5,
+            "cls": 0.007,
+            "speed_index_ms": 1525,
+            "eco_score": "E",
+            "eco_index": 41.26,
+            "mobile_overflow": false,
+            "tablet_overflow": false,
+            "invisible_links": 93,
+            "unused_js_kb": 0.0,
+            "unused_css_kb": 0.0
+          },
+          {
+            "url": "https://www.biat.com.tn/biat-la-une/communiques-de-presse?page=2",
+            "fcp_ms": 635.8,
+            "lcp_ms": 814.1999999880791,
+            "cls": 0.005,
+            "speed_index_ms": 851,
+            "eco_score": "E",
+            "eco_index": 41.27,
+            "mobile_overflow": false,
+            "tablet_overflow": false,
+            "invisible_links": 93,
+            "unused_js_kb": 0.0,
+            "unused_css_kb": 0.0
+          },
+          {
+            "url": "https://www.biat.com.tn/biat-la-une/communiques-de-presse?page=7",
+            "fcp_ms": 1936.5,
+            "lcp_ms": 2001.800000011921,
+            "cls": 0.004,
+            "speed_index_ms": 2162,
+            "eco_score": "E",
+            "eco_index": 41.26,
+            "mobile_overflow": false,
+            "tablet_overflow": false,
+            "invisible_links": 93,
+            "unused_js_kb": 0.0,
+            "unused_css_kb": 0.0
+          }
+        ],
+        "status": "failing",
+        "type": "bug",
+        "severity": "medium",
+        "data": {
+          "pages_with_nonfunc_buttons": 10,
+          "passed": false
+        }
+      },
+      "Fonctionnalités": {
+        "info": "Fonctionnalités détectées: Recherche=True, Connexion=False, Contact=False, Panier=False",
+        "impact": "Fonctionnalités manquantes = services utilisateur incomplets",
+        "pages_affected": 0,
+        "pages_affected_urls": [],
+        "status": "passing",
+        "type": null,
+        "severity": null,
+        "data": {
+          "has_search": true,
+          "has_login": false,
+          "has_contact": false,
+          "has_newsletter": false,
+          "has_cart": false,
+          "has_rdv": false
+        }
+      },
+      "Fonctionnement du Moteur de Recherche Interne": {
+        "info": "Moteur de recherche interne: Détecté",
+        "impact": "Fonctionnement défaillant = utilisateurs ne trouvent pas le contenu, taux de rebond élevé",
+        "pages_affected": 0,
+        "pages_affected_urls": [],
+        "status": "passing",
+        "type": null,
+        "severity": null,
+        "data": {
+          "has_search": true
+        }
+      },
+      "Erreur 404": {
+        "info": "Pages 404 détectées parmi 2 liens cassés",
+        "impact": "Erreurs 404 dégradent l'expérience utilisateur et le SEO",
+        "pages_affected": 1,
+        "pages_affected_urls": [
+          "https://www.biat.com.tn/biat-la-une/press-media/www.mybiat-corporate.tn"
+        ],
+        "status": "failing",
+        "type": "bug",
+        "severity": "medium",
+        "data": {
+          "broken_link_count": 2,
+          "broken_links": [
+            {
+              "url": "https://www.biat.com.tn/biat-la-une/press-media/www.mybiat-corporate.tn",
+              "error": "Not Found",
+              "found_on": "https://www.biat.com.tn/biat-la-une/press-media/la-biat-lance-sa-nouvelle-solution-digitale-mybiat-corporate",
+              "anchor_text": "www.mybiat-corporate.tn",
+              "status_code": 404
+            },
+            {
+              "url": "https://www.biat.com.tn/recherches-et-analyses/daily",
+              "error": "Forbidden",
+              "found_on": "https://www.biat.com.tn/",
+              "anchor_text": "Recherches et analyses",
+              "status_code": 403
+            }
+          ],
+          "passed": false
+        }
+      }
+    },
+    "Audit de Performance et Temps de Réponse": {
+      "Temps de Chargement Desktop": {
+        "info": "FCP=1616ms, LCP=2371ms, CLS=0.00",
+        "impact": "Temps de chargement élevé = abandon utilisateur, baisse des conversions, mauvais SEO",
+        "pages_affected": 100,
+        "pages_affected_urls": [],
+        "status": "passing",
+        "type": null,
+        "severity": null,
+        "data": {
+          "fcp_ms": 1616.4,
+          "lcp_ms": 2371.2,
+          "cls": 0.0,
+          "speed_index_ms": 2429.8
+        }
+      },
+      "Temps de Chargement Mobile": {
+        "info": "Disponible: False, LCP=N/Ams",
+        "impact": "Performance mobile dégradée = mauvaise expérience et pénalité SEO mobile-first",
+        "pages_affected": 0,
+        "pages_affected_urls": [],
+        "status": "not_available",
+        "type": null,
+        "severity": null,
+        "data": {
+          "fcp_ms": null,
+          "lcp_ms": null,
+          "cls": null,
+          "speed_index_ms": null,
+          "issues": [],
+          "passed": null,
+          "available": false
+        }
+      },
+      "Optimisation des Images": {
+        "info": "Compression: 97.5%, Images non optimisées: 5/200",
+        "impact": "Images mal optimisées = temps de chargement lent, énergie wasted, mauvaise UX",
+        "pages_affected": 5,
+        "pages_affected_urls": [
+          "https://www.biat.com.tn/sites/default/files/2021-12/act2.png",
+          "https://www.biat.com.tn/sites/default/files/2025-01/Soci%C3%A9t%C3%A9s-communautaires.JPG",
+          "https://www.biat.com.tn/sites/default/files/2026-02/image%20%2810%29.jpg",
+          "https://www.biat.com.tn/sites/default/files/2020-10/Mohamed-Agrebi-DG-BIAT.png",
+          "https://www.biat.com.tn/sites/default/files/2021-09/bann-biat.png"
+        ],
+        "status": "failing",
+        "type": "recommendation",
+        "severity": null,
+        "data": {
+          "passed": false,
+          "total_images": 611,
+          "sampled_images": 200,
+          "unoptimised_count": 5,
+          "unoptimised_images": [
+            {
+              "url": "https://www.biat.com.tn/sites/default/files/2021-12/act2.png",
+              "size_kb": 511.5146484375,
+              "content_type": "image/png",
+              "is_likely_unoptimised": true
+            },
+            {
+              "url": "https://www.biat.com.tn/sites/default/files/2025-01/Soci%C3%A9t%C3%A9s-communautaires.JPG",
+              "size_kb": 690.8525390625,
+              "content_type": "image/jpeg",
+              "is_likely_unoptimised": true
+            },
+            {
+              "url": "https://www.biat.com.tn/sites/default/files/2026-02/image%20%2810%29.jpg",
+              "size_kb": 518.8759765625,
+              "content_type": "image/jpeg",
+              "is_likely_unoptimised": true
+            },
+            {
+              "url": "https://www.biat.com.tn/sites/default/files/2020-10/Mohamed-Agrebi-DG-BIAT.png",
+              "size_kb": 777.1796875,
+              "content_type": "image/png",
+              "is_likely_unoptimised": true
+            },
+            {
+              "url": "https://www.biat.com.tn/sites/default/files/2021-09/bann-biat.png",
+              "size_kb": 545.005859375,
+              "content_type": "image/png",
+              "is_likely_unoptimised": true
+            }
+          ],
+          "compression_rate_pct": 97.5
+        }
+      },
+      "Gestion de Cache": {
+        "info": "Cache: Activé, Control: max-age=86400, public",
+        "impact": "Cache désactivé = plus de requêtes serveur, temps de réponse lent, surcharge serveur",
+        "pages_affected": 1,
+        "pages_affected_urls": [
+          "https://www.biat.com.tn"
+        ],
+        "status": "passing",
+        "type": null,
+        "severity": null,
+        "data": {
+          "has_cache": true,
+          "cache_control": "max-age=86400, public"
+        }
+      },
+      "Utilisation de Compression": {
+        "info": "Compression HTTP: Désactivée",
+        "impact": "Compression désactivée = taille des transferts importante, navigation plus lente",
+        "pages_affected": 1,
+        "pages_affected_urls": [
+          "https://www.biat.com.tn"
+        ],
+        "status": "failing",
+        "type": "recommendation",
+        "severity": null,
+        "data": {
+          "html_compression_applied": false
+        }
+      }
+    },
+    "SEO": {
+      "Balise Alts": {
+        "info": "Images sans ALT: 0 images",
+        "impact": "Images sans ALT = perte de signal SEO, accessibilité dégradée, mauvaise expérience handicapés",
+        "pages_affected": 0,
+        "pages_affected_urls": [
+          {
+            "url": "https://www.biat.com.tn/",
+            "fcp_ms": 2977.7,
+            "lcp_ms": 7804.5,
+            "cls": 0.284,
+            "speed_index_ms": 7273,
+            "eco_score": "E",
+            "eco_index": 37.47,
+            "mobile_overflow": false,
+            "tablet_overflow": false,
+            "invisible_links": 93,
+            "unused_js_kb": 0.0,
+            "unused_css_kb": 0.0
+          },
+          {
+            "url": "https://www.biat.com.tn/la-biat/le-mot-du-president",
+            "fcp_ms": 648.8,
+            "lcp_ms": 821.9000000059605,
+            "cls": 0.001,
+            "speed_index_ms": 840,
+            "eco_score": "E",
+            "eco_index": 47.93,
+            "mobile_overflow": false,
+            "tablet_overflow": false,
+            "invisible_links": 93,
+            "unused_js_kb": 0.0,
+            "unused_css_kb": 0.0
+          },
+          {
+            "url": "https://www.biat.com.tn/biat-la-une/communiques-de-presse?page=5",
+            "fcp_ms": 1182.8,
+            "lcp_ms": 1339.5,
+            "cls": 0.007,
+            "speed_index_ms": 1525,
+            "eco_score": "E",
+            "eco_index": 41.26,
+            "mobile_overflow": false,
+            "tablet_overflow": false,
+            "invisible_links": 93,
+            "unused_js_kb": 0.0,
+            "unused_css_kb": 0.0
+          },
+          {
+            "url": "https://www.biat.com.tn/biat-la-une/communiques-de-presse?page=2",
+            "fcp_ms": 635.8,
+            "lcp_ms": 814.1999999880791,
+            "cls": 0.005,
+            "speed_index_ms": 851,
+            "eco_score": "E",
+            "eco_index": 41.27,
+            "mobile_overflow": false,
+            "tablet_overflow": false,
+            "invisible_links": 93,
+            "unused_js_kb": 0.0,
+            "unused_css_kb": 0.0
+          },
+          {
+            "url": "https://www.biat.com.tn/biat-la-une/communiques-de-presse?page=7",
+            "fcp_ms": 1936.5,
+            "lcp_ms": 2001.800000011921,
+            "cls": 0.004,
+            "speed_index_ms": 2162,
+            "eco_score": "E",
+            "eco_index": 41.26,
+            "mobile_overflow": false,
+            "tablet_overflow": false,
+            "invisible_links": 93,
+            "unused_js_kb": 0.0,
+            "unused_css_kb": 0.0
+          }
+        ],
+        "status": "passing",
+        "type": null,
+        "severity": null,
+        "data": {
+          "images_missing_alt": 0
+        }
+      },
+      "Balises META": {
+        "info": "Meta descriptions manquantes: 32 pages, Titres manquants: 0 pages",
+        "impact": "Meta descriptions manquantes = mauvais CTR dans SERP et signaux SEO réduits",
+        "pages_affected": 32,
+        "pages_affected_urls": [
+          {
+            "url": "https://www.biat.com.tn/",
+            "fcp_ms": 2977.7,
+            "lcp_ms": 7804.5,
+            "cls": 0.284,
+            "speed_index_ms": 7273,
+            "eco_score": "E",
+            "eco_index": 37.47,
+            "mobile_overflow": false,
+            "tablet_overflow": false,
+            "invisible_links": 93,
+            "unused_js_kb": 0.0,
+            "unused_css_kb": 0.0
+          },
+          {
+            "url": "https://www.biat.com.tn/la-biat/le-mot-du-president",
+            "fcp_ms": 648.8,
+            "lcp_ms": 821.9000000059605,
+            "cls": 0.001,
+            "speed_index_ms": 840,
+            "eco_score": "E",
+            "eco_index": 47.93,
+            "mobile_overflow": false,
+            "tablet_overflow": false,
+            "invisible_links": 93,
+            "unused_js_kb": 0.0,
+            "unused_css_kb": 0.0
+          },
+          {
+            "url": "https://www.biat.com.tn/biat-la-une/communiques-de-presse?page=5",
+            "fcp_ms": 1182.8,
+            "lcp_ms": 1339.5,
+            "cls": 0.007,
+            "speed_index_ms": 1525,
+            "eco_score": "E",
+            "eco_index": 41.26,
+            "mobile_overflow": false,
+            "tablet_overflow": false,
+            "invisible_links": 93,
+            "unused_js_kb": 0.0,
+            "unused_css_kb": 0.0
+          },
+          {
+            "url": "https://www.biat.com.tn/biat-la-une/communiques-de-presse?page=2",
+            "fcp_ms": 635.8,
+            "lcp_ms": 814.1999999880791,
+            "cls": 0.005,
+            "speed_index_ms": 851,
+            "eco_score": "E",
+            "eco_index": 41.27,
+            "mobile_overflow": false,
+            "tablet_overflow": false,
+            "invisible_links": 93,
+            "unused_js_kb": 0.0,
+            "unused_css_kb": 0.0
+          },
+          {
+            "url": "https://www.biat.com.tn/biat-la-une/communiques-de-presse?page=7",
+            "fcp_ms": 1936.5,
+            "lcp_ms": 2001.800000011921,
+            "cls": 0.004,
+            "speed_index_ms": 2162,
+            "eco_score": "E",
+            "eco_index": 41.26,
+            "mobile_overflow": false,
+            "tablet_overflow": false,
+            "invisible_links": 93,
+            "unused_js_kb": 0.0,
+            "unused_css_kb": 0.0
+          }
+        ],
+        "status": "failing",
+        "type": "recommendation",
+        "severity": null,
+        "data": {
+          "pages_missing_meta_desc": 32,
+          "pages_missing_title": 0
+        }
+      },
+      "Sitemap": {
+        "info": "Sitemap XML: Présent",
+        "impact": "Sitemap absent = crawl SEO moins efficace, indexation potentiellement incomplète",
+        "pages_affected": 1,
+        "pages_affected_urls": [
+          "https://www.biat.com.tn"
+        ],
+        "status": "passing",
+        "type": null,
+        "severity": null,
+        "data": {
+          "has_sitemap": true
+        }
+      },
+      "Robot Txt": {
+        "info": "robots.txt: Présent",
+        "impact": "robots.txt absent = contrôle insuffisant du crawl, risque d'indexation de pages sensibles",
+        "pages_affected": 1,
+        "pages_affected_urls": [
+          "https://www.biat.com.tn"
+        ],
+        "status": "passing",
+        "type": null,
+        "severity": null,
+        "data": {
+          "has_robots_txt": true
+        }
+      },
+      "Duplication de Contenu": {
+        "info": "Taux de duplication: 0.0% (0 pages)",
+        "impact": "Contenu dupliqué = cannibalisation SEO, dilution de pertinence, classement affaibli",
+        "pages_affected": 0,
+        "pages_affected_urls": [],
+        "status": "passing",
+        "type": null,
+        "severity": null,
+        "data": {
+          "duplicate_content_rate_pct": 0.0,
+          "duplicate_page_count": 0,
+          "passed": true
+        }
+      },
+      "Compatibilité Multiplateforme": {
+        "info": "Multi-browser: not_available",
+        "impact": "Incompatibilité multiplateforme = perte d'utilisateurs, mauvaise expérience, pénalité SEO",
+        "pages_affected": 0,
+        "pages_affected_urls": [],
+        "status": "not_available",
+        "type": null,
+        "severity": null,
+        "data": {
+          "status": "not_available",
+          "reason": "chromium_capture_failed: BrowserType.launch: \n╔══════════════════════════════════════════════════════╗\n║ Host system is missing dependencies to run browsers. ║\n║ Please install them with the following command:      ║\n║                                                      ║\n║     playwright install-deps                          ║\n║                                                      ║\n║ Alternatively, use apt:                              ║\n║     apt-get install libxfixes3\\                      ║\n║         libxkbcommon0                                ║\n║                                                      ║\n║ <3 Playwright Team                                   ║\n╚══════════════════════════════════════════════════════╝"
+        }
+      },
+      "Structure des URLs": {
+        "info": "URLs non-propres (node/query): 0 URL(s)",
+        "impact": "URLs sales = mauvais SEO, inefficacité crawl, perte de PageRank",
+        "pages_affected": 0,
+        "pages_affected_urls": [],
+        "status": "passing",
+        "type": null,
+        "severity": null,
+        "data": {
+          "node_style_url_count": 0
+        }
+      },
+      "Structure du Contenu (Hn)": {
+        "info": "Pages avec mauvaise structure H1: 0, Homepage H1: Présent",
+        "impact": "Structure H1 défaillante = signal SEO réduit, hiérarchie de contenu confuse pour utilisateurs",
+        "pages_affected": 0,
+        "pages_affected_urls": [],
+        "status": "passing",
+        "type": null,
+        "severity": null,
+        "data": {
+          "pages_with_bad_h1": 0,
+          "homepage_h1_missing": false
+        }
+      },
+      "Linking Interne": {
+        "info": "Total liens internes: 13847, Pages manquant liens contextuels: 100",
+        "impact": "Linking interne faible = distribution du PageRank inefficace, crawl incomplet, perte de pertinence",
+        "pages_affected": 100,
+        "pages_affected_urls": [],
+        "status": "failing",
+        "type": "recommendation",
+        "severity": null,
+        "data": {
+          "total_internal_links": 13847,
+          "pages_missing_contextual_links": 100
+        }
+      },
+      "Linking Externe": {
+        "info": "Total liens externes: 2172, Domaines uniques: 23",
+        "impact": "Linking externe faible = faible autorité perçue, moins de backlinks, trust réduit",
+        "pages_affected": 0,
+        "pages_affected_urls": [],
+        "status": "passing",
+        "type": null,
+        "severity": null,
+        "data": {
+          "total_external_links": 2172,
+          "unique_external_domains": 23
+        }
+      },
+      "Qualité H1 (NLP)": {
+        "info": "H1 manquants: 0 pages, H1 multiples: 0 pages",
+        "impact": "Structure H1 incorrecte nuit au SEO on-page et à la lisibilité sémantique",
+        "pages_affected": 0,
+        "pages_affected_urls": [],
+        "status": "passing",
+        "type": null,
+        "severity": null,
+        "data": {}
+      },
+      "Méta Description (NLP)": {
+        "info": "Meta descriptions manquantes (NLP): 0 pages",
+        "impact": "Descriptions meta manquantes diminuent le CTR et la qualité des snippets SERP",
+        "pages_affected": 0,
+        "pages_affected_urls": [],
+        "status": "passing",
+        "type": null,
+        "severity": null,
+        "data": {}
+      },
+      "AI Readiness (llms.txt)": {
+        "info": "Pages avec llms.txt détecté: 0",
+        "impact": "Présence llms.txt améliore la découvrabilité dans les moteurs génératifs",
+        "pages_affected": 1,
+        "pages_affected_urls": [
+          "https://www.biat.com.tn"
+        ],
+        "status": "failing",
+        "type": "recommendation",
+        "severity": null,
+        "data": {}
+      }
+    },
+    "Audit UX/UI": {
+      "Ciblage": {
+        "info": "Segments d'audience détectés: B2B=85, Institutionnel=4, Investisseur=7",
+        "impact": "Ciblage incomplet = message non adapté aux audiences, conversion réduite",
+        "pages_affected": 0,
+        "pages_affected_urls": [],
+        "status": "passing",
+        "type": null,
+        "severity": null,
+        "data": {
+          "counts": {
+            "b2b": 85,
+            "institutionnel": 4,
+            "unknown": 4,
+            "investisseur": 7
+          },
+          "confidence": {
+            "low": 47,
+            "medium": 49,
+            "high": 4
+          }
+        }
+      },
+      "Pertinence, Qualité, Originalité et Intérêt": {
+        "info": "Contenu fin (NLP <300 mots): 16 pages, Contenu avec fautes: 100 pages, Keyword stuffing: 20 pages",
+        "impact": "Contenu mince = perte de pertinence SEO, mauvaise engagement utilisateur, taux rebond élevé",
+        "pages_affected": 16,
+        "pages_affected_urls": [],
+        "status": "failing",
+        "type": "recommendation",
+        "severity": null,
+        "data": {
+          "pages_thin_content_nlp": 16,
+          "pages_with_typos": 100,
+          "pages_with_keyword_stuffing": 20
+        }
+      },
+      "Périodicité de Mise à Jour": {
+        "info": "Pages d'actualité: 34, Dernière publication: 7080-01-14",
+        "impact": "Site non mis à jour = perte de fraîcheur, mauvais signal de pertinence SEO, contenu obsolète",
+        "pages_affected": 0,
+        "pages_affected_urls": [],
+        "status": "passing",
+        "type": null,
+        "severity": null,
+        "data": {
+          "news_page_count": 34,
+          "latest_pub_date": "7080-01-14"
+        }
+      },
+      "Partage Social": {
+        "info": "Pages avec partage social: 0/100 pages",
+        "impact": "Partage social faible = acquisition organique limitée, viralité réduite, portée diminuée",
+        "pages_affected": 100,
+        "pages_affected_urls": [],
+        "status": "failing",
+        "type": "recommendation",
+        "severity": null,
+        "data": {
+          "pages_with_social_sharing": 0,
+          "avg_social_sharing_score": 0.0,
+          "passed": false
+        }
+      },
+      "Maillage": {
+        "info": "Pages manquant liens contextuels: 100/100",
+        "impact": "Maillage faible = UX, crawl et PageRank compromis, pages orphelines non découvertes",
+        "pages_affected": 100,
+        "pages_affected_urls": [],
+        "status": "failing",
+        "type": "recommendation",
+        "severity": null,
+        "data": {
+          "pages_missing_contextual_links": 100
+        }
+      },
+      "Ergonomie et Design": {
+        "info": "Signaux CLS: 0.00, Pages sans images produit: 2",
+        "impact": "Design pauvre = mauvaise UX, conversion réduite, pénalité Core Web Vitals",
+        "pages_affected": 2,
+        "pages_affected_urls": [],
+        "status": "passing",
+        "type": null,
+        "severity": null,
+        "data": {
+          "avg_cls": 0.0,
+          "pages_missing_product_images": 2
+        }
+      },
+      "Structure, Navigation et Parcours Client": {
+        "info": "Pages avec funnels de conversion: 59/100",
+        "impact": "Navigation confuse = perte utilisateur, taux rebond élevé, parcours client frustrant",
+        "pages_affected": 0,
+        "pages_affected_urls": [],
+        "status": "passing",
+        "type": null,
+        "severity": null,
+        "data": {
+          "pages_with_conversion_funnels": 59,
+          "pages_missing_contextual_links": 100
+        }
+      },
+      "Tunnel de Conversion": {
+        "info": "Pages avec étapes de conversion: 59/100",
+        "impact": "Tunnel de conversion défaillant = perte de revenue, conversion rate faible",
+        "pages_affected": 0,
+        "pages_affected_urls": [],
+        "status": "passing",
+        "type": null,
+        "severity": null,
+        "data": {
+          "pages_with_conversion_funnels": 59
+        }
+      },
+      "Mobile Friendly": {
+        "info": "Performance mobile: Non disponible",
+        "impact": "Site non mobile-friendly = perte d'utilisateurs mobiles (~60%), pénalité SEO mobile-first",
+        "pages_affected": 1,
+        "pages_affected_urls": [
+          "https://www.biat.com.tn"
+        ],
+        "status": "not_available",
+        "type": null,
+        "severity": null,
+        "data": {
+          "fcp_ms": null,
+          "lcp_ms": null,
+          "cls": null,
+          "speed_index_ms": null,
+          "issues": [],
+          "passed": null,
+          "available": false
+        }
+      }
+    },
+    "Contenu": {
+      "Fraîcheur du Contenu": {
+        "info": "Pages d'actualité: 34, Dernière publication: 7080-01-14",
+        "impact": "Contenu obsolète = baisse du SEO, perte de confiance utilisateur, moins de retours",
+        "pages_affected": 1,
+        "pages_affected_urls": [
+          "https://www.biat.com.tn"
+        ],
+        "status": "passing",
+        "type": null,
+        "severity": null,
+        "data": {
+          "news_page_count": 34,
+          "latest_pub_date": "7080-01-14",
+          "passed": true
+        }
+      },
+      "Contenu Fin et Qualité": {
+        "info": "Contenu fin (NLP <300 mots): 16 pages, Fautes: 100 pages, Keyword stuffing: 20 pages",
+        "impact": "Contenu mince = mauvais classement SEO, mauvaise UX, taux de rebond élevé",
+        "pages_affected": 16,
+        "pages_affected_urls": [],
+        "status": "failing",
+        "type": "recommendation",
+        "severity": null,
+        "data": {
+          "pages_thin_content_nlp": 16,
+          "pages_with_typos": 100,
+          "pages_with_keyword_stuffing": 20
+        }
+      },
+      "Pages Clés": {
+        "info": "Pages produits: 0, Pages de FAQ: 0, Pages d'accueil: 0, Pages partenariat: 4",
+        "impact": "Pages clés mal identifiées = structure de site confuse, navigation utilisateur dégradée",
+        "pages_affected": 0,
+        "pages_affected_urls": [],
+        "status": "passing",
+        "type": null,
+        "severity": null,
+        "data": {
+          "product_page_count": 0,
+          "faq_pages": 0,
+          "landing_page_count": 0,
+          "partenariat_page_count": 4,
+          "news_page_count": 34
+        }
+      },
+      "Cannabalisation de Mots-clés": {
+        "info": "Clusters de mots-clés cannibalisés: 1",
+        "impact": "Cannabalisation = competition entre pages pour les mêmes mots-clés, dilution du classement SEO",
+        "pages_affected": 1,
+        "pages_affected_urls": [],
+        "status": "failing",
+        "type": "recommendation",
+        "severity": null,
+        "data": {
+          "cannibalized_keyword_count": 1,
+          "cannibalized_keywords": [
+            {
+              "keyword_stem": "biat",
+              "keyword": "biat",
+              "count": 86,
+              "pages": [
+                "https://www.biat.com.tn/",
+                "https://www.biat.com.tn/la-biat/le-mot-du-president",
+                "https://www.biat.com.tn/biat-la-une/actualites/securite-bancaire-adoptez-les-bons-reflexes",
+                "https://www.biat.com.tn/la-biat/le-mot-du-directeur-general",
+                "https://www.biat.com.tn/communication-financiere/chiffres-cles",
+                "https://www.biat.com.tn/biat-la-une/communiques-de-presse",
+                "https://www.biat.com.tn/vous-etes/jeunes-entrepreneurs",
+                "https://www.biat.com.tn/nous-contacter",
+                "https://www.biat.com.tn/vous-etes",
+                "https://www.biat.com.tn/taxonomy/term/53"
+              ]
+            }
+          ]
+        }
+      },
+      "CTA Transactionnels Manquants": {
+        "info": "Pages transactionnelles sans CTA: 0",
+        "impact": "Pages transactionnelles sans CTA réduisent directement la conversion",
+        "pages_affected": 0,
+        "pages_affected_urls": [],
+        "status": "passing",
+        "type": null,
+        "severity": null,
+        "data": {}
+      },
+      "Structure Contenu Cassée": {
+        "info": "Pages avec indice structure élevé: 0",
+        "impact": "Structure de contenu dégradée nuit à la lisibilité, au SEO et à la conversion",
+        "pages_affected": 0,
+        "pages_affected_urls": [],
+        "status": "passing",
+        "type": null,
+        "severity": null,
+        "data": {}
+      },
+      "Diversité Lexicale": {
+        "info": "Diversité lexicale moyenne: N/A",
+        "impact": "Faible diversité lexicale suggère contenu répétitif ou faible valeur éditoriale",
+        "pages_affected": 0,
+        "pages_affected_urls": [],
+        "status": "passing",
+        "type": null,
+        "severity": null,
+        "data": {}
+      }
+    },
+    "Eco Index": {
+      "Score Écologique et Impact Climatique": {
+        "info": "Eco Index: 41.6/100",
+        "impact": "Site gourmand en énergie = impact climatique, consommation serveur élevée, coûts d'infrastructure",
+        "pages_affected": 100,
+        "pages_affected_urls": [],
+        "status": "passing",
+        "type": "recommendation",
+        "severity": null,
+        "data": {
+          "avg_eco_index": 41.6
+        }
+      }
+    },
+    "RGPD": {
+      "Consentement Cookies": {
+        "info": "Banneau consentement: Absent",
+        "impact": "Consentement absent = violation RGPD/ePrivacy, risque légal et amende, perte de confiance utilisateur",
+        "pages_affected": 1,
+        "pages_affected_urls": [
+          "https://www.biat.com.tn"
+        ],
+        "status": "failing",
+        "type": "compliance",
+        "severity": null,
+        "data": {
+          "detected": false
+        }
+      },
+      "Politique de Confidentialité": {
+        "info": "Politique de confidentialité: Absente",
+        "impact": "Politique absente = violation RGPD, risque légal, manque de transparence envers utilisateurs",
+        "pages_affected": 1,
+        "pages_affected_urls": [
+          "https://www.biat.com.tn"
+        ],
+        "status": "failing",
+        "type": "compliance",
+        "severity": null,
+        "data": {
+          "has_privacy_policy": false
+        }
+      },
+      "Durée de Conservation": {
+        "info": "Déclaration durée conservation: 0 pages mentionnent la rétention",
+        "impact": "Durée non déclarée = non-conformité RGPD Art.5, transparence insuffisante",
+        "pages_affected": 1,
+        "pages_affected_urls": [
+          "https://www.biat.com.tn"
+        ],
+        "status": "failing",
+        "type": "compliance",
+        "severity": null,
+        "data": {
+          "rgpd_retention_signal_pages": 0
+        }
+      },
+      "Minimisation des Données": {
+        "info": "Déclaration minimisation: 0 pages mentionnent la minimisation",
+        "impact": "Minimisation non déclarée = non-conformité RGPD, principes de collecte transparence insuffisan",
+        "pages_affected": 1,
+        "pages_affected_urls": [
+          "https://www.biat.com.tn"
+        ],
+        "status": "failing",
+        "type": "compliance",
+        "severity": null,
+        "data": {
+          "rgpd_minimization_signal_pages": 0
+        }
+      },
+      "Mentions Légales": {
+        "info": "Mentions légales: Présentes",
+        "impact": "Mentions absentes = risque réglementaire France/EU, manque de transparence juridique",
+        "pages_affected": 1,
+        "pages_affected_urls": [
+          "https://www.biat.com.tn"
+        ],
+        "status": "passing",
+        "type": "compliance",
+        "severity": null,
+        "data": {
+          "has_legal_notice": true
+        }
+      },
+      "Droits des Personnes": {
+        "info": "Droits RGPD mentionnés: Non",
+        "impact": "Droits non mentionnés = non-conformité RGPD Art.13/14, violation transparence",
+        "pages_affected": 1,
+        "pages_affected_urls": [
+          "https://www.biat.com.tn"
+        ],
+        "status": "failing",
+        "type": "compliance",
+        "severity": null,
+        "data": {
+          "has_information_rights": false
+        }
+      },
+      "Finalité du Traitement": {
+        "info": "Finalité déclarée: Non",
+        "impact": "Finalité non déclarée = non-conformité RGPD, base légale insuffisante",
+        "pages_affected": 1,
+        "pages_affected_urls": [
+          "https://www.biat.com.tn"
+        ],
+        "status": "failing",
+        "type": "compliance",
+        "severity": null,
+        "data": {
+          "has_declared_purpose": false
+        }
+      },
+      "Couverture des Droits RGPD": {
+        "info": "Pages avec couverture droits insuffisante: 0",
+        "impact": "Droits RGPD incomplets exposent à des risques de non-conformité réglementaire",
+        "pages_affected": 0,
+        "pages_affected_urls": [],
+        "status": "passing",
+        "type": "compliance",
+        "severity": null,
+        "data": {}
+      },
+      "Trackers Avant Consentement": {
+        "info": "Pages avec trackers pré-consentement: 0",
+        "impact": "Trackers avant consentement peuvent enfreindre ePrivacy/CNIL et exposer à des sanctions",
+        "pages_affected": 0,
+        "pages_affected_urls": [],
+        "status": "passing",
+        "type": "compliance",
+        "severity": null,
+        "data": {}
+      },
+      "Score Politique de Confidentialité": {
+        "info": "Pages avec score confidentialité faible: 0",
+        "impact": "Politique de confidentialité faible dégrade la confiance et le niveau de conformité perçu",
+        "pages_affected": 0,
+        "pages_affected_urls": [],
+        "status": "passing",
+        "type": "compliance",
+        "severity": null,
+        "data": {}
+      }
+    }
+  },
+  "generated_at": null
+}

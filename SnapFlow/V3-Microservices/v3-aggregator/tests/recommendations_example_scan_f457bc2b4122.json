@@ -1,0 +1,245 @@
+{
+  "scan_id": "scan_f457bc2b4122",
+  "domain": "www.medianet.tn",
+  "generated_at": "2026-03-13T05:13:56Z",
+  "summary": {
+    "total": 10,
+    "bugs": 3,
+    "recommendations": 1,
+    "compliance": 6,
+    "critical": 2,
+    "high": 3,
+    "medium": 4,
+    "low": 1
+  },
+  "quick_wins": [],
+  "bugs": [
+    {
+      "id": "broken_links",
+      "title": "Liens cassés détectés",
+      "type": "BUG",
+      "severity": "HIGH",
+      "scope": "SITEWIDE",
+      "description": "2 lien(s) interne(s) ou externe(s) renvoient 4xx/5xx.",
+      "impact": "Dégrade l'expérience utilisateur et le crawl SEO.",
+      "effort": "MEDIUM",
+      "affected_count": 2,
+      "example_urls": [
+        "https://www.medianet.tn/fr/",
+        "https://www.medianet.tn/fr/immobilier"
+      ],
+      "fix": "Corriger, rediriger ou supprimer les liens cassés identifiés.",
+      "source_kpi": "site_metrics.seo.broken_link_kpi"
+    },
+    {
+      "id": "non_functional_buttons",
+      "title": "Boutons non fonctionnels",
+      "type": "BUG",
+      "severity": "MEDIUM",
+      "scope": "SITEWIDE",
+      "description": "Des boutons non fonctionnels existent sur 27 page(s).",
+      "impact": "Risque d'abandon du parcours utilisateur et baisse de conversion.",
+      "effort": "MEDIUM",
+      "affected_count": 27,
+      "example_urls": [],
+      "fix": "Rendre chaque action cliquable opérationnelle ou retirer les faux boutons.",
+      "source_kpi": "site_metrics.performance.button_kpi.pages_with_nonfunc_buttons"
+    },
+    {
+      "id": "plain_emails_exposed",
+      "title": "Emails en clair exposés",
+      "type": "BUG",
+      "severity": "MEDIUM",
+      "scope": "SITEWIDE",
+      "description": "Des emails en clair sont présents sur 1 page(s).",
+      "impact": "Risque de scraping, spam et fuite d'informations de contact.",
+      "effort": "MEDIUM",
+      "affected_count": 1,
+      "example_urls": [],
+      "fix": "Remplacer les emails visibles par des liens protégés ou formulaires sécurisés.",
+      "source_kpi": "site_metrics.ux.plain_email_kpi.pages_with_plain_emails"
+    }
+  ],
+  "recommendations": [
+    {
+      "id": "missing_contextual_internal_links",
+      "title": "Maillage interne contextuel insuffisant",
+      "type": "RECOMMENDATION",
+      "severity": "LOW",
+      "scope": "SITEWIDE",
+      "description": "2 page(s) manquent de liens internes contextuels.",
+      "impact": "Navigation et distribution de popularité interne dégradées.",
+      "effort": "MEDIUM",
+      "affected_count": 2,
+      "example_urls": [],
+      "fix": "Ajouter des liens internes contextuels dans le corps de page.",
+      "source_kpi": "site_metrics.ux.pages_missing_contextual_links"
+    }
+  ],
+  "compliance": [
+    {
+      "id": "missing_cookie_consent_banner",
+      "title": "Bandeau consentement cookies absent",
+      "type": "COMPLIANCE",
+      "severity": "CRITICAL",
+      "scope": "DOMAIN",
+      "description": "Aucun bandeau de consentement cookies n'a été détecté.",
+      "impact": "Risque réglementaire RGPD/ePrivacy immédiat.",
+      "effort": "LOW",
+      "affected_count": 1,
+      "example_urls": [],
+      "fix": "Déployer une CMP avec consentement explicite avant dépôt de traceurs.",
+      "source_kpi": "domain_analysis.privacy_kpi.cookie_consent"
+    },
+    {
+      "id": "missing_cookie_security_flags",
+      "title": "Cookies sans flags de sécurité",
+      "type": "COMPLIANCE",
+      "severity": "CRITICAL",
+      "scope": "DOMAIN",
+      "description": "3 cookie(s) sans HttpOnly/Secure ont été détectés.",
+      "impact": "Non-conformité sécurité/confidentialité et risque d'exploitation.",
+      "effort": "LOW",
+      "affected_count": 3,
+      "example_urls": [],
+      "fix": "Ajouter systématiquement HttpOnly et Secure sur les cookies concernés.",
+      "source_kpi": "domain_analysis.cookie_kpi.missing_cookie_flag_count"
+    },
+    {
+      "id": "missing_data_minimization_declaration",
+      "title": "Minimisation des données non déclarée",
+      "type": "COMPLIANCE",
+      "severity": "HIGH",
+      "scope": "DOMAIN",
+      "description": "Aucune mention explicite de minimisation des données n'a été détectée.",
+      "impact": "Risque de non-conformité RGPD sur le principe de minimisation.",
+      "effort": "LOW",
+      "affected_count": 1,
+      "example_urls": [],
+      "fix": "Documenter la minimisation des données collectées par finalité.",
+      "source_kpi": "site_metrics.content.rgpd_minimization_signal_pages"
+    },
+    {
+      "id": "missing_data_retention_declaration",
+      "title": "Durée de conservation non déclarée",
+      "type": "COMPLIANCE",
+      "severity": "HIGH",
+      "scope": "DOMAIN",
+      "description": "Aucune mention claire de durée de conservation des données n'a été trouvée.",
+      "impact": "Risque de non-conformité RGPD sur la transparence du traitement.",
+      "effort": "LOW",
+      "affected_count": 1,
+      "example_urls": [],
+      "fix": "Ajouter les durées de conservation par finalité dans la politique RGPD.",
+      "source_kpi": "site_metrics.content.rgpd_retention_signal_pages"
+    },
+    {
+      "id": "missing_declared_purpose",
+      "title": "Finalité du traitement non déclarée",
+      "type": "COMPLIANCE",
+      "severity": "MEDIUM",
+      "scope": "DOMAIN",
+      "description": "La finalité du traitement des données n'est pas explicitement mentionnée.",
+      "impact": "Risque de non-conformité sur la base légale et la transparence RGPD.",
+      "effort": "LOW",
+      "affected_count": 1,
+      "example_urls": [],
+      "fix": "Préciser la finalité de chaque collecte de données personnelles.",
+      "source_kpi": "domain_analysis.privacy_kpi.has_declared_purpose"
+    },
+    {
+      "id": "missing_security_policy",
+      "title": "Politique de sécurité absente",
+      "type": "COMPLIANCE",
+      "severity": "MEDIUM",
+      "scope": "DOMAIN",
+      "description": "Aucune politique de sécurité (PSSI) n'a été détectée.",
+      "impact": "Affaiblit la gouvernance sécurité et la conformité documentaire.",
+      "effort": "LOW",
+      "affected_count": 1,
+      "example_urls": [],
+      "fix": "Publier une politique de sécurité adaptée aux traitements réalisés.",
+      "source_kpi": "domain_analysis.privacy_kpi.has_security_policy"
+    }
+  ],
+  "roadmap": {
+    "immediate": [
+      {
+        "id": "missing_cookie_consent_banner",
+        "title": "Bandeau consentement cookies absent",
+        "type": "COMPLIANCE",
+        "severity": "CRITICAL",
+        "effort": "LOW"
+      },
+      {
+        "id": "missing_cookie_security_flags",
+        "title": "Cookies sans flags de sécurité",
+        "type": "COMPLIANCE",
+        "severity": "CRITICAL",
+        "effort": "LOW"
+      }
+    ],
+    "this_sprint": [
+      {
+        "id": "broken_links",
+        "title": "Liens cassés détectés",
+        "type": "BUG",
+        "severity": "HIGH",
+        "effort": "MEDIUM"
+      },
+      {
+        "id": "missing_data_minimization_declaration",
+        "title": "Minimisation des données non déclarée",
+        "type": "COMPLIANCE",
+        "severity": "HIGH",
+        "effort": "LOW"
+      },
+      {
+        "id": "missing_data_retention_declaration",
+        "title": "Durée de conservation non déclarée",
+        "type": "COMPLIANCE",
+        "severity": "HIGH",
+        "effort": "LOW"
+      }
+    ],
+    "this_quarter": [
+      {
+        "id": "missing_declared_purpose",
+        "title": "Finalité du traitement non déclarée",
+        "type": "COMPLIANCE",
+        "severity": "MEDIUM",
+        "effort": "LOW"
+      },
+      {
+        "id": "missing_security_policy",
+        "title": "Politique de sécurité absente",
+        "type": "COMPLIANCE",
+        "severity": "MEDIUM",
+        "effort": "LOW"
+      },
+      {
+        "id": "non_functional_buttons",
+        "title": "Boutons non fonctionnels",
+        "type": "BUG",
+        "severity": "MEDIUM",
+        "effort": "MEDIUM"
+      },
+      {
+        "id": "plain_emails_exposed",
+        "title": "Emails en clair exposés",
+        "type": "BUG",
+        "severity": "MEDIUM",
+        "effort": "MEDIUM"
+      }
+    ],
+    "backlog": [
+      {
+        "id": "missing_contextual_internal_links",
+        "title": "Maillage interne contextuel insuffisant",
+        "type": "RECOMMENDATION",
+        "severity": "LOW",
+        "effort": "MEDIUM"
+      }
+    ]
+  }
+}

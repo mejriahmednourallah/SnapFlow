@@ -1,0 +1,62 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: v3-nlp-worker
+  namespace: snapflow-prod
+  labels:
+    app: v3-nlp-worker
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: v3-nlp-worker
+  template:
+    metadata:
+      labels:
+        app: v3-nlp-worker
+    spec:
+      terminationGracePeriodSeconds: 120
+      containers:
+      - name: nlp-worker
+        image: snapflow/v3-nlp-worker:latest
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: DB_HOST
+          valueFrom:
+            secretKeyRef:
+              name: snapflow-secrets
+              key: db_host
+        - name: DB_PORT
+          valueFrom:
+            secretKeyRef:
+              name: snapflow-secrets
+              key: db_port
+        - name: DB_NAME
+          valueFrom:
+            secretKeyRef:
+              name: snapflow-secrets
+              key: db_name
+        - name: DB_USER
+          valueFrom:
+            secretKeyRef:
+              name: snapflow-secrets
+              key: db_user
+        - name: DB_PASS
+          valueFrom:
+            secretKeyRef:
+              name: snapflow-secrets
+              key: db_pass
+        - name: POLL_INTERVAL
+          value: "3"
+        resources:
+          requests:
+            cpu: 500m
+            memory: 512Mi
+          limits:
+            cpu: "2"
+            memory: 2Gi
+        livenessProbe:
+          exec:
+            command: ["/bin/sh", "-c", "pgrep -f 'python main.py' >/dev/null"]
+          initialDelaySeconds: 60
+          periodSeconds: 20

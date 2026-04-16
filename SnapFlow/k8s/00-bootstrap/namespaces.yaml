@@ -1,0 +1,44 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: snapflow-infra
+  labels:
+    app.kubernetes.io/part-of: snapflow
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: snapflow-prod
+  labels:
+    app.kubernetes.io/part-of: snapflow
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: snapflow-prod-quota
+  namespace: snapflow-prod
+spec:
+  hard:
+    requests.cpu: "12"
+    requests.memory: 20Gi
+    limits.cpu: "24"
+    limits.memory: 40Gi
+    pods: "40"
+---
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: snapflow-prod-limits
+  namespace: snapflow-prod
+spec:
+  limits:
+  - type: Container
+    default:
+      cpu: 500m
+      memory: 512Mi
+    defaultRequest:
+      cpu: 100m
+      memory: 128Mi
+    max:
+      cpu: "4"
+      memory: 6Gi

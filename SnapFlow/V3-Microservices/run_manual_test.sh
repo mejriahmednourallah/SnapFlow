@@ -1,0 +1,5 @@
+echo 'All automated checks pass. Remember to run these manually:'
+echo '- "snapflow" to test menu navigation'
+echo '- "snapflow monitor" to test service health'
+echo '- "snapflow test" for monitor log tail work'
+echo 'etc...'

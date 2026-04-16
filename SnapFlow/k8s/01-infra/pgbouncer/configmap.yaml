@@ -1,0 +1,30 @@
+# Replace REPLACE_WITH_STRONG_PASSWORD in userlist.txt before applying
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pgbouncer-config
+  namespace: snapflow-infra
+data:
+  pgbouncer.ini: |
+    [databases]
+    snapflow = host=postgres.snapflow-infra.svc.cluster.local port=5432 dbname=snapflow
+
+    [pgbouncer]
+    listen_addr = 0.0.0.0
+    listen_port = 5432
+    auth_type = plain
+    auth_file = /opt/bitnami/pgbouncer/conf/userlist.txt
+    pool_mode = transaction
+    max_client_conn = 200
+    default_pool_size = 20
+    min_pool_size = 5
+    reserve_pool_size = 5
+    reserve_pool_timeout = 3
+    server_idle_timeout = 600
+    log_connections = 0
+    log_disconnections = 0
+    log_pooler_errors = 1
+    stats_period = 60
+    ignore_startup_parameters = extra_float_digits
+  userlist.txt: |
+    "snapflow" "REPLACE_WITH_STRONG_PASSWORD"

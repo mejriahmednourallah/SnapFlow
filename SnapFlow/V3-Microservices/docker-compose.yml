@@ -1,0 +1,116 @@
+services:
+  # ─── PostgreSQL (Lightweight) ─────────────────────────────────────────
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: snapflow_v3
+      POSTGRES_USER: snapflow
+      POSTGRES_PASSWORD: snapflow
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U snapflow -d snapflow_v3"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+
+  # ─── Go Scanner API ───────────────────────────────────────────────────
+  scanner:
+    build:
+      context: ./v3-scanner-go
+      dockerfile: Dockerfile
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8081:8081"
+    environment:
+      DB_HOST: db
+      DB_PORT: "5432"
+      DB_NAME: snapflow_v3
+      DB_USER: snapflow
+      DB_PASS: snapflow
+      CHROME_NO_SANDBOX: "true"
+      ENABLE_PORT_SCAN: "true"
+      PORT_SCAN_TIMEOUT_MS: "900"
+      PORT_SCAN_PORTS: "21,22,25,53,80,443,3306,5432,6379,8080,8443,3389"
+
+  # ─── NLP Python Worker ──────────────────────────────────────────────
+  nlp-worker:
+    build:
+      context: ./v3-nlp-worker
+      dockerfile: Dockerfile
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DB_HOST: db
+      DB_PORT: "5432"
+      DB_NAME: snapflow_v3
+      DB_USER: snapflow
+      DB_PASS: snapflow
+      POLL_INTERVAL: "3"
+    restart: unless-stopped
+
+  # ─── Aggregator API ─────────────────────────────────────────────────
+  aggregator:
+    build:
+      context: ./v3-aggregator
+      dockerfile: Dockerfile
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    environment:
+      DB_HOST: db
+      DB_PORT: "5432"
+      DB_NAME: snapflow_v3
+      DB_USER: snapflow
+      DB_PASS: snapflow
+      SCANNER_API_URL: http://scanner:8081
+      VISUAL_REGRESSION_API_URL: http://v3-visual-regression:8083
+    restart: unless-stopped
+
+  # ─── Browser Pool ─────────────────────────────────────────────────────
+  v3-browser-pool:
+    build: ./v3-browser-pool
+    container_name: v3-browser-pool
+    ports:
+      - "8084:8084"
+    environment:
+      CHROME_NO_SANDBOX: "true"
+      BROWSER_POOL_CONCURRENCY: "3"
+      BROWSER_POOL_RECYCLE_AFTER: "50"
+      BROWSER_POOL_DEFAULT_TIMEOUT_MS: "30000"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8084/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ─── Visual Regression Microservice ─────────────────────────────────
+  v3-visual-regression:
+    build: ./v3-visual-regression
+    container_name: v3-visual-regression
+    ports:
+      - "8083:8083"
+    environment:
+      DATABASE_URL: postgresql://snapflow:snapflow@db:5432/snapflow_v3
+      VISUAL_REGRESSION_ENABLED: "true"
+      CHROME_NO_SANDBOX: "true"
+      BROWSER_POOL_URL: http://v3-browser-pool:8084
+    depends_on:
+      db:
+        condition: service_healthy
+      v3-browser-pool:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+

@@ -1,0 +1,30 @@
+api_url:     http://localhost:8080    # v3-aggregator
+scanner_url: http://localhost:8081    # v3-scanner-go
+
+build:
+  cgo_enabled: "0"
+  goos:        linux
+  goarch:      amd64
+  output:      ./bin/scanner
+  source:      ./v3-scanner-go
+  extra_flags: []                     # list of KEY=VALUE strings passed as -ldflags
+
+deploy:
+  pinggy_token:  ""                   # required for deploy command
+  target_port:   8080
+  tunnel_region: ""                   # optional
+
+monitor:
+  poll_interval_ms:   2000
+  log_lines_buffer:   200             # max lines kept in memory
+  services:
+    - name: scanner
+      url:  http://localhost:8081/health
+    - name: aggregator
+      url:  http://localhost:8080/health
+    - name: nlp-worker
+      check: docker                   # uses docker logs instead of HTTP
+      container: v3-nlp-worker
+    - name: db
+      check: docker
+      container: snapflow-db

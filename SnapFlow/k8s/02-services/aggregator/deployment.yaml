@@ -1,0 +1,86 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: v3-aggregator
+  namespace: snapflow-prod
+  labels:
+    app: v3-aggregator
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: v3-aggregator
+  template:
+    metadata:
+      labels:
+        app: v3-aggregator
+    spec:
+      terminationGracePeriodSeconds: 60
+      containers:
+      - name: aggregator
+        image: snapflow/v3-aggregator:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8080
+          name: http
+        env:
+        - name: DB_HOST
+          valueFrom:
+            secretKeyRef:
+              name: snapflow-secrets
+              key: db_host
+        - name: DB_PORT
+          valueFrom:
+            secretKeyRef:
+              name: snapflow-secrets
+              key: db_port
+        - name: DB_NAME
+          valueFrom:
+            secretKeyRef:
+              name: snapflow-secrets
+              key: db_name
+        - name: DB_USER
+          valueFrom:
+            secretKeyRef:
+              name: snapflow-secrets
+              key: db_user
+        - name: DB_PASS
+          valueFrom:
+            secretKeyRef:
+              name: snapflow-secrets
+              key: db_pass
+        - name: SCANNER_API_URL
+          valueFrom:
+            secretKeyRef:
+              name: snapflow-secrets
+              key: scanner_api_url
+        - name: VISUAL_REGRESSION_API_URL
+          valueFrom:
+            secretKeyRef:
+              name: snapflow-secrets
+              key: visual_regression_api_url
+        resources:
+          requests:
+            cpu: 500m
+            memory: 512Mi
+          limits:
+            cpu: "2"
+            memory: 2Gi
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 15
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 15
+        startupProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          failureThreshold: 30
+          periodSeconds: 5

@@ -1,0 +1,18 @@
+{
+  "scan_id_baseline": "scan-baseline-001",
+  "scan_id_new": "scan-new-001",
+  "overall_regression": false,
+  "regression_threshold_pct": 5.0,
+  "pages": [
+    {
+      "url": "https://example.com",
+      "diff_pct": 2.45,
+      "status": "ok"
+    },
+    {
+      "url": "https://example.com/about",
+      "diff_pct": 0.0,
+      "status": "ok"
+    }
+  ]
+}

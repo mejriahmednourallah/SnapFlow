@@ -1,0 +1,43 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: scanner-pdb
+  namespace: snapflow-prod
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: v3-scanner-go
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: aggregator-pdb
+  namespace: snapflow-prod
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: v3-aggregator
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: postgres-pdb
+  namespace: snapflow-infra
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: postgres
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: browserless-pdb
+  namespace: snapflow-prod
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: browserless

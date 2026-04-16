@@ -1,0 +1,18 @@
+# Deploy-ready mode for current code: CPU-based KEDA (no Redis queue dependency)
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: v3-nlp-scaledobject
+  namespace: snapflow-prod
+spec:
+  scaleTargetRef:
+    name: v3-nlp-worker
+  pollingInterval: 20
+  cooldownPeriod: 180
+  minReplicaCount: 1
+  maxReplicaCount: 4
+  triggers:
+  - type: cpu
+    metricType: Utilization
+    metadata:
+      value: "75"

@@ -1,0 +1,92 @@
+{
+  "site": "biat",
+  "pages_tested": 3,
+  "failed_checks": 0,
+  "pass": true,
+  "pages": [
+    {
+      "page_id": "home",
+      "url": "https://www.biat.com.tn/",
+      "ok": true,
+      "failures": [],
+      "result": {
+        "page_id": "home",
+        "url": "https://www.biat.com.tn/",
+        "title": "Banque Tunisienne|Banque Internationale Arabe- Banque BIAT Tunisie",
+        "word_count": 882,
+        "readability_grade": "F",
+        "content_type_hint": "normal",
+        "keyword_density_score": 0.0114,
+        "dominant_keyword": "biat",
+        "page_type": "landing",
+        "stuffing_flag": false,
+        "stuffing_risk": "low",
+        "dominant_kw_density_pct": 7.58,
+        "hidden_keyword_hits": 20,
+        "max_segment_ratio": 0.225,
+        "total_occurrences": 40,
+        "stuffing_reason": "brand_repetition_guard",
+        "lexical_method": "mtld",
+        "lexical_diversity": 57.17,
+        "rgpd_data_retention": false,
+        "rgpd_data_minimization": false
+      }
+    },
+    {
+      "page_id": "presentation_generale",
+      "url": "https://www.biat.com.tn/la-biat/presentation-generale",
+      "ok": true,
+      "failures": [],
+      "result": {
+        "page_id": "presentation_generale",
+        "url": "https://www.biat.com.tn/la-biat/presentation-generale",
+        "title": "Banque Universelle | Présentation générale de la Banque BIAT",
+        "word_count": 1045,
+        "readability_grade": "D",
+        "content_type_hint": "normal",
+        "keyword_density_score": 0.0243,
+        "dominant_keyword": "biat",
+        "page_type": "other",
+        "stuffing_flag": false,
+        "stuffing_risk": "low",
+        "dominant_kw_density_pct": 6.63,
+        "hidden_keyword_hits": 21,
+        "max_segment_ratio": 0.341,
+        "total_occurrences": 41,
+        "stuffing_reason": "brand_repetition_guard",
+        "lexical_method": "mtld",
+        "lexical_diversity": 108.68,
+        "rgpd_data_retention": false,
+        "rgpd_data_minimization": false
+      }
+    },
+    {
+      "page_id": "cookie_policy",
+      "url": "https://www.biat.com.tn/politique-de-gestion-des-cookies",
+      "ok": true,
+      "failures": [],
+      "result": {
+        "page_id": "cookie_policy",
+        "url": "https://www.biat.com.tn/politique-de-gestion-des-cookies",
+        "title": "Politique de gestion des cookies | BIAT Corporate",
+        "word_count": 348,
+        "readability_grade": "D",
+        "content_type_hint": "normal",
+        "keyword_density_score": 0.0093,
+        "dominant_keyword": "cookies",
+        "page_type": "other",
+        "stuffing_flag": false,
+        "stuffing_risk": "low",
+        "dominant_kw_density_pct": 4.67,
+        "hidden_keyword_hits": 4,
+        "max_segment_ratio": 0.4,
+        "total_occurrences": 10,
+        "stuffing_reason": "no_strong_signal",
+        "lexical_method": "mtld",
+        "lexical_diversity": 76.37,
+        "rgpd_data_retention": true,
+        "rgpd_data_minimization": false
+      }
+    }
+  ]
+}

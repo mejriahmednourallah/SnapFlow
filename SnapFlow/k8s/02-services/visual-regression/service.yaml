@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: v3-visual-regression
+  namespace: snapflow-prod
+  labels:
+    app: v3-visual-regression
+spec:
+  selector:
+    app: v3-visual-regression
+  ports:
+  - name: http
+    port: 8083
+    targetPort: 8083

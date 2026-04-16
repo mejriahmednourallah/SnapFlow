@@ -1,0 +1,65 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: v3-visual-regression
+  namespace: snapflow-prod
+  labels:
+    app: v3-visual-regression
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: v3-visual-regression
+  template:
+    metadata:
+      labels:
+        app: v3-visual-regression
+    spec:
+      terminationGracePeriodSeconds: 180
+      containers:
+      - name: visual-regression
+        image: snapflow/v3-visual-regression:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8083
+          name: http
+        env:
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: snapflow-secrets
+              key: database_url
+        - name: VISUAL_REGRESSION_ENABLED
+          value: "true"
+        - name: CHROME_NO_SANDBOX
+          value: "true"
+        resources:
+          requests:
+            cpu: "1"
+            memory: 1Gi
+          limits:
+            cpu: "3"
+            memory: 4Gi
+        securityContext:
+          capabilities:
+            add: ["SYS_ADMIN"]
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8083
+          initialDelaySeconds: 20
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8083
+          initialDelaySeconds: 45
+          periodSeconds: 20
+        volumeMounts:
+        - name: dshm
+          mountPath: /dev/shm
+      volumes:
+      - name: dshm
+        emptyDir:
+          medium: Memory
+          sizeLimit: 1Gi

@@ -1,0 +1,44 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: aggregator-netpol
+  namespace: snapflow-prod
+spec:
+  podSelector:
+    matchLabels:
+      app: v3-aggregator
+  policyTypes: [Ingress, Egress]
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: ingress-nginx
+    ports:
+    - port: 8080
+  egress:
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: snapflow-infra
+      podSelector:
+        matchLabels:
+          app: pgbouncer
+    ports:
+    - port: 5432
+  - to:
+    - podSelector:
+        matchLabels:
+          app: v3-scanner-go
+    ports:
+    - port: 8081
+  - to:
+    - podSelector:
+        matchLabels:
+          app: v3-visual-regression
+    ports:
+    - port: 8083
+  - ports:
+    - port: 53
+      protocol: UDP
+    - port: 53
+      protocol: TCP
