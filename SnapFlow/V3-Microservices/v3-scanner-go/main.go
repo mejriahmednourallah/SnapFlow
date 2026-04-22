@@ -141,14 +141,14 @@ type PhaseTimings struct {
 }
 
 type ScanTelemetry struct {
-	StopReason             string             `json:"stop_reason"`
-	PhaseTimingsMS         PhaseTimings       `json:"phase_timings_ms"`
-	PagesAtStop            int                `json:"pages_at_stop"`
-	BudgetRemainingMS      int64              `json:"budget_remaining_ms"`
-	FormFuzzer             formfuzzer.Summary `json:"form_fuzzer"`
+	StopReason        string             `json:"stop_reason"`
+	PhaseTimingsMS    PhaseTimings       `json:"phase_timings_ms"`
+	PagesAtStop       int                `json:"pages_at_stop"`
+	BudgetRemainingMS int64              `json:"budget_remaining_ms"`
+	FormFuzzer        formfuzzer.Summary `json:"form_fuzzer"`
 	// Issue 5: headless coverage metadata
-	HeadlessCoveragePct      float64 `json:"headless_coverage_pct"`
-	PartialHeadlessCoverage  bool    `json:"partial_headless_coverage,omitempty"`
+	HeadlessCoveragePct     float64 `json:"headless_coverage_pct"`
+	PartialHeadlessCoverage bool    `json:"partial_headless_coverage,omitempty"`
 }
 
 type FinalReport struct {
@@ -176,7 +176,7 @@ type FinalReport struct {
 	ScanDuration       string                       `json:"scan_duration"`
 	ScanTelemetry      ScanTelemetry                `json:"scan_telemetry"`
 	// Issue 1: SPA detection flag for downstream KPI consumers
-	IsSPA              bool                         `json:"is_spa"`
+	IsSPA bool `json:"is_spa"`
 }
 
 type ScanRequestPayload struct {
@@ -391,6 +391,11 @@ func loadHeadlessSampleRatio() float64 {
 // regardless of crawl size or sample ratio. Keeps scan time predictable on
 // large sites while still hitting the 80% target on sites ≤ 125 pages.
 const headlessPageCap = 100
+
+// minReliableContentHashConfidence is the minimum confidence accepted when
+// computing site-wide duplication rates. Lower-quality hashes are excluded to
+// avoid false 100% duplication when extraction falls back to weak text blocks.
+const minReliableContentHashConfidence = 0.45
 
 func evidenceProvenanceFromHeadless(hr performance.HeadlessResult) string {
 	if strings.TrimSpace(hr.RenderedHTML) != "" {
@@ -643,6 +648,8 @@ func startScan(ctx context.Context, config ScannerConfig) {
 	// ALL PRE-FETCH CHECKS RUN CONCURRENTLY
 	var sslInfo security.SSLInfo
 	var hasSitemap, hasRobots bool
+	var robotsProbe seo.HTTPProbeResult
+	var sitemapProbe seo.HTTPProbeResult
 	var robotsTxtContent string
 	var htmlBody string
 	var domainHeaders *http.Header
@@ -654,6 +661,7 @@ func startScan(ctx context.Context, config ScannerConfig) {
 	var preWg sync.WaitGroup
 	preFetchStart := time.Now()
 	preWg.Add(4)
+	robotsReady := make(chan struct{})
 
 	go func() {
 		defer preWg.Done()
@@ -661,22 +669,16 @@ func startScan(ctx context.Context, config ScannerConfig) {
 	}()
 	go func() {
 		defer preWg.Done()
-		hasSitemap = seo.CheckSitemap(baseURL)
+		<-robotsReady
+		sitemapProbe = seo.ProbeSitemap(baseURL, &robotsProbe)
+		hasSitemap = sitemapProbe.Present
 	}()
 	go func() {
 		defer preWg.Done()
-		hasRobots = seo.CheckRobotsTxt(baseURL)
-		// Fetch actual robots.txt content for security checks.
-		// Use a bounded timeout client — default http.Get has no timeout and can block indefinitely.
-		prefetchClient := &http.Client{Timeout: 10 * time.Second}
-		resp, err := prefetchClient.Get(baseURL + "/robots.txt")
-		if err == nil {
-			defer resp.Body.Close() // [#3] Always close, not just on 200 — non-200 bodies leak sockets.
-			if resp.StatusCode == http.StatusOK {
-				bodyBytes, _ := io.ReadAll(resp.Body)
-				robotsTxtContent = string(bodyBytes)
-			}
-		}
+		robotsProbe = seo.ProbeRobotsTxt(baseURL)
+		hasRobots = robotsProbe.Present
+		robotsTxtContent = robotsProbe.Body
+		close(robotsReady)
 	}()
 	go func() {
 		defer preWg.Done()
@@ -823,8 +825,10 @@ func startScan(ctx context.Context, config ScannerConfig) {
 	brokenURLSet := map[string]bool{}       // track 404 URLs to exclude from headless sampling
 	allImageURLs := map[string]bool{}       // Phase I: unique image URLs seen during crawl
 	allExternalDomains := map[string]bool{} // Phase K: unique external link hostnames
-	var totalResourceBytes int64            // Phase R: aggregate downloaded bytes across crawled pages
-	var gatewayTimeoutCount int32           // Phase R: count HTTP 504 occurrences
+	reliableContentHashPages := 0
+	lowQualityContentHashPages := 0
+	var totalResourceBytes int64  // Phase R: aggregate downloaded bytes across crawled pages
+	var gatewayTimeoutCount int32 // Phase R: count HTTP 504 occurrences
 	var cloudflareChallengeDetected uint32
 	crawlDebug := envBool("SCANNER_VERBOSE_CRAWL_LOGS", true)
 	var discoveredURLCount int32
@@ -834,6 +838,8 @@ func startScan(ctx context.Context, config ScannerConfig) {
 	var skippedSchemeCount int32
 	var skippedEmailLikeCount int32
 	var skippedBinaryCount int32
+	var skippedFragmentOnlyCount int32
+	var skippedForbiddenDomainCount int32
 	var skippedInvalidAbsCount int32
 	var onErrorAlreadyVisitedCount int32
 	var onErrorDeadlineCount int32
@@ -917,8 +923,14 @@ func startScan(ctx context.Context, config ScannerConfig) {
 			return
 		}
 		atomic.AddInt32(&discoveredURLCount, 1)
+		rawLink = strings.TrimSpace(rawLink)
 		if rawLink == "" {
 			atomic.AddInt32(&skippedEmptyCount, 1)
+			return
+		}
+		if strings.HasPrefix(rawLink, "#") {
+			atomic.AddInt32(&skippedFragmentOnlyCount, 1)
+			logCrawlDebug("↷ skip link: source=%s parent=%s raw=%s reason=fragment_only", source, parentURL, rawLink)
 			return
 		}
 		linkLower := strings.ToLower(rawLink)
@@ -944,6 +956,17 @@ func startScan(ctx context.Context, config ScannerConfig) {
 		if absLink == "" {
 			atomic.AddInt32(&skippedInvalidAbsCount, 1)
 			logCrawlDebug("↷ skip link: source=%s parent=%s raw=%s reason=invalid_absolute", source, parentURL, rawLink)
+			return
+		}
+		absParsed, err := url.Parse(absLink)
+		if err != nil || absParsed.Hostname() == "" {
+			atomic.AddInt32(&skippedInvalidAbsCount, 1)
+			logCrawlDebug("↷ skip link: source=%s parent=%s raw=%s reason=invalid_host", source, parentURL, rawLink)
+			return
+		}
+		if !isHostAllowedForCrawl(absParsed.Hostname(), config.AllowedDomains) {
+			atomic.AddInt32(&skippedForbiddenDomainCount, 1)
+			logCrawlDebug("↷ skip link: source=%s parent=%s raw=%s reason=forbidden_domain", source, parentURL, rawLink)
 			return
 		}
 		ctx := colly.NewContext()
@@ -1103,9 +1126,6 @@ func startScan(ctx context.Context, config ScannerConfig) {
 
 		extractedForms := formfuzzer.ExtractForms(targetURL, html)
 
-		// Phase K-3: extract per-page external link domains (outside lock for concurrency)
-		extDoms := extractExternalDomains(html, baseURL)
-
 		mu.Lock()
 		for _, f := range extractedForms {
 			formKey := f.PageURL + "|" + f.FormID + "|" + f.ActionURL
@@ -1117,20 +1137,26 @@ func startScan(ctx context.Context, config ScannerConfig) {
 		}
 		allSEOResults = append(allSEOResults, seoRes)
 		allUXResults = append(allUXResults, uxRes)
-		for _, d := range extDoms {
+		for _, d := range seoRes.Links.ExternalDomains {
 			allExternalDomains[d] = true
 		}
 
-		// Track content hashes for duplicate detection
-		found := false
-		for _, p := range contentHashes[seoRes.ContentHash] {
-			if p == targetURL {
-				found = true
-				break
+		// Track only reliable content hashes for duplicate detection.
+		hashValue := strings.TrimSpace(seoRes.ContentHash)
+		if hashValue == "" || seoRes.ContentHashConfidence < minReliableContentHashConfidence {
+			lowQualityContentHashPages++
+		} else {
+			reliableContentHashPages++
+			found := false
+			for _, p := range contentHashes[hashValue] {
+				if p == targetURL {
+					found = true
+					break
+				}
 			}
-		}
-		if !found {
-			contentHashes[seoRes.ContentHash] = append(contentHashes[seoRes.ContentHash], targetURL)
+			if !found {
+				contentHashes[hashValue] = append(contentHashes[hashValue], targetURL)
+			}
 		}
 		mu.Unlock()
 
@@ -1198,7 +1224,7 @@ func startScan(ctx context.Context, config ScannerConfig) {
 	c.Wait()
 	crawlMS := time.Since(crawlStart).Milliseconds()
 	log.Printf(
-		"Crawl diagnostics: discovered=%d enqueued=%d enqueue_errors=%d skipped_empty=%d skipped_scheme=%d skipped_email_like=%d skipped_binary=%d skipped_invalid_abs=%d already_visited=%d request_deadline=%d unsupported_scheme=%d gateway_timeouts=%d",
+		"Crawl diagnostics: discovered=%d enqueued=%d enqueue_errors=%d skipped_empty=%d skipped_scheme=%d skipped_email_like=%d skipped_binary=%d skipped_fragment_only=%d skipped_forbidden_domain=%d skipped_invalid_abs=%d already_visited=%d request_deadline=%d unsupported_scheme=%d gateway_timeouts=%d",
 		atomic.LoadInt32(&discoveredURLCount),
 		atomic.LoadInt32(&enqueueSuccessCount),
 		atomic.LoadInt32(&enqueueErrorCount),
@@ -1206,6 +1232,8 @@ func startScan(ctx context.Context, config ScannerConfig) {
 		atomic.LoadInt32(&skippedSchemeCount),
 		atomic.LoadInt32(&skippedEmailLikeCount),
 		atomic.LoadInt32(&skippedBinaryCount),
+		atomic.LoadInt32(&skippedFragmentOnlyCount),
+		atomic.LoadInt32(&skippedForbiddenDomainCount),
 		atomic.LoadInt32(&skippedInvalidAbsCount),
 		atomic.LoadInt32(&onErrorAlreadyVisitedCount),
 		atomic.LoadInt32(&onErrorDeadlineCount),
@@ -1402,17 +1430,24 @@ func startScan(ctx context.Context, config ScannerConfig) {
 	}
 	summary.HomepageH1KPIPassed = !summary.HomepageH1Missing
 
-	// K-2: Duplicate content rate
+	// K-2: Duplicate content rate (reliable hashes only)
 	dupPages := 0
 	for _, pages := range contentHashes {
 		if len(pages) > 1 {
 			dupPages += len(pages)
 		}
 	}
-	if summary.TotalPages > 0 {
-		summary.DuplicateContentRatePct = float64(dupPages) / float64(summary.TotalPages) * 100
+	if reliableContentHashPages > 0 {
+		summary.DuplicateContentRatePct = float64(dupPages) / float64(reliableContentHashPages) * 100
 	}
 	summary.DupContentKPIPassed = summary.DuplicateContentRatePct <= 10.0
+	duplicationReliability := "reliable"
+	if lowQualityContentHashPages > 0 {
+		duplicationReliability = "partial"
+	}
+	if summary.DuplicateContentRatePct >= 80.0 && lowQualityContentHashPages > 0 {
+		duplicationReliability = "pipeline_suspect"
+	}
 
 	// K-3: Unique external domains
 	summary.UniqueExternalDomains = len(allExternalDomains)
@@ -1428,22 +1463,29 @@ func startScan(ctx context.Context, config ScannerConfig) {
 		summary.UniqueExternalDomains, summary.NodeStyleURLCount)
 
 	seoKPIExtended := map[string]interface{}{
-		"has_sitemap":                hasSitemap,
-		"has_robots_txt":             hasRobots,
-		"total_internal_links":       summary.TotalInternalLinks,
-		"total_external_links":       summary.TotalExternalLinks,
-		"total_resource_size_kb":     math.Round((float64(atomic.LoadInt64(&totalResourceBytes))/1024.0)*10) / 10,
-		"gateway_timeout_count":      int(atomic.LoadInt32(&gatewayTimeoutCount)),
-		"homepage_h1_missing":        summary.HomepageH1Missing,
-		"homepage_h1_kpi_passed":     summary.HomepageH1KPIPassed,
-		"duplicate_content_rate_pct": summary.DuplicateContentRatePct,
-		"dup_content_kpi_passed":     summary.DupContentKPIPassed,
-		"unique_external_domains":    summary.UniqueExternalDomains,
-		"node_style_url_count":       summary.NodeStyleURLCount,
-		"node_url_kpi_passed":        summary.NodeURLKPIPassed,
-		"pages_with_social_sharing":  summary.PagesWithSocialSharing,
-		"avg_social_sharing_score":   summary.AvgSocialSharingScore,
-		"social_sharing_kpi_passed":  summary.SocialSharingKPIPassed,
+		"has_sitemap":                    hasSitemap,
+		"has_robots_txt":                 hasRobots,
+		"sitemap_url":                    sitemapProbe.FinalURL,
+		"sitemap_detected_via":           sitemapProbe.DetectedVia,
+		"robots_url":                     robotsProbe.FinalURL,
+		"robots_detected_via":            robotsProbe.DetectedVia,
+		"total_internal_links":           summary.TotalInternalLinks,
+		"total_external_links":           summary.TotalExternalLinks,
+		"total_resource_size_kb":         math.Round((float64(atomic.LoadInt64(&totalResourceBytes))/1024.0)*10) / 10,
+		"gateway_timeout_count":          int(atomic.LoadInt32(&gatewayTimeoutCount)),
+		"homepage_h1_missing":            summary.HomepageH1Missing,
+		"homepage_h1_kpi_passed":         summary.HomepageH1KPIPassed,
+		"duplicate_content_rate_pct":     summary.DuplicateContentRatePct,
+		"dup_content_kpi_passed":         summary.DupContentKPIPassed,
+		"content_hash_eligible_pages":    reliableContentHashPages,
+		"content_hash_low_quality_pages": lowQualityContentHashPages,
+		"duplication_reliability":        duplicationReliability,
+		"unique_external_domains":        summary.UniqueExternalDomains,
+		"node_style_url_count":           summary.NodeStyleURLCount,
+		"node_url_kpi_passed":            summary.NodeURLKPIPassed,
+		"pages_with_social_sharing":      summary.PagesWithSocialSharing,
+		"avg_social_sharing_score":       summary.AvgSocialSharingScore,
+		"social_sharing_kpi_passed":      summary.SocialSharingKPIPassed,
 	}
 	if err := db.UpdateSEOKPIExtended(scanID, seoKPIExtended); err != nil {
 		log.Printf("⚠ UpdateSEOKPIExtended failed: %v", err)
@@ -2090,6 +2132,43 @@ func selectMobileTestPages(results []seo.SEOResult, homepageURL string) []string
 	return selected
 }
 
+func normalizeCrawlHost(host string) string {
+	h := strings.ToLower(strings.TrimSpace(host))
+	if h == "" {
+		return ""
+	}
+	if strings.Contains(h, "://") {
+		if parsed, err := url.Parse(h); err == nil {
+			h = parsed.Host
+		}
+	}
+	if parsed, err := url.Parse("//" + h); err == nil && parsed.Hostname() != "" {
+		h = parsed.Hostname()
+	}
+	h = strings.TrimPrefix(h, "www.")
+	return h
+}
+
+func isHostAllowedForCrawl(host string, allowedDomains []string) bool {
+	if len(allowedDomains) == 0 {
+		return true
+	}
+	normalizedHost := normalizeCrawlHost(host)
+	if normalizedHost == "" {
+		return false
+	}
+	for _, domain := range allowedDomains {
+		normalizedAllowed := normalizeCrawlHost(domain)
+		if normalizedAllowed == "" {
+			continue
+		}
+		if normalizedHost == normalizedAllowed || strings.HasSuffix(normalizedHost, "."+normalizedAllowed) {
+			return true
+		}
+	}
+	return false
+}
+
 // e2abs resolves rawLink to an absolute URL string.
 // It first tries url.Parse on rawLink; if that yields a relative reference it
 // resolves against parentURL, falling back to baseURL when parentURL is empty.
@@ -2099,6 +2178,7 @@ func e2abs(parentURL, rawLink, baseURL string) string {
 		return ""
 	}
 	if parsed.IsAbs() {
+		parsed.Fragment = ""
 		return parsed.String()
 	}
 	base := parentURL
@@ -2109,7 +2189,9 @@ func e2abs(parentURL, rawLink, baseURL string) string {
 	if err != nil {
 		return ""
 	}
-	return baseParsed.ResolveReference(parsed).String()
+	resolved := baseParsed.ResolveReference(parsed)
+	resolved.Fragment = ""
+	return resolved.String()
 }
 
 // extractExternalDomains scans HTML for href attributes pointing to external

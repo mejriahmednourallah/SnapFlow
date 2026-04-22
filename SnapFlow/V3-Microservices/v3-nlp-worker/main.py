@@ -259,7 +259,11 @@ PRIVACY_SCORE_WEIGHTS = {
     "legal_basis_mentioned": 10,
 }
 
-_PURPOSE_RE = re.compile(r"finalite.{0,20}traitement|purpose.{0,15}processing|objectif.{0,15}collecte", re.I)
+_PURPOSE_RE = re.compile(
+    r"(finalite.{0,30}traitement|purpose.{0,20}processing|objectif.{0,20}collecte|"
+    r"a des fins de|utilisees? pour|traitement des donnees|purpose of processing)",
+    re.I,
+)
 _LEGAL_BASIS_RE = re.compile(r"base.{0,15}legale|legal.{0,10}basis|consentement|obligation.{0,10}legale|interet.{0,10}legitime", re.I)
 
 _llms_cache: dict[str, bool] = {}
@@ -1311,7 +1315,7 @@ def check_pre_consent_tracking(html: str, advertising_trackers: list) -> dict:
 
 def compute_privacy_score(text: str, rgpd_analysis: dict, rights: dict, dpo: dict) -> dict:
     norm = _normalize_for_rgpd_match(text)
-    purpose = bool(_PURPOSE_RE.search(norm))
+    purpose = bool(_PURPOSE_RE.search(norm)) or bool(rgpd_analysis.get("purpose_mentioned"))
     legal_basis = bool(_LEGAL_BASIS_RE.search(norm))
     score = 0.0
     score += PRIVACY_SCORE_WEIGHTS["data_retention_mentioned"] * int(rgpd_analysis.get("data_retention_mentioned", False))
@@ -1466,11 +1470,14 @@ def analyze_rgpd_text(url: str, text: str) -> dict:
         retention_sentences = [s for s in sentences if _RETENTION_RE_NORM.search(_normalize_for_rgpd_match(s))]
 
     minimization_found = bool(_MINIMIZATION_RE.search(text) or _MINIMIZATION_RE_NORM.search(text_norm))
+    purpose_sentences = [s for s in sentences if _PURPOSE_RE.search(_normalize_for_rgpd_match(s))]
     has_rgpd_content_signal = has_rgpd_content_signal or bool(retention_sentences) or minimization_found
 
     return {
         "data_retention_mentioned": len(retention_sentences) > 0,
         "data_minimization_mentioned": minimization_found,
+        "purpose_mentioned": len(purpose_sentences) > 0,
+        "purpose_phrases": purpose_sentences[:3],
         "retention_phrases": retention_sentences[:3],
         "used_strong_signal": (not is_privacy_url) and strong_signal,
         "has_rgpd_content_signal": has_rgpd_content_signal,

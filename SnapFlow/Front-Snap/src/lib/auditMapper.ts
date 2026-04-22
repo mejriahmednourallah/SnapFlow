@@ -289,6 +289,10 @@ function toStringList(value: unknown): string[] {
       if (item && typeof item === 'object') {
         const row = item as Record<string, unknown>;
         const best = [
+          typeof row.page_url === 'string' ? row.page_url : undefined,
+          typeof row.action_url === 'string' ? row.action_url : undefined,
+          typeof row.target_url === 'string' ? row.target_url : undefined,
+          typeof row.image_url === 'string' ? row.image_url : undefined,
           typeof row.url === 'string' ? row.url : undefined,
           typeof row.found_on === 'string' ? row.found_on : undefined,
           typeof row.source_page === 'string' ? row.source_page : undefined,
@@ -327,15 +331,34 @@ function toEvidenceLines(prefix: string, value: unknown): string[] {
       .slice(0, 8)
       .map((item) => {
         const row = item as Record<string, unknown>;
-        const url = typeof row.url === 'string' ? row.url : typeof row.found_on === 'string' ? row.found_on : '';
+        const pageUrl =
+          typeof row.page_url === 'string' ? row.page_url
+            : typeof row.source_page === 'string' ? row.source_page
+              : typeof row.url === 'string' ? row.url
+                : typeof row.found_on === 'string' ? row.found_on
+                  : '';
+        const targetUrl =
+          typeof row.target_url === 'string' ? row.target_url
+            : typeof row.action_url === 'string' ? row.action_url
+              : typeof row.image_url === 'string' ? row.image_url
+                : '';
         const status = row.status_code ?? row.status ?? '';
         const error = typeof row.error === 'string' ? row.error : '';
-        const anchor = typeof row.anchor_text === 'string' ? row.anchor_text : '';
+        const label =
+          typeof row.label_or_text === 'string' ? row.label_or_text
+            : typeof row.label === 'string' ? row.label
+              : typeof row.anchor_text === 'string' ? row.anchor_text
+                : typeof row.anomaly === 'string' ? row.anomaly
+                  : typeof row.issue_type === 'string' ? row.issue_type
+                    : '';
+        const selector = typeof row.selector === 'string' ? row.selector : '';
         const compact = [
-          url && `url=${url}`,
+          pageUrl && `page=${pageUrl}`,
+          targetUrl && `target=${targetUrl}`,
+          selector && `selector=${selector}`,
+          label && `item=${label}`,
           status !== '' && `status=${status}`,
           error && `error=${error}`,
-          anchor && `anchor=${anchor}`,
         ]
           .filter(Boolean)
           .join(' | ');
@@ -349,6 +372,10 @@ function toEvidenceLines(prefix: string, value: unknown): string[] {
   }
 
   if (typeof value === 'object') {
+    if (isRecord(value) && value.status === 'MISSING' && typeof value.reason === 'string') {
+      return [`${prefix}: MISSING - ${value.reason}`];
+    }
+
     const entries = Object.entries(value as Record<string, unknown>)
       .filter(([, val]) => val !== null && val !== undefined && val !== '')
       .slice(0, 8);
@@ -367,6 +394,7 @@ function extractScannerRecommendation(kpiNode: any, status: FindingStatus): { te
       : {};
 
   const fromBackend = [
+    typeof kpiNode?.fix === 'string' ? kpiNode.fix : '',
     typeof kpiNode?.recommended_action === 'string' ? kpiNode.recommended_action : '',
     typeof kpiNode?.evidence?.fix === 'string' ? kpiNode.evidence.fix : '',
     typeof kpiNode?.metrics?.fix === 'string' ? kpiNode.metrics.fix : '',
@@ -378,7 +406,11 @@ function extractScannerRecommendation(kpiNode: any, status: FindingStatus): { te
   if (fromBackend) {
     return {
       text: fromBackend,
-      source: typeof kpiNode?.recommendation_source === 'string' ? kpiNode.recommendation_source : 'fix',
+      source: typeof kpiNode?.recommendation_source === 'string'
+        ? kpiNode.recommendation_source
+        : typeof kpiNode?.fix === 'string'
+          ? 'fix'
+          : 'fix',
     };
   }
 
@@ -504,6 +536,25 @@ function collectScannerKpiNodes(section: RawAxisSection): Array<{ kpiName: strin
   return collected;
 }
 
+function collectUrlsDeep(value: unknown, seen: Set<string>) {
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (/^https?:\/\//i.test(trimmed)) {
+      seen.add(trimmed);
+    }
+    return;
+  }
+
+  if (Array.isArray(value)) {
+    value.forEach((item) => collectUrlsDeep(item, seen));
+    return;
+  }
+
+  if (isRecord(value)) {
+    Object.values(value).forEach((item) => collectUrlsDeep(item, seen));
+  }
+}
+
 function extractScannerKpiUrls(kpiNode: any): string[] {
   const scopeUrls = Array.isArray(kpiNode?.scope?.pages_affected_urls)
     ? kpiNode.scope.pages_affected_urls
@@ -528,16 +579,22 @@ function extractScannerKpiUrls(kpiNode: any): string[] {
     ...toStringList(evidenceExamples),
   ];
 
-  return Array.from(new Set(all)).slice(0, 20);
+  const seen = new Set<string>(all);
+  collectUrlsDeep(kpiNode?.evidence, seen);
+  return Array.from(seen).slice(0, 500);
 }
 
 function extractScannerKpiAffectedCount(kpiNode: any, urls: string[]): number | undefined {
+  if (typeof kpiNode?.evidence?.affected_pages === 'number') return kpiNode.evidence.affected_pages;
   if (typeof kpiNode?.scope?.pages_affected === 'number') return kpiNode.scope.pages_affected;
   if (typeof kpiNode?.pages_affected === 'number') return kpiNode.pages_affected;
   return urls.length > 0 ? urls.length : undefined;
 }
 
 function extractScannerKpiDescription(kpiNode: any, fallbackName: string): string {
+  if (typeof kpiNode?.constat === 'string' && kpiNode.constat.trim().length > 0) {
+    return kpiNode.constat;
+  }
   if (typeof kpiNode?.client_summary === 'string' && kpiNode.client_summary.trim().length > 0) {
     return kpiNode.client_summary;
   }

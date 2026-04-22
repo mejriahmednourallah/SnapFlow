@@ -4,6 +4,7 @@ Converts raw report data to axis/sub-axis/KPI structure
 All output in French for easy client consumption
 """
 from datetime import datetime
+import re
 from typing import Optional
 
 def _safe_dict(val):
@@ -74,6 +75,19 @@ def _resolve_mobile_kpi_status(mobile_kpi):
     if lcp_ms > 2500 or cls > 0.1 or fcp_ms > 1800:
         return "failing"
     return "passing"
+
+
+def _resolve_mobile_friendly_status(mobile_friendly_kpi):
+    """Status resolver for UX mobile-friendly evidence (separate from perf)."""
+    probe = _safe_dict(mobile_friendly_kpi)
+    if not _safe_bool(probe.get("available")):
+        return "not_available"
+
+    passed = probe.get("passed")
+    if isinstance(passed, bool):
+        return "passing" if passed else "failing"
+
+    return "failing" if _safe_int(probe.get("pages_with_mobile_overflow")) > 0 else "passing"
 
 
 def _axis_is_security(axis_name):
@@ -354,8 +368,15 @@ def _generate_constat(kpi_obj, axis_name=None, kpi_name=None):
             constat = _generate_constat_failing_recommendation(display_name, data, info, pages_affected)
         else:
             constat = f"{display_name}: anomalie détectée. Vérification manuelle recommandée."
+    elif status == "warning":
+        if kpi_type == "bug":
+            constat = _generate_constat_failing_bug(display_name, data, info, pages_affected, axis_name)
+        elif kpi_type == "compliance":
+            constat = _generate_constat_failing_compliance(display_name, data, info, pages_affected)
+        else:
+            constat = _generate_constat_failing_recommendation(display_name, data, info, pages_affected)
     else:
-        constat = f"{display_name}: données insuffisantes pour une évaluation fiable."
+        constat = f"{display_name}: données insuffisantes pour conclure de façon fiable sur ce critère."
     
     return constat
 
@@ -444,6 +465,7 @@ _KPI_META = {
     "Version CMS/Framework":              ("tech_cms_version",        "medium", "aggregate"),
     "Version Modules Installés":          ("tech_modules_versions",   "low",    "aggregate"),
     "Version Langage de Programmation":   ("tech_server_version",     "medium", "aggregate"),
+    "Langage de Programmation":           ("tech_programming_language","low",    "aggregate"),
     "Vérification du Code":               ("tech_cve_check",          "high",   "aggregate"),
     # — Check Sécurité —
     "SSL":                                ("sec_ssl",                  "high",   "concrete"),
@@ -458,6 +480,7 @@ _KPI_META = {
     "Contrôle d'Extension Upload Fichier":("sec_file_upload",         "medium", "aggregate"),
     "Dépendances JS Vulnérables (CVE)":   ("sec_js_deps",             "high",   "aggregate"),
     "Mise en Cache":                      ("perf_cache",              "medium", "heuristic"),
+    "Gestion de Cache":                   ("perf_cache",              "medium", "heuristic"),
     "Utilisation de Compression":         ("perf_compression",        "medium", "heuristic"),
     # — Audit Fonctionnel —
     "Les Formulaires":                    ("func_forms",              "high",   "concrete"),
@@ -468,7 +491,9 @@ _KPI_META = {
     # — Audit Performance —
     "Temps de Chargement Desktop":        ("perf_desktop_speed",      "high",   "aggregate"),
     "Performance Mobile":                 ("perf_mobile_speed",       "high",   "aggregate"),
+    "Temps de Chargement Mobile":         ("perf_mobile_speed",       "high",   "aggregate"),
     "Images Optimisées":                  ("perf_image_optim",        "medium", "aggregate"),
+    "Optimisation des Images":            ("perf_image_optim",        "medium", "aggregate"),
     "Erreurs Console JavaScript":         ("perf_console_errors",     "high",   "concrete"),
     # — SEO —
     "Balise Alts":                        ("seo_alt_tags",            "high",   "aggregate"),
@@ -517,6 +542,7 @@ _KPI_BUSINESS_IMPACT = {
     "tech_cms_version":         "Une version CMS obsolète ou en fin de vie augmente le risque d'exploitation de failles connues et complique la maintenance.",
     "tech_modules_versions":    "Des modules non mis à jour peuvent contenir des vulnérabilités corrigées dans les versions récentes.",
     "tech_server_version":      "L'exposition de la version serveur facilite le ciblage par des attaquants exploitant des CVEs spécifiques.",
+    "tech_programming_language": "L'absence d'information sur le langage/Runtime complique la gestion des correctifs de sécurité et la priorisation des mises à jour.",
     "tech_cve_check":           "Des CVEs actifs exposent l'application à des attaques documentées pouvant compromettre données et disponibilité.",
     "sec_ssl":                  "Un certificat SSL invalide bloque l'accès pour certains navigateurs, nuit au référencement et expose les données en transit.",
     "sec_http_headers":         "Les en-têtes de sécurité manquants élargissent la surface d'attaque face aux injections, clickjacking et MIME sniffing.",
@@ -584,7 +610,7 @@ _KPI_TICKET_TEAM = {
     "sec_robots_disclosure": "backend", "sec_error_pages": "backend", "sec_brute_force": "backend",
     "sec_file_upload": "backend", "sec_js_deps": "frontend",
     "tech_cms_version": "infrastructure", "tech_modules_versions": "infrastructure",
-    "tech_server_version": "infrastructure", "tech_cve_check": "infrastructure",
+    "tech_server_version": "infrastructure", "tech_programming_language": "infrastructure", "tech_cve_check": "infrastructure",
     "func_forms": "frontend", "func_links": "frontend", "func_buttons": "frontend",
     "func_features": "product", "func_search": "frontend",
     "perf_desktop_speed": "frontend", "perf_mobile_speed": "frontend",
@@ -820,6 +846,7 @@ def _build_client_summary_v2(kpi_id: str, status: str, evidence_quality: str, pa
     if status == "not_evaluated":
         return {
             "seo_multi_browser": "La compatibilité multi-navigateurs n'a pas pu être vérifiée de manière fiable lors de ce scan.",
+            "seo_duplication": "Le taux de duplication n'est pas exploitable dans ce scan car la qualité d'extraction du contenu est insuffisante.",
         }.get(kpi_id, "Ce point n'a pas pu être évalué avec suffisamment de fiabilité pendant ce scan.")
 
     if status == "passing":
@@ -886,6 +913,7 @@ def _build_technical_summary_v2(kpi_id: str, status: str, evidence_quality: str,
         return {
             "seo_multi_browser": "Le résultat repose sur un fallback HTTP User-Agent, sans comparaison réelle de rendu entre moteurs navigateur.",
             "rgpd_cookie_consent": "Détection basée sur HTML statique uniquement ; aucun rendu JS ni contrôle réseau concluant n'a été obtenu.",
+            "seo_duplication": "Le calcul de duplication est marqué non fiable (extraction de contenu faible ou incomplète sur un volume significatif de pages).",
         }.get(kpi_id, "Données insuffisantes pour une évaluation fiable — aucune sonde n'a retourné de résultat.")
 
     if status == "passing":
@@ -1029,19 +1057,777 @@ def _build_evidence_digest(client_summary: str, scope: dict, v1_data: dict, page
     }
 
 
-def _compute_v2_status(kpi_id: str, v1_status: str, evidence_quality: str, confidence: str) -> str:
-    """Enforce: heuristic KPIs can be 'warning' or 'not_evaluated', never 'failing'."""
-    if v1_status == "not_available" or evidence_quality == "not_evaluated":
-        return "not_evaluated"
-    if v1_status == "passing":
+_KPI_TYPE_DEFAULTS = {
+    "tech_cms_version": "bug",
+    "tech_modules_versions": "recommendation",
+    "tech_server_version": "bug",
+    "tech_programming_language": "recommendation",
+    "tech_cve_check": "bug",
+    "sec_ssl": "bug",
+    "sec_http_headers": "bug",
+    "sec_session_cookies": "bug",
+    "sec_sqli_ddos": "bug",
+    "sec_admin_exposed": "bug",
+    "sec_sensitive_files": "bug",
+    "sec_robots_disclosure": "bug",
+    "sec_error_pages": "bug",
+    "sec_brute_force": "bug",
+    "sec_file_upload": "bug",
+    "sec_js_deps": "bug",
+    "func_forms": "bug",
+    "func_links": "bug",
+    "func_buttons": "bug",
+    "func_features": "recommendation",
+    "func_search": "recommendation",
+    "perf_desktop_speed": "recommendation",
+    "perf_mobile_speed": "recommendation",
+    "perf_image_optim": "recommendation",
+    "perf_cache": "recommendation",
+    "perf_compression": "recommendation",
+    "perf_console_errors": "bug",
+    "seo_alt_tags": "recommendation",
+    "seo_meta_tags": "recommendation",
+    "seo_sitemap": "recommendation",
+    "seo_robots_txt": "recommendation",
+    "seo_duplication": "recommendation",
+    "seo_multi_browser": "recommendation",
+    "seo_url_structure": "recommendation",
+    "seo_heading_structure": "recommendation",
+    "seo_internal_linking": "recommendation",
+    "seo_external_linking": "recommendation",
+    "seo_h1_quality": "recommendation",
+    "seo_meta_nlp": "recommendation",
+    "seo_ai_readiness": "recommendation",
+    "ux_audience_targeting": "recommendation",
+    "ux_social_sharing": "recommendation",
+    "ux_design_ergonomics": "recommendation",
+    "ux_navigation": "recommendation",
+    "ux_mobile_friendly": "recommendation",
+    "content_freshness": "recommendation",
+    "content_thin": "recommendation",
+    "content_key_pages": "recommendation",
+    "content_cannibalization": "recommendation",
+    "content_missing_cta": "recommendation",
+    "content_broken_structure": "recommendation",
+    "content_lexical_diversity": "recommendation",
+    "eco_index_score": "recommendation",
+    "rgpd_cookie_consent": "compliance",
+    "rgpd_privacy_policy": "compliance",
+    "rgpd_data_retention": "compliance",
+    "rgpd_minimization": "compliance",
+    "rgpd_legal_notice": "compliance",
+    "rgpd_user_rights": "compliance",
+    "rgpd_declared_purpose": "compliance",
+    "rgpd_rights_coverage": "compliance",
+    "rgpd_pre_consent_trackers": "compliance",
+    "rgpd_privacy_score": "compliance",
+}
+
+_LATEST_VERSION_CATALOG = {
+    "wordpress": {"latest_known_version": "6.8.1", "latest_version_source": "local_catalog_2026_04"},
+    "drupal": {"latest_known_version": "11.2.5", "latest_version_source": "local_catalog_2026_04"},
+    "joomla": {"latest_known_version": "5.3.1", "latest_version_source": "local_catalog_2026_04"},
+    "prestashop": {"latest_known_version": "8.2.2", "latest_version_source": "local_catalog_2026_04"},
+    "php": {"latest_known_version": "8.4.5", "latest_version_source": "local_catalog_2026_04"},
+    "apache": {"latest_known_version": "2.4.63", "latest_version_source": "local_catalog_2026_04"},
+    "apache http server": {"latest_known_version": "2.4.63", "latest_version_source": "local_catalog_2026_04"},
+    "nginx": {"latest_known_version": "1.28.0", "latest_version_source": "local_catalog_2026_04"},
+    "node": {"latest_known_version": "22.15.0", "latest_version_source": "local_catalog_2026_04"},
+    "node.js": {"latest_known_version": "22.15.0", "latest_version_source": "local_catalog_2026_04"},
+    "nodejs": {"latest_known_version": "22.15.0", "latest_version_source": "local_catalog_2026_04"},
+}
+
+
+def _missing_field(reason: str) -> dict:
+    return {"value": None, "status": "MISSING", "reason": reason}
+
+
+def _is_missing_field(value) -> bool:
+    return isinstance(value, dict) and value.get("status") == "MISSING" and "value" in value
+
+
+def _clean_text(value) -> str:
+    if isinstance(value, str):
+        return value.strip()
+    if value is None:
+        return ""
+    return str(value).strip()
+
+
+def _display_value(value, fallback: str = "non détecté") -> str:
+    if _is_missing_field(value):
+        return fallback
+    rendered = _clean_text(value)
+    return rendered or fallback
+
+
+def _unique_strings(values) -> list:
+    unique = []
+    for value in _safe_list(values):
+        text = _clean_text(value)
+        if text and text not in unique:
+            unique.append(text)
+    return unique
+
+
+def _value_or_missing(value, reason: str, empty_is_missing: bool = True):
+    if value is None:
+        return _missing_field(reason)
+    if isinstance(value, str) and not value.strip():
+        return _missing_field(reason)
+    if empty_is_missing and isinstance(value, (list, dict)) and len(value) == 0:
+        return _missing_field(reason)
+    return value
+
+
+def _normalize_contract_status(v1_status: str) -> str:
+    status = _clean_text(v1_status).lower()
+    if status in {"passing", "pass", "covered"}:
         return "passing"
-    if v1_status == "failing":
-        if evidence_quality == "heuristic":
-            return "warning"  # Downgrade: heuristic cannot be 'failing'
+    if status in {"failing", "fail", "failed"}:
         return "failing"
-    if v1_status in ("warning", "non_evalue"):
-        return "warning" if v1_status == "warning" else "not_evaluated"
-    return v1_status
+    if status == "warning":
+        return "warning"
+    if status in {"non_evalue", "not_available", "not available", "not-evaluated", "not_evaluated"}:
+        return "not_evaluated"
+    return "not_evaluated"
+
+
+def _compare_versions(left: str, right: str) -> Optional[int]:
+    left_parts = [int(part) for part in re.findall(r"\d+", str(left or ""))]
+    right_parts = [int(part) for part in re.findall(r"\d+", str(right or ""))]
+    if not left_parts or not right_parts:
+        return None
+    max_len = max(len(left_parts), len(right_parts))
+    left_parts += [0] * (max_len - len(left_parts))
+    right_parts += [0] * (max_len - len(right_parts))
+    if left_parts < right_parts:
+        return -1
+    if left_parts > right_parts:
+        return 1
+    return 0
+
+
+def _lookup_latest_version(product_name: str):
+    normalized = re.sub(r"[^a-z0-9]+", " ", _clean_text(product_name).lower()).strip()
+    if not normalized:
+        return None
+    aliases = {
+        "apache httpd": "apache",
+        "apache http server": "apache",
+        "httpd": "apache",
+        "node js": "node.js",
+        "nodejs": "node.js",
+    }
+    key = aliases.get(normalized, normalized)
+    return _LATEST_VERSION_CATALOG.get(key)
+
+
+def _downgrade_confidence(level: str, steps: int = 1) -> str:
+    order = ["low", "medium", "high"]
+    current = _clean_text(level).lower() or "medium"
+    if current not in order:
+        current = "medium"
+    index = max(order.index(current) - max(steps, 0), 0)
+    return order[index]
+
+
+def _contract_detection_sources(kpi_id: str) -> list:
+    if kpi_id == "func_forms":
+        return ["form_fuzzer", "scanner_aggregation"]
+    if kpi_id == "func_buttons":
+        return ["headless_probe", "scanner_aggregation"]
+    if kpi_id == "func_links":
+        return ["crawler_link_check", "scanner_aggregation"]
+    if kpi_id == "sec_ssl":
+        return ["ssl_probe"]
+    if kpi_id in {"sec_http_headers", "sec_session_cookies"}:
+        return ["http_response_headers"]
+    if kpi_id in {"seo_meta_tags", "seo_alt_tags", "seo_heading_structure", "seo_internal_linking"}:
+        return ["scanner_aggregation", "nlp"]
+    if kpi_id in {"seo_sitemap", "seo_robots_txt"}:
+        return ["http_probe"]
+    if kpi_id in {"tech_cms_version", "tech_server_version", "tech_programming_language", "tech_cve_check"}:
+        return ["scanner_aggregation", "stack_fingerprint"]
+    return ["scanner_aggregation"]
+
+
+def _derive_pages_checked(kpi_id: str, pages_scanned: int, data: dict, affected_urls: list) -> int:
+    if kpi_id in {
+        "tech_cms_version", "tech_modules_versions", "tech_server_version", "tech_programming_language",
+        "tech_cve_check", "sec_ssl", "sec_http_headers", "sec_session_cookies", "sec_sqli_ddos",
+        "sec_admin_exposed", "sec_sensitive_files", "sec_robots_disclosure", "sec_error_pages",
+        "sec_brute_force", "sec_file_upload", "sec_js_deps", "seo_sitemap", "seo_robots_txt",
+    }:
+        return 1
+    if kpi_id == "func_forms":
+        return max(len(_unique_strings(data.get("affected_page_urls"))), _safe_int(data.get("forms_tested")), _safe_int(data.get("total_forms")), 0)
+    if affected_urls:
+        return len(affected_urls)
+    return max(_safe_int(pages_scanned), 1)
+
+
+def _normalize_anomalous_test_row(row: dict) -> dict:
+    payload = row.get("payload") if isinstance(row, dict) and "payload" in row else None
+    return {
+        "page_url": _value_or_missing(_clean_text(row.get("page_url")) if isinstance(row, dict) else "", "URL de page absente pour le test de formulaire"),
+        "action_url": _value_or_missing(_clean_text(row.get("action_url")) if isinstance(row, dict) else "", "URL d'action du formulaire absente"),
+        "form_id": _value_or_missing(_clean_text(row.get("form_id")) if isinstance(row, dict) else "", "Identifiant du formulaire absent"),
+        "test_type": _value_or_missing(_clean_text(row.get("test_type")) if isinstance(row, dict) else "", "Type de test absent"),
+        "payload": payload if payload not in (None, "") else _missing_field("Payload de fuzzing absent dans le résultat stocké"),
+        "response_type": _value_or_missing(_clean_text(row.get("response_type")) if isinstance(row, dict) else "", "Type de réponse absent"),
+        "status_code": row.get("status_code") if isinstance(row, dict) and row.get("status_code") is not None else _missing_field("Code HTTP absent"),
+        "anomaly": _value_or_missing(_clean_text(row.get("anomaly")) if isinstance(row, dict) else "", "Nom de l'anomalie absent"),
+        "anomaly_reason": _value_or_missing(_clean_text(row.get("anomaly_reason")) if isinstance(row, dict) else "", "Raison de l'anomalie absente"),
+        "duration_ms": row.get("duration_ms") if isinstance(row, dict) and row.get("duration_ms") is not None else _missing_field("Durée d'exécution absente"),
+        "error": _clean_text(row.get("error")) if isinstance(row, dict) and row.get("error") is not None else "",
+    }
+
+
+def _build_contract_evidence(kpi_id: str, kpi_obj: dict, pages_scanned: int, domain_url: str):
+    data = _safe_dict(kpi_obj.get("data", {}))
+    affected_pages = _safe_int(kpi_obj.get("pages_affected", 0))
+    affected_urls = _unique_strings(kpi_obj.get("pages_affected_urls", []))
+    evidence = {
+        "detection_source": _contract_detection_sources(kpi_id),
+        "pages_checked": _derive_pages_checked(kpi_id, pages_scanned, data, affected_urls),
+        "affected_pages": affected_pages,
+    }
+    data_quality = "VALID"
+    status_override = None
+    confidence_penalty = 0
+
+    if kpi_id == "func_forms":
+        forms_detected = _safe_int(data.get("forms_detected") or data.get("unique_transactional_forms_detected") or data.get("total_forms"))
+        forms_tested = _safe_int(data.get("forms_tested") or data.get("unique_transactional_forms_tested"))
+        non_transactional_forms_tested = _safe_int(data.get("non_transactional_forms_tested"))
+        tests_run = _safe_int(data.get("tests_run"))
+        anomalies_count = _safe_int(data.get("anomalies") or data.get("anomalies_count"))
+        suppressed_low_confidence_anomalies = _safe_int(data.get("suppressed_low_confidence_anomalies"))
+        anomalies_by_type = _safe_dict(data.get("anomalies_by_type"))
+        affected_page_urls_all = _unique_strings(data.get("affected_page_urls", [])) or _unique_strings([
+            _safe_dict(item).get("page_url") for item in _safe_list(data.get("top_affected", []))
+        ])
+        anomalous_tests_raw = _safe_list(data.get("anomalous_tests_all", []))
+        anomalous_tests_all = [_normalize_anomalous_test_row(_safe_dict(row)) for row in anomalous_tests_raw]
+
+        if forms_detected > 0 and forms_tested == 0:
+            status_override = "not_evaluated"
+            data_quality = "MISSING"
+            confidence_penalty = 2
+        elif forms_detected > forms_tested and forms_tested > 0:
+            data_quality = "PARTIAL"
+            confidence_penalty = max(confidence_penalty, 1)
+        elif anomalies_count > 0 and forms_tested > 0:
+            status_override = "failing"
+        elif forms_tested > 0 and anomalies_count == 0:
+            status_override = "passing"
+        elif forms_detected == 0:
+            status_override = "not_evaluated"
+            data_quality = "MISSING"
+            confidence_penalty = 2
+
+        evidence.update({
+            "data_quality": data_quality,
+            "forms_detected": forms_detected,
+            "forms_tested": forms_tested,
+            "non_transactional_forms_tested": non_transactional_forms_tested,
+            "tests_run": tests_run,
+            "anomalies_count": anomalies_count,
+            "suppressed_low_confidence_anomalies": suppressed_low_confidence_anomalies,
+            "anomalies_by_type": anomalies_by_type if anomalies_by_type or anomalies_count == 0 else _missing_field("Le détail des anomalies par type n'a pas été conservé"),
+            "affected_page_urls_all": affected_page_urls_all if affected_page_urls_all or forms_detected == 0 else _missing_field("Aucune URL de page formulaire n'a été conservée"),
+            "anomalous_tests_all": anomalous_tests_all if anomalous_tests_all or anomalies_count == 0 else _missing_field("Les payloads de fuzzing anormaux n'ont pas été conservés"),
+        })
+        return evidence, data_quality, status_override, confidence_penalty
+
+    if kpi_id == "func_buttons":
+        broken_buttons = []
+        for row in _safe_list(data.get("broken_buttons", [])):
+            if not isinstance(row, dict):
+                continue
+            broken_buttons.append({
+                "page_url": _value_or_missing(_clean_text(row.get("url")), "URL de la page du bouton absente"),
+                "selector": _value_or_missing(_clean_text(row.get("selector")), "Sélecteur du bouton absent"),
+                "label_or_text": _value_or_missing(_clean_text(row.get("label") or row.get("text")), "Texte du bouton absent"),
+                "tag": _value_or_missing(_clean_text(row.get("tag")), "Balise HTML du bouton absente"),
+                "href": row.get("href") if row.get("href") not in (None, "") else _missing_field("Aucun href détecté"),
+                "onclick": row.get("onclick") if row.get("onclick") not in (None, "") else _missing_field("Aucun gestionnaire onclick détecté"),
+                "form_action": row.get("form_action") if row.get("form_action") not in (None, "") else _missing_field("Aucune action de formulaire associée"),
+                "issue_type": _value_or_missing(_clean_text(row.get("issue_type")), "Type d'anomalie du bouton absent"),
+            })
+        affected_page_urls_all = _unique_strings([_clean_text(row.get("url")) for row in _safe_list(data.get("broken_buttons", [])) if isinstance(row, dict)])
+        if _safe_int(data.get("total_broken_buttons")) > 0 and not broken_buttons:
+            data_quality = "PARTIAL"
+            confidence_penalty = 1
+        elif any(_is_missing_field(row.get("page_url")) or _is_missing_field(row.get("selector")) for row in broken_buttons):
+            data_quality = "PARTIAL"
+            confidence_penalty = 1
+        evidence.update({
+            "data_quality": data_quality,
+            "pages_with_nonfunc_buttons": _safe_int(data.get("pages_with_nonfunc_buttons")),
+            "total_broken_buttons": _safe_int(data.get("total_broken_buttons")),
+            "affected_page_urls_all": affected_page_urls_all if affected_page_urls_all or _safe_int(data.get("total_broken_buttons")) == 0 else _missing_field("Les URLs des pages affectées n'ont pas été conservées"),
+            "broken_buttons_all": broken_buttons if broken_buttons or _safe_int(data.get("total_broken_buttons")) == 0 else _missing_field("Le détail des boutons cassés n'a pas été conservé"),
+        })
+        return evidence, data_quality, status_override, confidence_penalty
+
+    if kpi_id == "func_links":
+        broken_links = []
+        for row in _safe_list(data.get("broken_links", [])):
+            if not isinstance(row, dict):
+                continue
+            broken_links.append({
+                "source_page": _value_or_missing(_clean_text(row.get("source_page")), "Page source du lien absente"),
+                "target_url": _value_or_missing(_clean_text(row.get("url")), "URL cible du lien absente"),
+                "anchor_text": row.get("anchor_text") if row.get("anchor_text") not in (None, "") else _missing_field("Texte d'ancrage absent"),
+                "status_code": row.get("status_code") if row.get("status_code") is not None else _missing_field("Code HTTP absent"),
+                "error": _clean_text(row.get("error")) if row.get("error") is not None else "",
+                "link_selector": row.get("link_selector") if row.get("link_selector") not in (None, "") else _missing_field("Sélecteur du lien absent"),
+            })
+        affected_page_urls_all = _unique_strings([_clean_text(row.get("source_page")) for row in _safe_list(data.get("broken_links", [])) if isinstance(row, dict)])
+        if affected_pages > 0 and not broken_links:
+            data_quality = "PARTIAL"
+            confidence_penalty = 1
+        evidence.update({
+            "data_quality": data_quality,
+            "broken_internal_link_count": _safe_int(data.get("broken_link_count")),
+            "broken_links_all": broken_links if broken_links or affected_pages == 0 else _missing_field("Le détail des liens cassés n'a pas été conservé"),
+            "affected_page_urls_all": affected_page_urls_all if affected_page_urls_all or affected_pages == 0 else _missing_field("Les pages sources des liens cassés n'ont pas été conservées"),
+            "by_status": _safe_dict(data.get("by_status")),
+        })
+        return evidence, data_quality, status_override, confidence_penalty
+
+    if kpi_id == "seo_meta_tags":
+        meta_missing_count = _safe_int(data.get("pages_missing_meta_desc"))
+        title_missing_count = _safe_int(data.get("pages_missing_title"))
+        meta_urls = _unique_strings(data.get("affected_pages_meta", []))
+        title_urls = _unique_strings(data.get("affected_pages_title", []))
+        if (meta_missing_count > 0 and not meta_urls) or (title_missing_count > 0 and not title_urls):
+            data_quality = "PARTIAL"
+            confidence_penalty = 1
+        evidence.update({
+            "data_quality": data_quality,
+            "meta_missing_count": meta_missing_count,
+            "title_missing_count": title_missing_count,
+            "meta_missing_urls_all": meta_urls if meta_urls or meta_missing_count == 0 else _missing_field("Les URLs sans meta description n'ont pas été conservées"),
+            "title_missing_urls_all": title_urls if title_urls or title_missing_count == 0 else _missing_field("Les URLs sans balise title n'ont pas été conservées"),
+        })
+        evidence["affected_pages"] = max(len(_unique_strings(meta_urls + title_urls)), affected_pages)
+        return evidence, data_quality, status_override, confidence_penalty
+
+    if kpi_id == "seo_alt_tags":
+        missing_alt_count = _safe_int(data.get("images_missing_alt"))
+        images = []
+        page_urls = []
+        for row in _safe_list(data.get("images", [])):
+            if not isinstance(row, dict):
+                continue
+            page_url = _clean_text(row.get("page_url") or row.get("url"))
+            image_url = _clean_text(row.get("image_url") or row.get("src"))
+            if page_url:
+                page_urls.append(page_url)
+            images.append({
+                "page_url": _value_or_missing(page_url, "Page source de l'image absente"),
+                "image_url": _value_or_missing(image_url, "URL de l'image absente"),
+                "alt_value": row.get("alt") if row.get("alt") not in (None, "") else _missing_field("Attribut alt absent"),
+                "selector": row.get("selector") if row.get("selector") not in (None, "") else _missing_field("Sélecteur de l'image absent"),
+            })
+        page_urls = _unique_strings(page_urls)
+        if missing_alt_count > 0 and (not images or not page_urls):
+            data_quality = "PARTIAL"
+            confidence_penalty = 1
+        evidence.update({
+            "data_quality": data_quality,
+            "missing_alt_image_count": missing_alt_count,
+            "missing_alt_page_urls_all": page_urls if page_urls or missing_alt_count == 0 else _missing_field("Les pages contenant des images sans ALT n'ont pas été conservées"),
+            "missing_alt_images_all": images if images or missing_alt_count == 0 else _missing_field("Le détail des images sans ALT n'a pas été conservé"),
+        })
+        evidence["affected_pages"] = max(len(page_urls), affected_pages)
+        return evidence, data_quality, status_override, confidence_penalty
+
+    if kpi_id == "seo_heading_structure":
+        bad_h1_count = _safe_int(data.get("pages_with_bad_h1"))
+        bad_h1_urls = _unique_strings(data.get("bad_h1_urls", []))
+        homepage_h1_missing = bool(data.get("homepage_h1_missing"))
+        homepage_url = _clean_text(data.get("homepage_url") or domain_url)
+        if homepage_h1_missing and homepage_url and homepage_url not in bad_h1_urls:
+            bad_h1_urls = [homepage_url] + bad_h1_urls
+        if bad_h1_count > 0 and not bad_h1_urls:
+            data_quality = "PARTIAL"
+            confidence_penalty = 1
+        evidence.update({
+            "data_quality": data_quality,
+            "bad_h1_page_count": bad_h1_count,
+            "bad_h1_urls_all": bad_h1_urls if bad_h1_urls or bad_h1_count == 0 else _missing_field("Les URLs avec H1 invalide n'ont pas été conservées"),
+            "homepage_h1_missing": homepage_h1_missing,
+            "homepage_url": homepage_url if homepage_url else _missing_field("URL de la page d'accueil absente"),
+        })
+        evidence["affected_pages"] = max(len(bad_h1_urls), bad_h1_count)
+        return evidence, data_quality, status_override, confidence_penalty
+
+    if kpi_id == "seo_internal_linking":
+        missing_count = _safe_int(data.get("pages_missing_contextual_links"))
+        urls = _unique_strings(data.get("pages_missing_contextual_links_all", []))
+        total_internal_links = _safe_int(data.get("total_internal_links"))
+        total_contextual_links = _safe_int(data.get("total_contextual_internal_links"))
+        internal_linking_source = _clean_text(data.get("internal_linking_source"))
+        internal_linking_note = _clean_text(data.get("internal_linking_note"))
+        measurement = _safe_dict(data.get("contextual_link_measurement"))
+        reliable_coverage_pct = _safe_float(measurement.get("reliable_coverage_pct"))
+        if missing_count > 0 and not urls:
+            data_quality = "PARTIAL"
+            confidence_penalty = 1
+        if total_internal_links == 0 and total_contextual_links > 0:
+            data_quality = "PARTIAL"
+            confidence_penalty = max(confidence_penalty, 1)
+            if status_override is None and missing_count > 0:
+                status_override = "warning"
+        if reliable_coverage_pct and reliable_coverage_pct < 50.0:
+            data_quality = "PARTIAL"
+            confidence_penalty = max(confidence_penalty, 2)
+            status_override = "not_evaluated"
+        if internal_linking_source == "page_recount" and not internal_linking_note:
+            internal_linking_note = "Le total des liens internes provient d'un recomptage page-par-page (agrégat scanner absent)."
+        evidence.update({
+            "data_quality": data_quality,
+            "pages_missing_contextual_links_count": missing_count,
+            "pages_missing_contextual_links_all": urls if urls or missing_count == 0 else _missing_field("Les URLs sans liens contextuels n'ont pas été conservées"),
+            "total_internal_links": total_internal_links,
+            "total_contextual_internal_links": total_contextual_links,
+            "internal_linking_source": internal_linking_source or _missing_field("Source de comptage des liens internes non spécifiée"),
+            "contextual_link_measurement": measurement,
+            "note": internal_linking_note,
+        })
+        evidence["affected_pages"] = max(len(urls), missing_count)
+        return evidence, data_quality, status_override, confidence_penalty
+
+    if kpi_id == "seo_url_structure":
+        non_clean_count = _safe_int(data.get("node_style_url_count"))
+        non_clean_urls = _unique_strings(data.get("non_clean_urls_all", []))
+        if non_clean_count > 0 and not non_clean_urls:
+            data_quality = "PARTIAL"
+            confidence_penalty = 1
+        evidence.update({
+            "data_quality": data_quality,
+            "non_clean_url_count": non_clean_count,
+            "non_clean_urls_all": non_clean_urls if non_clean_urls or non_clean_count == 0 else _missing_field("Le scanner a remonté un volume agrégé sans conserver la liste des URLs"),
+        })
+        return evidence, data_quality, status_override, confidence_penalty
+
+    if kpi_id == "seo_sitemap":
+        detected = bool(data.get("has_sitemap"))
+        evidence.update({
+            "data_quality": "VALID",
+            "sitemap_detected": detected,
+            "sitemap_url": _clean_text(data.get("sitemap_url")) or (f"{domain_url.rstrip('/')}/sitemap.xml" if detected and domain_url else _missing_field("Aucun sitemap.xml n'a été détecté à la racine du domaine")),
+            "detected_via": _clean_text(data.get("sitemap_detected_via")) or (_missing_field("Aucune provenance de détection du sitemap n'a été conservée") if detected else _missing_field("Aucun sitemap détecté")),
+        })
+        return evidence, "VALID", status_override, confidence_penalty
+
+    if kpi_id == "seo_robots_txt":
+        detected = bool(data.get("has_robots_txt"))
+        evidence.update({
+            "data_quality": "VALID",
+            "robots_detected": detected,
+            "robots_url": _clean_text(data.get("robots_url")) or (f"{domain_url.rstrip('/')}/robots.txt" if detected and domain_url else _missing_field("Aucun robots.txt n'a été détecté à la racine du domaine")),
+            "detected_via": _clean_text(data.get("robots_detected_via")) or (_missing_field("Aucune provenance de détection du robots.txt n'a été conservée") if detected else _missing_field("Aucun robots.txt détecté")),
+        })
+        return evidence, "VALID", status_override, confidence_penalty
+
+    if kpi_id == "seo_duplication":
+        duplicate_rate = _safe_float(data.get("duplicate_content_rate_pct"))
+        duplicate_page_count = _safe_int(data.get("duplicate_page_count"))
+        hash_eligible_pages = _safe_int(data.get("hash_eligible_pages"))
+        hash_low_conf_pages = _safe_int(data.get("hash_low_confidence_pages"))
+        duplication_reliability = _clean_text(data.get("duplication_reliability")).lower()
+        pipeline_suspect = bool(data.get("pipeline_suspect")) or duplication_reliability == "pipeline_suspect"
+        duplication_note = _clean_text(data.get("note"))
+        duplicate_clusters = _safe_list(data.get("duplicate_clusters", [])) or _safe_list(data.get("duplicate_groups", []))
+        if hash_eligible_pages == 0 and pages_scanned > 0:
+            data_quality = "MISSING"
+            confidence_penalty = 2
+            status_override = "not_evaluated"
+        elif pipeline_suspect:
+            data_quality = "PARTIAL"
+            confidence_penalty = 2
+            status_override = "not_evaluated"
+        elif duplicate_page_count > 0 and not duplicate_clusters:
+            data_quality = "PARTIAL"
+            confidence_penalty = 1
+        evidence.update({
+            "data_quality": data_quality,
+            "duplicate_content_rate_pct": duplicate_rate,
+            "duplicate_page_count": duplicate_page_count,
+            "hash_eligible_pages": hash_eligible_pages,
+            "hash_low_confidence_pages": hash_low_conf_pages,
+            "duplication_reliability": duplication_reliability or _missing_field("Niveau de fiabilité de la duplication non fourni"),
+            "pipeline_suspect": pipeline_suspect,
+            "note": duplication_note,
+            "duplicate_clusters_all": duplicate_clusters if duplicate_clusters or duplicate_page_count == 0 else _missing_field("Les groupes de duplication n'ont pas été conservés dans l'agrégat"),
+        })
+        return evidence, data_quality, status_override, confidence_penalty
+
+    if kpi_id in {"tech_cms_version", "tech_server_version"}:
+        product = _clean_text(data.get("cms_name") or data.get("server_tech") or data.get("programming_language"))
+        version = _clean_text(data.get("cms_version") or data.get("server_version") or data.get("programming_language_version"))
+        eol = data.get("cms_eol")
+        explicit_support_status = _clean_text(data.get("cms_support_status"))
+        support_status = explicit_support_status or ("end_of_life" if eol is True else "supported" if eol is False else _missing_field("Le statut de support n'a pas été déterminé par le scan"))
+        latest = _lookup_latest_version(product)
+        latest_version = latest.get("latest_known_version") if latest else None
+        comparison = None
+        if version and latest_version:
+            cmp = _compare_versions(version, latest_version)
+            comparison = "behind_latest" if cmp == -1 else "current_or_newer" if cmp in {0, 1} else None
+        if not product:
+            data_quality = "MISSING"
+            confidence_penalty = 2
+        elif not version:
+            data_quality = "PARTIAL"
+            confidence_penalty = 1
+        elif kpi_id == "tech_cms_version" and _is_missing_field(support_status):
+            data_quality = "PARTIAL"
+            confidence_penalty = 1
+        evidence.update({
+            "data_quality": data_quality,
+            "detected_product": _value_or_missing(product, "Produit ou technologie non détecté(e)"),
+            "detected_version": _value_or_missing(version, "Version non détectée"),
+            "support_status": support_status,
+            "eol": eol if eol is not None else _missing_field("Fin de support inconnue"),
+            "latest_known_version": latest_version if latest_version else _missing_field("Aucune version de référence maintenue localement pour ce produit"),
+            "latest_version_source": latest.get("latest_version_source") if latest else _missing_field("Catalogue local absent pour ce produit"),
+            "comparison_result": comparison if comparison else _missing_field("Comparaison impossible sans version détectée et version de référence"),
+        })
+        return evidence, data_quality, status_override, confidence_penalty
+
+    if kpi_id == "tech_programming_language":
+        language = _clean_text(data.get("language"))
+        language_version = _clean_text(data.get("language_version"))
+        latest = _lookup_latest_version(language)
+        evidence.update({
+            "detected_product": _value_or_missing(language, "Langage ou runtime non détecté"),
+            "detected_version": _value_or_missing(language_version, "Version du langage non détectée"),
+            "support_status": _missing_field("Le statut de support du runtime n'est pas disponible dans cet agrégat"),
+            "eol": _missing_field("La date de fin de support n'est pas disponible dans cet agrégat"),
+            "latest_known_version": latest.get("latest_known_version") if latest else _missing_field("Aucune version de référence maintenue localement pour ce runtime"),
+            "latest_version_source": latest.get("latest_version_source") if latest else _missing_field("Catalogue local absent pour ce runtime"),
+            "comparison_result": _missing_field("Comparaison impossible sans version de référence fiable"),
+        })
+        if not language:
+            data_quality = "MISSING"
+            confidence_penalty = 2
+        elif not language_version:
+            data_quality = "PARTIAL"
+            confidence_penalty = 1
+        evidence["data_quality"] = data_quality
+        return evidence, data_quality, status_override, confidence_penalty
+
+    if kpi_id == "tech_cve_check":
+        critical = _safe_int(data.get("critical"))
+        high = _safe_int(data.get("high"))
+        medium = _safe_int(data.get("medium"))
+        low = _safe_int(data.get("low"))
+        evidence.update({
+            "data_quality": "VALID",
+            "cve_counts": {"critical": critical, "high": high, "medium": medium, "low": low},
+            "critical_cve_count": critical,
+            "high_cve_count": high,
+            "medium_cve_count": medium,
+            "low_cve_count": low,
+        })
+        return evidence, "VALID", status_override, confidence_penalty
+
+    observed_metrics = {key: value for key, value in data.items() if key != "fix"}
+    if not observed_metrics and _normalize_contract_status(kpi_obj.get("status")) == "not_evaluated":
+        data_quality = "MISSING"
+        confidence_penalty = 2
+    elif not observed_metrics:
+        data_quality = "PARTIAL"
+        confidence_penalty = 1
+    evidence.update({
+        "data_quality": data_quality,
+        "observed_metrics": observed_metrics if observed_metrics else _missing_field("Aucune métrique exploitable n'a été conservée pour ce KPI"),
+        "affected_page_urls_all": affected_urls if affected_urls or affected_pages == 0 else _missing_field("La liste des URLs concernées n'a pas été conservée"),
+    })
+    return evidence, data_quality, status_override, confidence_penalty
+def _compute_v2_status(kpi_id: str, v1_status: str, evidence_quality: str, confidence: str) -> str:
+    return _normalize_contract_status(v1_status)
+
+
+def _contract_type(kpi_id: str, axis: str, kpi_obj: dict) -> str:
+    explicit = _clean_text(kpi_obj.get("type")).lower()
+    if explicit in {"bug", "recommendation", "compliance"}:
+        return explicit
+    if _axis_is_compliance(axis):
+        return "compliance"
+    return _KPI_TYPE_DEFAULTS.get(kpi_id, "recommendation")
+
+
+def _compute_contract_score(status: str, severity: Optional[str], data_quality: str) -> Optional[int]:
+    if status == "not_evaluated":
+        return None
+    if status == "passing":
+        return 92 if data_quality == "VALID" else 78
+    if status == "warning":
+        return 45 if data_quality == "PARTIAL" else 58
+    severity_value = _clean_text(severity).lower()
+    if severity_value == "critical":
+        return 15
+    if severity_value == "high":
+        return 28
+    if severity_value == "medium":
+        return 40
+    return 48 if data_quality == "VALID" else 42
+
+
+def _cap_severity_by_confidence(severity: Optional[str], confidence: str) -> Optional[str]:
+    """Avoid critical severity when confidence is low."""
+    sev = _clean_text(severity).lower()
+    if not sev:
+        return None
+    if _clean_text(confidence).lower() == "low" and sev == "critical":
+        return "high"
+    return sev
+
+
+def _contract_fix(kpi_id: str, kpi_name: str, status: str, data: dict, severity: Optional[str]) -> Optional[str]:
+    if status == "passing":
+        return None
+    ticket = _build_ticket_payload(kpi_id, kpi_name, severity or "medium", "aggregate", []) if status in {"failing", "warning"} else None
+    recommended_action, _ = _extract_recommended_action(data, ticket, status)
+    return recommended_action
+
+
+def _contract_impact(kpi_id: str, status: str, kpi_obj: dict) -> Optional[str]:
+    if status == "passing":
+        return None
+    impact = _clean_text(kpi_obj.get("impact"))
+    return impact or _KPI_BUSINESS_IMPACT.get(kpi_id, "Ce point peut freiner la performance opérationnelle ou commerciale du site.")
+
+
+def _build_contract_constat(kpi_id: str, kpi_name: str, status: str, kpi_type: str, axis: str, kpi_obj: dict, evidence: dict) -> str:
+    data = _safe_dict(kpi_obj.get("data", {}))
+    pages_affected = _safe_int(kpi_obj.get("pages_affected", 0))
+
+    if kpi_id == "tech_cms_version":
+        product = _display_value(evidence.get("detected_product"))
+        version = _display_value(evidence.get("detected_version"))
+        support_status = _display_value(evidence.get("support_status"), "statut de support inconnu")
+        if status == "passing":
+            return f"Le CMS détecté est {product} {version} et le statut de support remonté est « {support_status} »."
+        if status == "not_evaluated":
+            return f"Le CMS {product if product != 'non détecté' else 'du site'} n'a pas pu être qualifié de façon fiable car la version ou le statut de support manque."
+        return f"Le site expose {product} {version} avec un statut de support « {support_status} ». Cette base technique doit être traitée avant qu'elle ne devienne un risque d'exploitation ou de maintenance."
+
+    if kpi_id == "tech_server_version":
+        product = _display_value(evidence.get("detected_product"))
+        version = _display_value(evidence.get("detected_version"))
+        critical = _safe_int(_safe_dict(data.get("cve_severity")).get("critical"))
+        high = _safe_int(_safe_dict(data.get("cve_severity")).get("high"))
+        if status == "passing":
+            return f"Le serveur ou runtime détecté est {product} {version}. Aucun signal critique ou haut n'a été remonté dans l'agrégat utilisé pour ce KPI."
+        if status == "not_evaluated":
+            return f"Le serveur {product if product != 'non détecté' else 'du site'} a été partiellement détecté, mais la version exploitable manque pour conclure sur son niveau de risque."
+        return f"Le site expose {product} {version} avec {critical} CVE critique(s) et {high} CVE haute(s) dans l'agrégat technique. Cette exposition facilite le ciblage d'attaques connues."
+
+    if kpi_id == "func_forms":
+        forms_detected = _safe_int(evidence.get("forms_detected"))
+        forms_tested = _safe_int(evidence.get("forms_tested"))
+        tests_run = _safe_int(evidence.get("tests_run"))
+        anomalies_count = _safe_int(evidence.get("anomalies_count"))
+        non_transactional_forms_tested = _safe_int(evidence.get("non_transactional_forms_tested"))
+        suppressed_low_confidence_anomalies = _safe_int(evidence.get("suppressed_low_confidence_anomalies"))
+        if status == "passing":
+            return f"{forms_detected} formulaire(s) ont été détectés et {forms_tested} testés, sans anomalie remontée par le fuzzing."
+        if status == "not_evaluated":
+            return f"{forms_detected} formulaire(s) ont été détectés mais aucun test exploitable n'a été exécuté ({tests_run} test(s)). Le risque métier sur les parcours de soumission reste donc inconnu."
+        if status == "warning":
+            return f"{forms_detected} formulaire(s) ont été détectés mais seulement {forms_tested} ont été testés. La couverture reste partielle et {anomalies_count} anomalie(s) ont déjà été remontées."
+        suffix = ""
+        if non_transactional_forms_tested > 0 or suppressed_low_confidence_anomalies > 0:
+            suffix = f" {non_transactional_forms_tested} formulaire(s) non transactionnel(s) ont été isolés hors du score principal, avec {suppressed_low_confidence_anomalies} signal(s) à faible confiance conservés en preuve."
+        return f"{anomalies_count} anomalie(s) ont été remontées sur {forms_tested} formulaire(s) transactionnels testés, alors que {forms_detected} formulaire(s) transactionnels ont été détectés au total. Des parcours de conversion ou de contact peuvent échouer en production.{suffix}"
+
+    if kpi_id == "func_buttons":
+        total_broken_buttons = _safe_int(evidence.get("total_broken_buttons"))
+        affected_pages = _safe_int(evidence.get("affected_pages"))
+        first_button = (_safe_list(evidence.get("broken_buttons_all")) or [{}])[0]
+        label = _display_value(_safe_dict(first_button).get("label_or_text"), "bouton sans libellé exploitable")
+        page_url = _display_value(_safe_dict(first_button).get("page_url"), "page non conservée")
+        if status == "passing":
+            return "Aucun bouton sans action exploitable n'a été détecté sur les pages échantillonnées."
+        return f"{total_broken_buttons} bouton(s) sans action exploitable ont été détectés sur {affected_pages} page(s). Exemple prioritaire : « {label} » sur {page_url}."
+
+    if kpi_id == "func_links":
+        broken_count = _safe_int(evidence.get("broken_internal_link_count"))
+        first_link = (_safe_list(evidence.get("broken_links_all")) or [{}])[0]
+        source_page = _display_value(_safe_dict(first_link).get("source_page"), "page source non conservée")
+        target_url = _display_value(_safe_dict(first_link).get("target_url"), "URL cible non conservée")
+        if status == "passing":
+            return "Aucun lien interne cassé n'a été remonté sur les pages échantillonnées."
+        return f"{broken_count} lien(s) interne(s) cassé(s) ont été détectés. Un exemple concerne {source_page}, qui pointe vers {target_url} sans réponse exploitable."
+
+    if kpi_id == "seo_meta_tags":
+        meta_missing_count = _safe_int(evidence.get("meta_missing_count"))
+        title_missing_count = _safe_int(evidence.get("title_missing_count"))
+        meta_urls = _safe_list(evidence.get("meta_missing_urls_all")) if isinstance(evidence.get("meta_missing_urls_all"), list) else []
+        title_urls = _safe_list(evidence.get("title_missing_urls_all")) if isinstance(evidence.get("title_missing_urls_all"), list) else []
+        if status == "passing":
+            return "Les pages analysées disposent de titres et de meta descriptions exploitables dans l'agrégat SEO."
+        details = []
+        if meta_missing_count > 0:
+            details.append(f"{meta_missing_count} page(s) sans meta description")
+        if title_missing_count > 0:
+            details.append(f"{title_missing_count} page(s) sans balise title")
+        preview_url = (meta_urls + title_urls)[:2]
+        suffix = f" Exemples : {', '.join(preview_url)}." if preview_url else ""
+        return f"{' et '.join(details)} ont été détectées dans l'audit SEO.{suffix}"
+
+    if kpi_id == "seo_alt_tags":
+        missing_alt_count = _safe_int(evidence.get("missing_alt_image_count"))
+        page_urls = _safe_list(evidence.get("missing_alt_page_urls_all")) if isinstance(evidence.get("missing_alt_page_urls_all"), list) else []
+        if status == "passing":
+            return "Les images échantillonnées disposent d'un attribut ALT exploitable dans l'agrégat SEO."
+        suffix = f" Les premières pages concernées sont {', '.join(page_urls[:2])}." if page_urls else ""
+        return f"{missing_alt_count} image(s) sans ALT ont été détectées sur {max(len(page_urls), pages_affected)} page(s).{suffix}"
+
+    if kpi_id == "seo_heading_structure":
+        bad_h1_count = _safe_int(evidence.get("bad_h1_page_count"))
+        homepage_h1_missing = bool(evidence.get("homepage_h1_missing"))
+        homepage_url = _display_value(evidence.get("homepage_url"), "page d'accueil non conservée")
+        if status == "passing":
+            return "La hiérarchie Hn est cohérente sur les pages analysées et la page d'accueil dispose d'un H1 exploitable."
+        if homepage_h1_missing:
+            return f"La hiérarchie Hn est défaillante et la page d'accueil ({homepage_url}) est elle-même concernée. {bad_h1_count} page(s) sont remontées comme non conformes."
+        return f"{bad_h1_count} page(s) présentent une hiérarchie Hn non conforme dans l'agrégat SEO. Cela affaiblit la lisibilité et la compréhension du sujet principal."
+
+    if kpi_id == "seo_internal_linking":
+        missing_count = _safe_int(evidence.get("pages_missing_contextual_links_count"))
+        urls = _safe_list(evidence.get("pages_missing_contextual_links_all")) if isinstance(evidence.get("pages_missing_contextual_links_all"), list) else []
+        total_internal_links = _safe_int(evidence.get("total_internal_links"))
+        total_contextual_links = _safe_int(evidence.get("total_contextual_internal_links"))
+        measurement = _safe_dict(evidence.get("contextual_link_measurement"))
+        reliable_coverage_pct = _safe_float(measurement.get("reliable_coverage_pct"))
+        if status == "passing":
+            return f"Le maillage contextuel remonte comme suffisant sur les pages analysées ({total_contextual_links} lien(s) contextuel(s), {total_internal_links} lien(s) interne(s) agrégés)."
+        if status == "not_evaluated":
+            if reliable_coverage_pct:
+                return f"Le KPI de maillage interne n'a pas pu être évalué de manière fiable sur ce scan, la couverture de mesure contextuelle restant limitée à {reliable_coverage_pct:.1f}% des pages."
+            return "Le KPI de maillage interne n'a pas pu être évalué de manière fiable sur ce scan."
+        if total_internal_links == 0 and total_contextual_links > 0:
+            return f"Le volume global de liens internes est incohérent avec le comptage contextuel ({total_contextual_links} liens contextuels détectés). Le résultat est traité comme une alerte de qualité de données."
+        suffix = f" Exemples : {', '.join(urls[:2])}." if urls else ""
+        return f"{missing_count} page(s) manquent de liens contextuels dans la zone de contenu principale.{suffix}"
+
+    base_constat = _generate_constat({
+        "status": status,
+        "type": kpi_type,
+        "info": kpi_obj.get("info"),
+        "data": data,
+        "pages_affected": pages_affected,
+    }, axis, kpi_name)
+    return _clean_text(base_constat) or f"{kpi_name}: observation disponible dans les éléments collectés."
 
 
 def _make_kpi_v2(kpi_name: str, kpi_obj: dict, axis: str, pages_scanned: int, domain_url: str) -> dict:
@@ -1049,50 +1835,52 @@ def _make_kpi_v2(kpi_name: str, kpi_obj: dict, axis: str, pages_scanned: int, do
     Transforms a V1 KPI object into the V2 14-field standardised schema.
     Called from the phase-4 normalization loop.
     """
-    # Look up metadata
     meta = _KPI_META.get(kpi_name, (f"kpi_{kpi_name.lower().replace(' ', '_')}", "medium", "aggregate"))
-    kpi_id, confidence, evidence_quality = meta
+    kpi_id, base_confidence, evidence_quality = meta
 
-    # V1 fields
-    v1_status   = str(kpi_obj.get("status", "not_available"))
+    v1_status = str(kpi_obj.get("status", "not_available"))
     v1_severity = kpi_obj.get("severity")
-    v1_pages    = _safe_int(kpi_obj.get("pages_affected", 0))
-    v1_data     = _safe_dict(kpi_obj.get("data", {}))
+    v1_pages = _safe_int(kpi_obj.get("pages_affected", 0))
+    v1_data = _safe_dict(kpi_obj.get("data", {}))
 
-    # Compute V2 status (enforces heuristic→warning rule)
-    v2_status = _compute_v2_status(kpi_id, v1_status, evidence_quality, confidence)
+    evidence, data_quality, status_override, confidence_penalty = _build_contract_evidence(
+        kpi_id, kpi_obj, pages_scanned, domain_url
+    )
+    status = status_override or _compute_v2_status(kpi_id, v1_status, evidence_quality, base_confidence)
+    kpi_type = _contract_type(kpi_id, axis, kpi_obj)
 
-    # Severity: null if passing/not_evaluated; keep v1 severity otherwise (already inferred)
-    v2_severity = None if v2_status in ("passing", "not_evaluated") else (v1_severity or "low")
+    if status in {"passing", "not_evaluated"}:
+        severity = None
+    else:
+        severity = v1_severity or _infer_severity_from_context(
+            kpi_type,
+            v1_pages or _safe_int(evidence.get("affected_pages", 0)),
+            is_security=_axis_is_security(axis),
+        )
 
-    # Build sub-objects
-    scope   = _derive_scope(pages_scanned, v1_pages)
-    ev      = _build_evidence(kpi_id, evidence_quality, v1_data, domain_url)
-    ticket  = _build_ticket_payload(kpi_id, kpi_name, v2_severity, evidence_quality, ev["examples"]) if v2_status in ("failing", "warning") else None
-    pages_affected_urls = _safe_list(kpi_obj.get("pages_affected_urls", []))
-    client_summary = _build_client_summary_v2(kpi_id, v2_status, evidence_quality, v1_pages, v1_data)
-    technical_summary = _build_technical_summary_v2(kpi_id, v2_status, evidence_quality, v1_data)
-    recommended_action, recommendation_source = _extract_recommended_action(v1_data, ticket, v2_status)
-    evidence_digest = _build_evidence_digest(client_summary, scope, v1_data, pages_affected_urls)
+    if status == "not_evaluated":
+        confidence = "low"
+    else:
+        if data_quality == "PARTIAL":
+            confidence_penalty += 1
+        elif data_quality == "MISSING":
+            confidence_penalty += 2
+        confidence = _downgrade_confidence(base_confidence, confidence_penalty)
+    severity = _cap_severity_by_confidence(severity, confidence)
 
     return {
-        "kpi_id":           kpi_id,
-        "name":             kpi_name,
-        "axis":             axis,
-        "status":           v2_status,
-        "severity":         v2_severity,
-        "confidence":       confidence if v2_status != "not_evaluated" else "low",
-        "evidence_quality": evidence_quality,
-        "client_summary":   client_summary,
-        "recommended_action": recommended_action,
-        "recommendation_source": recommendation_source,
-        "business_impact":  _KPI_BUSINESS_IMPACT.get(kpi_id, ""),
-        "technical_summary":technical_summary,
-        "scope":            scope,
-        "evidence_digest":  evidence_digest,
-        "evidence":         ev,
-        "ticket_payload":   ticket,
-        "metrics":          v1_data,  # raw metrics preserved here
+        "kpi_id": kpi_id,
+        "name": kpi_name,
+        "axis": axis,
+        "type": kpi_type,
+        "status": status,
+        "severity": severity,
+        "confidence": confidence,
+        "constat": _build_contract_constat(kpi_id, kpi_name, status, kpi_type, axis, kpi_obj, evidence),
+        "score": _compute_contract_score(status, severity, data_quality),
+        "impact": _contract_impact(kpi_id, status, kpi_obj),
+        "evidence": evidence,
+        "fix": _contract_fix(kpi_id, kpi_name, status, v1_data, severity),
     }
 
 
@@ -1100,81 +1888,99 @@ def _build_summary_v2(axes: dict, pages_scanned: int) -> dict:
     """Build the V2 top-level summary block from normalised axes."""
     total_kpis = passed = warning = failed = not_eval = critical = high = medium = low = 0
     axis_failed: dict[str, dict] = {}
+    key_candidates = []
 
     for axis_name, axis_data in axes.items():
         if not isinstance(axis_data, dict):
             continue
-        for kpi_name, kpi in axis_data.items():
+        for _, kpi in axis_data.items():
             if not isinstance(kpi, dict) or "status" not in kpi:
                 continue
             total_kpis += 1
-            st  = kpi.get("status")
-            sev = str(kpi.get("severity") or "").lower()
-            if st == "passing":
+            status = kpi.get("status")
+            severity = _clean_text(kpi.get("severity")).lower()
+            if status == "passing":
                 passed += 1
-            elif st == "warning":
+            elif status == "warning":
                 warning += 1
-                if sev == "medium":   medium += 1
-                elif sev == "low":    low    += 1
-            elif st == "failing":
+                if severity == "critical":
+                    critical += 1
+                elif severity == "high":
+                    high += 1
+                elif severity == "medium":
+                    medium += 1
+                elif severity == "low":
+                    low += 1
+                key_candidates.append((severity or "low", kpi.get("constat", ""), axis_name, _clean_text(kpi.get("kpi_id"))))
+            elif status == "failing":
                 failed += 1
-                if sev == "critical": critical += 1
-                elif sev == "high":   high   += 1
-                elif sev == "medium": medium += 1
-                elif sev == "low":    low    += 1
-                # risk_breakdown
-                akey = axis_name.lower()
-                if akey not in axis_failed:
-                    axis_failed[akey] = {"failed": 0, "high_confidence_failed": 0}
-                axis_failed[akey]["failed"] += 1
+                if severity == "critical":
+                    critical += 1
+                elif severity == "high":
+                    high += 1
+                elif severity == "medium":
+                    medium += 1
+                elif severity == "low":
+                    low += 1
+                axis_key = axis_name.lower()
+                axis_failed.setdefault(axis_key, {"failed": 0, "high_confidence_failed": 0})
+                axis_failed[axis_key]["failed"] += 1
                 if kpi.get("confidence") in ("high", "medium"):
-                    axis_failed[akey]["high_confidence_failed"] += 1
-            elif st == "not_evaluated":
+                    axis_failed[axis_key]["high_confidence_failed"] += 1
+                key_candidates.append((severity or "low", kpi.get("constat", ""), axis_name, _clean_text(kpi.get("kpi_id"))))
+            elif status == "not_evaluated":
                 not_eval += 1
 
-    # Determine health status
     if critical > 0:
         health = "critical"
-    elif failed > 2 or high > 0:
+    elif failed > 0 or warning > 3:
         health = "needs_attention"
     else:
         health = "healthy"
 
-    # Build headline
     if health == "critical":
-        headline = f"Des problèmes critiques ont été identifiés sur {failed} indicateur(s). Une intervention immédiate est requise."
+        headline = f"{critical} indicateur(s) critique(s) ont été confirmés. Une action prioritaire est nécessaire avant de poursuivre l'optimisation."
     elif health == "needs_attention":
-        headline = f"Le site présente {failed} anomalie(s) confirmée(s) qui freinent la performance, la conformité ou la conversion."
+        headline = f"{failed} KPI en échec et {warning} en alerte freinent actuellement la performance, la conformité ou la conversion."
     else:
-        headline = f"Le site présente un bon niveau global sur les {total_kpis} indicateurs analysés. Quelques optimisations restent possibles."
+        headline = f"Le site reste globalement maîtrisé sur {total_kpis} KPI, avec peu d'écarts bloquants remontés par le scan."
 
-    # Key points (top 3 failing by severity)
-    severity_order = {"critical": 0, "high": 1, "medium": 2, "low": 3}
-    failing_kpis_list = []
-    for ax_name, ax_data in axes.items():
-        if not isinstance(ax_data, dict):
+    severity_order = {"critical": 0, "high": 1, "medium": 2, "low": 3, "": 4}
+    key_candidates.sort(key=lambda item: severity_order.get(item[0], 5))
+    key_points = []
+    seen_points = set()
+    seen_kpis = set()
+    for _, constat, _, kpi_id in key_candidates:
+        clean_constat = _clean_text(constat)
+        if not clean_constat:
             continue
-        for kn, kv in ax_data.items():
-            if isinstance(kv, dict) and kv.get("status") in ("failing", "warning"):
-                failing_kpis_list.append((kv.get("severity"), kv.get("client_summary", ""), ax_name))
-    failing_kpis_list.sort(key=lambda x: severity_order.get(str(x[0] or "low").lower(), 4))
-    key_points = [cs for _, cs, _ in failing_kpis_list[:3]]
+        if kpi_id and kpi_id in seen_kpis:
+            continue
+        key = clean_constat.casefold()
+        if key in seen_points:
+            continue
+        seen_points.add(key)
+        if kpi_id:
+            seen_kpis.add(kpi_id)
+        key_points.append(clean_constat)
+        if len(key_points) >= 3:
+            break
 
-    # Risk breakdown
     axis_map = {
-        "check sécurité": "sécurité", "audit technique": "sécurité",
+        "check sécurité": "sécurité",
+        "audit technique": "sécurité",
         "audit fonctionnel": "fonctionnel",
         "audit de performance et temps de réponse": "performance",
-        "seo": "seo", "audit ux/ui": "ux",
+        "seo": "seo",
+        "audit ux/ui": "ux",
         "contenu": "contenu",
         "eco index": "performance_eco",
         "rgpd": "rgpd",
     }
     risk_breakdown: dict[str, dict] = {}
-    for ax_name_lower, bucket in axis_map.items():
-        src = axis_failed.get(ax_name_lower, {"failed": 0, "high_confidence_failed": 0})
-        if bucket not in risk_breakdown:
-            risk_breakdown[bucket] = {"failed": 0, "high_confidence_failed": 0}
+    for axis_name_lower, bucket in axis_map.items():
+        src = axis_failed.get(axis_name_lower, {"failed": 0, "high_confidence_failed": 0})
+        risk_breakdown.setdefault(bucket, {"failed": 0, "high_confidence_failed": 0})
         risk_breakdown[bucket]["failed"] += src["failed"]
         risk_breakdown[bucket]["high_confidence_failed"] += src["high_confidence_failed"]
 
@@ -1186,16 +1992,16 @@ def _build_summary_v2(axes: dict, pages_scanned: int) -> dict:
         },
         "risk_breakdown": risk_breakdown,
         "delivery_overview": {
-            "pages_scanned":       pages_scanned,
-            "total_kpis":          total_kpis,
-            "passed_kpis":         passed,
-            "warning_kpis":        warning,
-            "failed_kpis":         failed,
-            "not_evaluated_kpis":  not_eval,
-            "critical_kpis":       critical,
-            "high_kpis":           high,
-            "medium_kpis":         medium,
-            "low_kpis":            low,
+            "pages_scanned": pages_scanned,
+            "total_kpis": total_kpis,
+            "passed_kpis": passed,
+            "warning_kpis": warning,
+            "failed_kpis": failed,
+            "not_evaluated_kpis": not_eval,
+            "critical_kpis": critical,
+            "high_kpis": high,
+            "medium_kpis": medium,
+            "low_kpis": low,
         },
     }
 
@@ -1232,6 +2038,8 @@ def build_kpi_centric_report(report: dict) -> dict:
     missing_meta_evidence = _normalized_kpi_evidence(report, "Missing Meta Descriptions")
     missing_title_evidence = _normalized_kpi_evidence(report, "Missing Page Titles")
     missing_alt_evidence = _normalized_kpi_evidence(report, "Images Missing Alt Text")
+    heading_hierarchy_evidence = _normalized_kpi_evidence(report, "Heading Hierarchy")
+    internal_contextual_links_evidence = _normalized_kpi_evidence(report, "Internal Contextual Links")
 
     axes = {}
 
@@ -1284,6 +2092,8 @@ def build_kpi_centric_report(report: dict) -> dict:
     tech_issues = _safe_list(cms_kpi.get("issues"))
     server_tech = str(cms_kpi.get("server_tech") or "").strip()
     server_version = str(cms_kpi.get("server_version") or "").strip()
+    programming_language = str(cms_kpi.get("language") or "").strip()
+    programming_language_version = str(cms_kpi.get("language_version") or "").strip()
     cve_severity = _safe_dict(cms_kpi.get("cve_severity"))
     server_critical = _safe_int(cve_severity.get("critical"))
     server_high = _safe_int(cve_severity.get("high"))
@@ -1292,14 +2102,24 @@ def build_kpi_centric_report(report: dict) -> dict:
         if any(tag in str(issue).lower() for tag in ("server", "version", "x-powered-by", "header"))
     ]
 
+    if programming_language:
+        if programming_language_version:
+            programming_language_info = f"Langage détecté: {programming_language} {programming_language_version}"
+        else:
+            programming_language_info = f"Langage détecté: {programming_language} (version non détectée)"
+        programming_language_status = "passing"
+    else:
+        programming_language_info = "Langage de programmation: Non détecté"
+        programming_language_status = "non_evalue"
+
     if not server_tech:
         server_version_status = "not_available"
         server_version_has_issue = False
         server_version_info = "Serveur: Non détecté"
     elif not server_version:
-        server_version_status = "passing"
+        server_version_status = "non_evalue"
         server_version_has_issue = False
-        server_version_info = f"Serveur: {server_tech} (version masquée)"
+        server_version_info = f"Serveur: {server_tech} (version non détectée)"
     else:
         server_version_has_issue = (server_critical > 0 or server_high > 0 or len(server_related_issues) > 0)
         server_version_status = "failing" if server_version_has_issue else "passing"
@@ -1323,6 +2143,7 @@ def build_kpi_centric_report(report: dict) -> dict:
                 "cms_name": cms_kpi.get("cms_detected"),
                 "cms_version": cms_kpi.get("cms_version"),
                 "cms_eol": cms_eol,
+                "cms_support_status": cms_kpi.get("cms_support_status"),
             }
         },
         "Version Modules Installés": {
@@ -1341,16 +2162,31 @@ def build_kpi_centric_report(report: dict) -> dict:
         "Version Langage de Programmation": {
             "info": server_version_info,
             "impact": "Versions obsolètes exposent à des vulnérabilités connues",
-            "pages_affected": 1 if server_version_status != "not_available" else 0,
-            "pages_affected_urls": [report.get("domain", "")] if server_version_status != "not_available" else [],
+            "pages_affected": 1 if server_version_status in ("passing", "failing") else 0,
+            "pages_affected_urls": [report.get("domain", "")] if server_version_status in ("passing", "failing") else [],
             "status": server_version_status,
             "type": "bug" if server_version_has_issue else None,
             "severity": "high" if server_version_has_issue else None,
             "data": {
                 "server_tech": cms_kpi.get("server_tech"),
                 "server_version": cms_kpi.get("server_version"),
+                "programming_language": cms_kpi.get("language"),
+                "programming_language_version": cms_kpi.get("language_version"),
                 "issues": server_related_issues,
                 "cve_severity": cve_severity,
+            }
+        },
+        "Langage de Programmation": {
+            "info": programming_language_info,
+            "impact": "Identifier le langage/runtime aide a cibler les correctifs de securite et les upgrades de maintenance.",
+            "pages_affected": 1 if programming_language_status == "passing" else 0,
+            "pages_affected_urls": [report.get("domain", "")] if programming_language_status == "passing" else [],
+            "status": programming_language_status,
+            "type": None,
+            "severity": None,
+            "data": {
+                "language": cms_kpi.get("language"),
+                "language_version": cms_kpi.get("language_version"),
             }
         },
         "Vérification du Code": {
@@ -1544,7 +2380,7 @@ def build_kpi_centric_report(report: dict) -> dict:
     # ─── AUDIT FONCTIONNEL ──────────────────────────────────────────────────────
     axes["Audit Fonctionnel"] = {
         "Les Formulaires": {
-            "info": f"{functional_kpi.get('total_forms', 0)} formulaires détectés, {functional_fuzzer_kpi.get('tests_run', 0)} tests exécutés"
+            "info": f"{functional_fuzzer_kpi.get('unique_transactional_forms_detected', functional_kpi.get('total_forms', 0))} formulaires transactionnels détectés, {functional_fuzzer_kpi.get('tests_run', 0)} tests exécutés"
                     f"{' (pages affectées estimées)' if functional_fuzzer_kpi.get('affected_pages_estimated') else ''}",
             "impact": "Formulaires avec anomalies = perte de conversions et problèmes de saisie utilisateur",
             "pages_affected": (
@@ -1556,12 +2392,12 @@ def build_kpi_centric_report(report: dict) -> dict:
                 })
             ),
             "pages_affected_urls": (
-                _safe_list(functional_fuzzer_kpi.get("affected_page_urls", []))[:25]
+                _safe_list(functional_fuzzer_kpi.get("affected_page_urls", []))
                 or list({
                     str(item.get("page_url") or "").strip()
                     for item in _safe_list(functional_fuzzer_kpi.get("top_affected", []))
                     if isinstance(item, dict) and str(item.get("page_url") or "").strip()
-                })[:25]
+                })
             ),
             "status": (
                 "failing" if functional_fuzzer_kpi.get("status") == "failing"
@@ -1572,14 +2408,18 @@ def build_kpi_centric_report(report: dict) -> dict:
             "severity": "high" if functional_fuzzer_kpi.get("status") == "failing" else None,
             "data": {
                 "total_forms": functional_kpi.get("total_forms", 0),
-                "forms_tested": functional_fuzzer_kpi.get("total_forms_tested", 0),
+                "forms_detected": functional_fuzzer_kpi.get("unique_transactional_forms_detected", functional_kpi.get("total_forms", 0)),
+                "forms_tested": functional_fuzzer_kpi.get("unique_transactional_forms_tested", functional_fuzzer_kpi.get("total_forms_tested", 0)),
+                "non_transactional_forms_tested": functional_fuzzer_kpi.get("non_transactional_forms_tested", 0),
                 "tests_run": functional_fuzzer_kpi.get("tests_run", 0),
                 "anomalies": functional_fuzzer_kpi.get("anomalies_count", 0),
+                "suppressed_low_confidence_anomalies": functional_fuzzer_kpi.get("suppressed_low_confidence_anomalies", 0),
                 "affected_pages": functional_fuzzer_kpi.get("affected_pages", 0),
                 "affected_pages_estimated": bool(functional_fuzzer_kpi.get("affected_pages_estimated")),
-                "affected_page_urls": _safe_list(functional_fuzzer_kpi.get("affected_page_urls", []))[:25],
+                "affected_page_urls": _safe_list(functional_fuzzer_kpi.get("affected_page_urls", [])),
                 "anomalies_by_type": functional_fuzzer_kpi.get("anomalies_by_type", {}),
                 "top_affected": functional_fuzzer_kpi.get("top_affected", []),
+                "anomalous_tests_all": _safe_list(functional_fuzzer_kpi.get("anomalous_tests_all", [])),
             }
         }
     }
@@ -1615,7 +2455,7 @@ def build_kpi_centric_report(report: dict) -> dict:
         "info": f"{internal_broken_count} lien(s) interne(s) cassé(s), {len(external_broken_links)} externe(s)",
         "impact": "Liens cassés dégradent l'UX, le crawl SEO et les conversions",
         "pages_affected": affected_broken_pages,
-        "pages_affected_urls": affected_broken_pages_set[:25],
+        "pages_affected_urls": affected_broken_pages_set,
         "status": broken_status,
         "type": "bug" if internal_broken_count > 0 else None,
         "severity": broken_severity,
@@ -1636,7 +2476,7 @@ def build_kpi_centric_report(report: dict) -> dict:
                         "link_selector": None,
                         "context": None,
                     }
-                    for link in seo.get("broken_link_kpi", {}).get("broken_links", [])[:50]
+                    for link in seo.get("broken_link_kpi", {}).get("broken_links", [])
                 ],
             },
     }
@@ -1645,7 +2485,7 @@ def build_kpi_centric_report(report: dict) -> dict:
         "info": f"Boutons non-fonctionnels: {perf.get('button_kpi', {}).get('pages_with_nonfunc_buttons', 0)} pages affectées",
         "impact": "Boutons non-fonctionnels = abandon de parcours utilisateur et baisse de conversion",
         "pages_affected": perf.get("button_kpi", {}).get("pages_with_nonfunc_buttons", 0),
-        "pages_affected_urls": list(dict.fromkeys(_safe_list(non_func_buttons_evidence.get("affected_pages"))))[:25],
+        "pages_affected_urls": list(dict.fromkeys(_safe_list(non_func_buttons_evidence.get("affected_pages")))),
         "status": "failing" if perf.get("button_kpi", {}).get("pages_with_nonfunc_buttons", 0) > 0 else "passing",
         "type": "bug" if perf.get("button_kpi", {}).get("pages_with_nonfunc_buttons", 0) > 0 else None,
         "severity": "medium" if perf.get("button_kpi", {}).get("pages_with_nonfunc_buttons", 0) > 0 else None,
@@ -1663,7 +2503,7 @@ def build_kpi_centric_report(report: dict) -> dict:
                     "onclick": btn.get("onclick"),
                     "form_action": btn.get("form_action"),
                 }
-                for btn in broken_buttons[:100]
+                for btn in broken_buttons
                 if isinstance(btn, dict)
             ],
         },
@@ -1718,9 +2558,13 @@ def build_kpi_centric_report(report: dict) -> dict:
     }
 
     # ─── AUDIT DE PERFORMANCE ET TEMPS DE RÉPONSE ──────────────────────────────
-    mobile_available = perf.get("mobile_kpi", {}).get("available", False)
-    mobile_status = _resolve_mobile_kpi_status(perf.get("mobile_kpi", {}))
+    mobile_kpi = _safe_dict(perf.get("mobile_kpi", {}))
+    mobile_available = mobile_kpi.get("available", False)
+    mobile_status = _resolve_mobile_kpi_status(mobile_kpi)
     mobile_is_available = mobile_status != "not_available"
+    mobile_friendly_kpi = _safe_dict(ux.get("mobile_friendly_kpi", {}))
+    mobile_friendly_status = _resolve_mobile_friendly_status(mobile_friendly_kpi)
+    mobile_friendly_available = mobile_friendly_status != "not_available"
     avg_fcp_ms = _safe_float(perf.get("avg_fcp_ms"))
     avg_lcp_ms = _safe_float(perf.get("avg_lcp_ms"))
     avg_cls = _safe_float(perf.get("avg_cls"))
@@ -1732,7 +2576,7 @@ def build_kpi_centric_report(report: dict) -> dict:
             "info": f"FCP={avg_fcp_ms:.0f}ms, LCP={avg_lcp_ms:.0f}ms, CLS={avg_cls:.2f}",
             "impact": "Temps de chargement élevé = abandon utilisateur, baisse des conversions, mauvais SEO",
             "pages_affected": report.get("pages_scanned", 0),
-            "pages_affected_urls": [],
+            "pages_affected_urls": _safe_list(heading_hierarchy_evidence.get("affected_pages")),
             "status": "failing" if avg_lcp_ms > 2500 else "passing",
             "type": "recommendation" if avg_lcp_ms > 2500 else None,
             "severity": None,
@@ -1751,7 +2595,7 @@ def build_kpi_centric_report(report: dict) -> dict:
             "status": mobile_status,
             "type": None,
             "severity": None,
-            "data": perf.get("mobile_kpi", {}),
+            "data": mobile_kpi,
         },
         "Optimisation des Images": {
             "info": f"Compression: {compression_rate_pct:.1f}%, Images non optimisées: {content.get('image_compression_stats', {}).get('unoptimised_count', 0)}/{content.get('image_compression_stats', {}).get('sampled_images', 0)}",
@@ -1791,7 +2635,11 @@ def build_kpi_centric_report(report: dict) -> dict:
             "info": f"Images sans ALT: {seo.get('images_missing_alt', 0)} images",
             "impact": "Images sans ALT = perte de signal SEO, accessibilité dégradée, mauvaise expérience handicapés",
             "pages_affected": seo.get("images_missing_alt", 0),
-            "pages_affected_urls": list(dict.fromkeys([img.get("image_url") for img in _safe_list(missing_alt_evidence.get("images")) if isinstance(img, dict) and img.get("image_url")]))[:25],
+            "pages_affected_urls": list(dict.fromkeys([
+                img.get("page_url") or img.get("url") or img.get("image_url")
+                for img in _safe_list(missing_alt_evidence.get("images"))
+                if isinstance(img, dict) and (img.get("page_url") or img.get("url") or img.get("image_url"))
+            ])),
             "status": "failing" if seo.get("images_missing_alt", 0) > 0 else "passing",
             "type": "recommendation" if seo.get("images_missing_alt", 0) > 0 else None,
             "severity": None,
@@ -1804,7 +2652,7 @@ def build_kpi_centric_report(report: dict) -> dict:
             "info": f"Meta descriptions manquantes: {seo.get('pages_missing_meta_desc', 0)} pages, Titres manquants: {seo.get('pages_missing_title', 0)} pages",
             "impact": "Meta descriptions manquantes = mauvais CTR dans SERP et signaux SEO réduits",
             "pages_affected": seo.get("pages_missing_meta_desc", 0),
-            "pages_affected_urls": list(dict.fromkeys(_safe_list(missing_meta_evidence.get("affected_pages")) + _safe_list(missing_title_evidence.get("affected_pages"))))[:25],
+            "pages_affected_urls": list(dict.fromkeys(_safe_list(missing_meta_evidence.get("affected_pages")) + _safe_list(missing_title_evidence.get("affected_pages")))),
             "status": "failing" if seo.get("pages_missing_meta_desc", 0) > 0 or seo.get("pages_missing_title", 0) > 0 else "passing",
             "type": "recommendation" if seo.get("pages_missing_meta_desc", 0) > 0 or seo.get("pages_missing_title", 0) > 0 else None,
             "severity": None,
@@ -1823,7 +2671,11 @@ def build_kpi_centric_report(report: dict) -> dict:
             "status": "passing" if seo.get("has_sitemap") else "failing",
             "type": "recommendation" if not seo.get("has_sitemap") else None,
             "severity": None,
-            "data": {"has_sitemap": seo.get("has_sitemap")},
+            "data": {
+                "has_sitemap": seo.get("has_sitemap"),
+                "sitemap_url": seo.get("sitemap_url"),
+                "sitemap_detected_via": seo.get("sitemap_detected_via"),
+            },
         },
         "Robot Txt": {
             "info": f"robots.txt: {'Présent' if seo.get('has_robots_txt') else 'Absent'}",
@@ -1833,15 +2685,25 @@ def build_kpi_centric_report(report: dict) -> dict:
             "status": "passing" if seo.get("has_robots_txt") else "failing",
             "type": "recommendation" if not seo.get("has_robots_txt") else None,
             "severity": None,
-            "data": {"has_robots_txt": seo.get("has_robots_txt")},
+            "data": {
+                "has_robots_txt": seo.get("has_robots_txt"),
+                "robots_url": seo.get("robots_url"),
+                "robots_detected_via": seo.get("robots_detected_via"),
+            },
         },
         "Duplication de Contenu": {
-            "info": f"Taux de duplication: {seo.get('duplicate_content_kpi', {}).get('duplicate_content_rate_pct', 0):.1f}% ({seo.get('duplicate_content_kpi', {}).get('duplicate_page_count', 0)} pages)",
+            "info": f"Taux de duplication: {seo.get('duplicate_content_kpi', {}).get('duplicate_content_rate_pct', 0):.1f}% ({seo.get('duplicate_content_kpi', {}).get('duplicate_page_count', 0)} pages), fiabilité: {seo.get('duplicate_content_kpi', {}).get('duplication_reliability', 'unknown')}",
             "impact": "Contenu dupliqué = cannibalisation SEO, dilution de pertinence, classement affaibli",
             "pages_affected": seo.get("duplicate_content_kpi", {}).get("duplicate_page_count", 0),
             "pages_affected_urls": [],
-            "status": "failing" if seo.get("duplicate_content_kpi", {}).get("duplicate_content_rate_pct", 0) > 10.0 else "passing",
-            "type": "recommendation" if seo.get("duplicate_content_kpi", {}).get("duplicate_content_rate_pct", 0) > 10.0 else None,
+            "status": (
+                "not_evaluated" if seo.get("duplicate_content_kpi", {}).get("pipeline_suspect") or seo.get("duplicate_content_kpi", {}).get("passed") is None
+                else ("failing" if seo.get("duplicate_content_kpi", {}).get("duplicate_content_rate_pct", 0) > 10.0 else "passing")
+            ),
+            "type": (
+                None if seo.get("duplicate_content_kpi", {}).get("pipeline_suspect") or seo.get("duplicate_content_kpi", {}).get("passed") is None
+                else ("recommendation" if seo.get("duplicate_content_kpi", {}).get("duplicate_content_rate_pct", 0) > 10.0 else None)
+            ),
             "severity": None,
             "data": seo.get("duplicate_content_kpi", {}),
         },
@@ -1880,30 +2742,54 @@ def build_kpi_centric_report(report: dict) -> dict:
             "data": {
                 "pages_with_bad_h1": seo.get("pages_with_bad_h1", 0),
                 "homepage_h1_missing": seo.get("homepage_h1_kpi", {}).get("homepage_h1_missing"),
+                "bad_h1_urls": _safe_list(heading_hierarchy_evidence.get("affected_pages")),
+                "heading_hierarchy_note": heading_hierarchy_evidence.get("note"),
+                "homepage_url": domain_url,
             },
         },
         "Linking Interne": {
             "info": f"Total liens internes: {seo.get('total_internal_links', 0)}, Pages manquant liens contextuels: {ux.get('pages_missing_contextual_links', 0)}",
             "impact": "Linking interne faible = distribution du PageRank inefficace, crawl incomplet, perte de pertinence",
             "pages_affected": ux.get("pages_missing_contextual_links", 0),
-            "pages_affected_urls": [],
+            "pages_affected_urls": _safe_list(internal_contextual_links_evidence.get("affected_pages")),
             "status": (
-                "failing" if ux.get("pages_missing_contextual_links", 0) > report.get("pages_scanned", 1) * 0.30
+                "non_evalue" if (
+                    _safe_int(seo.get("contextual_link_measurement", {}).get("pages_checked")) > 0
+                    and _safe_float(seo.get("contextual_link_measurement", {}).get("reliable_coverage_pct")) < 50.0
+                )
+                else "warning" if (
+                    _safe_int(seo.get("total_internal_links", 0)) == 0 and _safe_int(seo.get("total_contextual_internal_links", 0)) > 0
+                )
+                else "failing" if ux.get("pages_missing_contextual_links", 0) > report.get("pages_scanned", 1) * 0.30
                 else "warning" if ux.get("pages_missing_contextual_links", 0) > report.get("pages_scanned", 1) * 0.15
                 else "passing"
             ),
             "type": (
-                "recommendation" if ux.get("pages_missing_contextual_links", 0) > report.get("pages_scanned", 1) * 0.15
+                None if (
+                    _safe_int(seo.get("contextual_link_measurement", {}).get("pages_checked")) > 0
+                    and _safe_float(seo.get("contextual_link_measurement", {}).get("reliable_coverage_pct")) < 50.0
+                )
+                else
+                "recommendation" if (
+                    (_safe_int(seo.get("total_internal_links", 0)) == 0 and _safe_int(seo.get("total_contextual_internal_links", 0)) > 0)
+                    or ux.get("pages_missing_contextual_links", 0) > report.get("pages_scanned", 1) * 0.15
+                )
                 else None
             ),
             "severity": (
-                "high" if ux.get("pages_missing_contextual_links", 0) > report.get("pages_scanned", 1) * 0.30
+                "medium" if (_safe_int(seo.get("total_internal_links", 0)) == 0 and _safe_int(seo.get("total_contextual_internal_links", 0)) > 0)
+                else "high" if ux.get("pages_missing_contextual_links", 0) > report.get("pages_scanned", 1) * 0.30
                 else "medium" if ux.get("pages_missing_contextual_links", 0) > report.get("pages_scanned", 1) * 0.15
                 else None
             ),
             "data": {
                 "total_internal_links": seo.get("total_internal_links", 0),
+                "total_contextual_internal_links": seo.get("total_contextual_internal_links", 0),
+                "internal_linking_source": seo.get("internal_linking_source"),
                 "pages_missing_contextual_links": ux.get("pages_missing_contextual_links", 0),
+                "pages_missing_contextual_links_all": _safe_list(internal_contextual_links_evidence.get("affected_pages")),
+                "internal_linking_note": seo.get("internal_linking_note") or internal_contextual_links_evidence.get("note"),
+                "contextual_link_measurement": seo.get("contextual_link_measurement", {}),
             },
         },
         "Linking Externe": {
@@ -1920,34 +2806,34 @@ def build_kpi_centric_report(report: dict) -> dict:
             },
         },
         "Qualité H1 (NLP)": {
-            "info": f"H1 manquants: {seo.get('nlp_seo_kpis', {}).get('h1_missing_pages', 0)} pages, H1 multiples: {seo.get('nlp_seo_kpis', {}).get('h1_multiple_pages', 0)} pages",
+            "info": f"H1 manquants: {seo.get('nlp_seo_h1_kpi', {}).get('h1_missing_pages', 0)} pages, H1 multiples: {seo.get('nlp_seo_h1_kpi', {}).get('h1_multiple_pages', 0)} pages",
             "impact": "Structure H1 incorrecte nuit au SEO on-page et à la lisibilité sémantique",
-            "pages_affected": _safe_int(seo.get('nlp_seo_kpis', {}).get('h1_missing_pages', 0)) + _safe_int(seo.get('nlp_seo_kpis', {}).get('h1_multiple_pages', 0)),
+            "pages_affected": _safe_int(seo.get('nlp_seo_h1_kpi', {}).get('h1_missing_pages', 0)) + _safe_int(seo.get('nlp_seo_h1_kpi', {}).get('h1_multiple_pages', 0)),
             "pages_affected_urls": [],
-            "status": "failing" if (_safe_int(seo.get('nlp_seo_kpis', {}).get('h1_missing_pages', 0)) + _safe_int(seo.get('nlp_seo_kpis', {}).get('h1_multiple_pages', 0))) > 0 else "passing",
-            "type": "recommendation" if (_safe_int(seo.get('nlp_seo_kpis', {}).get('h1_missing_pages', 0)) + _safe_int(seo.get('nlp_seo_kpis', {}).get('h1_multiple_pages', 0))) > 0 else None,
+            "status": "failing" if (_safe_int(seo.get('nlp_seo_h1_kpi', {}).get('h1_missing_pages', 0)) + _safe_int(seo.get('nlp_seo_h1_kpi', {}).get('h1_multiple_pages', 0))) > 0 else "passing",
+            "type": "recommendation" if (_safe_int(seo.get('nlp_seo_h1_kpi', {}).get('h1_missing_pages', 0)) + _safe_int(seo.get('nlp_seo_h1_kpi', {}).get('h1_multiple_pages', 0))) > 0 else None,
             "severity": None,
-            "data": _safe_dict(seo.get("nlp_seo_kpis", {})),
+            "data": _safe_dict(seo.get("nlp_seo_h1_kpi", {})),
         },
         "Méta Description (NLP)": {
-            "info": f"Meta descriptions manquantes (NLP): {seo.get('nlp_seo_kpis', {}).get('meta_missing_pages', 0)} pages",
+            "info": f"Meta descriptions manquantes (NLP): {seo.get('nlp_seo_meta_kpi', {}).get('meta_missing_pages', 0)} pages",
             "impact": "Descriptions meta manquantes diminuent le CTR et la qualité des snippets SERP",
-            "pages_affected": _safe_int(seo.get('nlp_seo_kpis', {}).get('meta_missing_pages', 0)),
+            "pages_affected": _safe_int(seo.get('nlp_seo_meta_kpi', {}).get('meta_missing_pages', 0)),
             "pages_affected_urls": [],
-            "status": "failing" if _safe_int(seo.get('nlp_seo_kpis', {}).get('meta_missing_pages', 0)) > 0 else "passing",
-            "type": "recommendation" if _safe_int(seo.get('nlp_seo_kpis', {}).get('meta_missing_pages', 0)) > 0 else None,
+            "status": "failing" if _safe_int(seo.get('nlp_seo_meta_kpi', {}).get('meta_missing_pages', 0)) > 0 else "passing",
+            "type": "recommendation" if _safe_int(seo.get('nlp_seo_meta_kpi', {}).get('meta_missing_pages', 0)) > 0 else None,
             "severity": None,
-            "data": _safe_dict(seo.get("nlp_seo_kpis", {})),
+            "data": _safe_dict(seo.get("nlp_seo_meta_kpi", {})),
         },
         "AI Readiness (llms.txt)": {
-            "info": f"Pages avec llms.txt détecté: {seo.get('nlp_seo_kpis', {}).get('llms_txt_present_pages', 0)}",
-            "impact": "Présence llms.txt améliore la découvrabilité dans les moteurs génératifs",
-            "pages_affected": 1,
-            "pages_affected_urls": [report.get("domain", "")],
-            "status": "passing",
-            "type": "recommendation" if _safe_int(seo.get('nlp_seo_kpis', {}).get('llms_txt_present_pages', 0)) == 0 else None,
-            "severity": None,
-            "data": _safe_dict(seo.get("nlp_seo_kpis", {})),
+            "info": f"Pages avec llms.txt détecté: {seo.get('nlp_seo_ai_readiness_kpi', {}).get('llms_txt_present_pages', 0)}",
+            "impact": "Absence de llms.txt réduit la découvrabilité du site dans les moteurs génératifs",
+            "pages_affected": 1 if _safe_int(seo.get('nlp_seo_ai_readiness_kpi', {}).get('llms_txt_present_pages', 0)) == 0 else 0,
+            "pages_affected_urls": [report.get("domain", "")] if _safe_int(seo.get('nlp_seo_ai_readiness_kpi', {}).get('llms_txt_present_pages', 0)) == 0 else [],
+            "status": "failing" if _safe_int(seo.get('nlp_seo_ai_readiness_kpi', {}).get('llms_txt_present_pages', 0)) == 0 else "passing",
+            "type": "recommendation" if _safe_int(seo.get('nlp_seo_ai_readiness_kpi', {}).get('llms_txt_present_pages', 0)) == 0 else None,
+            "severity": "low" if _safe_int(seo.get('nlp_seo_ai_readiness_kpi', {}).get('llms_txt_present_pages', 0)) == 0 else None,
+            "data": _safe_dict(seo.get("nlp_seo_ai_readiness_kpi", {})),
         }
     }
 
@@ -2003,14 +2889,14 @@ def build_kpi_centric_report(report: dict) -> dict:
         },
 
         "Mobile Friendly": {
-            "info": f"Performance mobile: {'Disponible' if mobile_available else 'Non disponible'}",
+            "info": f"Évaluation mobile UX: {'Disponible' if mobile_friendly_available else 'Non disponible'}",
             "impact": "Site non mobile-friendly = perte d'utilisateurs mobiles (~60%), pénalité SEO mobile-first",
-            "pages_affected": 1 if mobile_is_available else 0,
-            "pages_affected_urls": [report.get("domain", "")] if mobile_is_available else [],
-            "status": mobile_status,
+            "pages_affected": _safe_int(mobile_friendly_kpi.get("pages_with_mobile_overflow", 0)) if mobile_friendly_available else 0,
+            "pages_affected_urls": _safe_list(mobile_friendly_kpi.get("affected_page_urls", [])) if mobile_friendly_available else [],
+            "status": mobile_friendly_status,
             "type": None,
             "severity": None,
-            "data": perf.get("mobile_kpi", {}),
+            "data": mobile_friendly_kpi,
         }
     }
 
@@ -2151,14 +3037,6 @@ def build_kpi_centric_report(report: dict) -> dict:
                 else "low" if privacy_kpi.get("cookie_consent", {}).get("cmp_nlp_detected")
                 else "critical"
             ),
-            "client_summary": (
-                None if (
-                    privacy_kpi.get("cookie_consent", {}).get("has_banner")
-                    or privacy_kpi.get("cookie_consent", {}).get("cmp_present")
-                    or privacy_kpi.get("cookie_consent") is None
-                )
-                else "Aucune bannière de consentement cookies détectée. Non-conformité RGPD potentielle."
-            ),
             "data": privacy_kpi.get("cookie_consent", {}),
         },
         "Politique de Confidentialité": {
@@ -2296,6 +3174,7 @@ def build_kpi_centric_report(report: dict) -> dict:
         "scan_id":        report.get("scan_id"),
         "domain":         report.get("domain"),
         "generated_at":   report.get("generated_at") or datetime.utcnow().isoformat() + "Z",
+        "pages_scanned":  pages_scanned_total,
         "summary":        summary_v2,
         "axes":           axes,
     }

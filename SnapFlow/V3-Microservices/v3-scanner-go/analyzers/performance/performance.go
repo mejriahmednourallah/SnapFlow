@@ -410,9 +410,13 @@ func analyzePageHeadless(browser *rod.Browser, targetURL string) HeadlessResult 
 			return score;
 		};
 
+		const seenIssues = new Set();
 		const pushIssue = (el, issueType, href, onclick, formAction) => {
 			if (results.length >= LIMIT) return;
 			const label = (el.innerText || el.value || '').trim() || el.id || el.getAttribute('aria-label') || '(unnamed)';
+			const key = [window.location.href, (href || '').trim(), label.toLowerCase(), issueType].join('|');
+			if (seenIssues.has(key)) return;
+			seenIssues.add(key);
 			results.push({
 				label: label.slice(0, 120),
 				selector: buildSelector(el),
@@ -430,7 +434,8 @@ func analyzePageHeadless(browser *rod.Browser, targetURL string) HeadlessResult 
 			const tag = (el.tagName || '').toLowerCase();
 			const onclick = (el.getAttribute('onclick') || '').trim();
 			const dataAction = (el.getAttribute('data-action') || '').trim();
-			const hasClickBehavior = !!onclick || !!dataAction || !!el.getAttribute('data-toggle') || !!el.getAttribute('data-bs-toggle') || !!el.getAttribute('data-target') || !!el.getAttribute('aria-expanded') || !!el.getAttribute('aria-controls') || el.getAttribute('role') === 'tab' || el.getAttribute('role') === 'switch';
+			const hasDataNavigation = !!el.getAttribute('data-href') || !!el.getAttribute('data-url') || !!el.getAttribute('data-link') || !!el.getAttribute('data-route') || !!el.getAttribute('data-target') || !!el.getAttribute('data-bs-target');
+			const hasClickBehavior = !!onclick || !!dataAction || hasDataNavigation || !!el.getAttribute('data-toggle') || !!el.getAttribute('data-bs-toggle') || !!el.getAttribute('aria-expanded') || !!el.getAttribute('aria-controls') || el.getAttribute('role') === 'tab' || el.getAttribute('role') === 'switch';
 
 			// Skip elements with low intent score (Gate 1 Intent Scorer)
 			if (['button', 'input'].includes(tag) || el.getAttribute('role') === 'button') {
@@ -442,15 +447,38 @@ func analyzePageHeadless(browser *rod.Browser, targetURL string) HeadlessResult 
 			}
 
 			if (tag === 'a') {
-				const href = (el.getAttribute('href') || '').trim();
-				const isHashLink = href.startsWith('#');
+				const hrefAttr = el.getAttribute('href');
+				const href = (hrefAttr || '').trim();
+				const hrefLower = href.toLowerCase();
+				const isHashLink = hrefLower.startsWith('#');
+				const textLower = (el.innerText || '').toLowerCase();
+				const hasVisibleLabel = (el.innerText || '').trim().length > 0 || !!el.getAttribute('aria-label') || !!el.getAttribute('title');
+				const classLower = (el.getAttribute('class') || '').toLowerCase();
+				const idLower = (el.getAttribute('id') || '').toLowerCase();
+				const nameLower = (el.getAttribute('name') || '').toLowerCase();
+				const roleLower = (el.getAttribute('role') || '').toLowerCase();
+				const isAnchorTargetOnly = !href && !!(idLower || nameLower) && !hasClickBehavior && !roleLower;
+				const isKnownAnchorTarget = /^(main|main-content|content|top|tab-\d+|tabpanel-\d+|pane-\d+)$/i.test(idLower) || /^(main|main-content|content|top|tab-\d+|tabpanel-\d+|pane-\d+)$/i.test(nameLower);
+				if (isAnchorTargetOnly && (isKnownAnchorTarget || !hasVisibleLabel)) {
+					continue;
+				}
+				const isSkipAnchor = /^#(main|main-content|content|top|skip|skip-link|skiplink|navigation|nav)$/i.test(hrefLower) || /\bskip\b/.test(textLower) || /\bskip\b/.test(classLower) || /\bskip\b/.test(idLower);
 				let hashTargetExists = false;
 				if (isHashLink && href.length > 1) {
 					const targetId = href.slice(1);
 					hashTargetExists = !!document.getElementById(targetId);
 				}
-				const isDeadHref = !href || href === '#' || /^javascript:.*\s*$/i.test(href) || (isHashLink && !hashTargetExists);
-				const hasInteractiveBehavior = hasClickBehavior || !!el.getAttribute('aria-controls') || !!el.getAttribute('data-bs-target');
+				const actionableAnchor = !!hrefAttr || hasClickBehavior || hasVisibleLabel || /\b(btn|button|cta)\b/.test(classLower);
+				const hasInteractiveBehavior = hasClickBehavior || !!el.getAttribute('aria-controls') || !!el.getAttribute('data-bs-target') || !!el.getAttribute('data-drupal-selector') || roleLower === 'tab' || roleLower === 'switch';
+				const hashFragment = isHashLink ? hrefLower.slice(1) : '';
+				const hashTargetLooksUIState = !!hashFragment && (/^[!?]/.test(hashFragment) || /\b(tab|pane|collapse|accordion|faq|question|garantie|presentation|avantage|fiscal|step|slide|modal|section)\b/i.test(hashFragment));
+				const hasUICues = /\b(btn|button|btn-border|tab|tabs|accordion|collapse|toggle|pill|dropdown|cta|nav-link)\b/.test(classLower) || !!el.getAttribute('data-drupal-selector');
+				const insideStatefulUI = !!el.closest('[role="tablist"], [role="tabpanel"], .tabs, .nav-tabs, .nav-pills, .accordion, .faq, .tab-content, .tab-pane');
+				const safeHashFragment = (window.CSS && typeof window.CSS.escape === 'function') ? window.CSS.escape(hashFragment) : hashFragment;
+				const targetExistsByName = !!(hashFragment && document.querySelector('[name="' + safeHashFragment + '"]'));
+				hashTargetExists = hashTargetExists || targetExistsByName;
+				const isLikelyJSAnchor = isHashLink && (hasInteractiveBehavior || hasUICues || hashTargetLooksUIState || insideStatefulUI);
+				const isDeadHref = actionableAnchor && (!href || href === '#' || /^javascript:.*\s*$/i.test(href) || (isHashLink && !hashTargetExists && !isSkipAnchor && !isLikelyJSAnchor));
 				// Ensure it's not a generic anchor we shouldn't care about.
 				if (!el.closest('nav') && !hasInteractiveBehavior && isDeadHref) {
 					pushIssue(el, 'dead_anchor', href, onclick, '');

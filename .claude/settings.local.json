@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -m pytest SnapFlow/V3-Microservices/v3-aggregator/tests/test_kpi_centric_report.py -v)",
+      "Bash(python -m unittest SnapFlow/V3-Microservices/v3-aggregator/tests/test_kpi_centric_report.py -v)"
+    ]
+  }
+}

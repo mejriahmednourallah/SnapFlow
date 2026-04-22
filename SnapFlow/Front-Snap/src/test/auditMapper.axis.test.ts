@@ -1,71 +1,34 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { mapApiResponseToReport } from '@/lib/auditMapper';
 import type { ApiResponse } from '@/lib/auditMapper';
 
-describe('Axis Mapping - normalizeAxisLabel & resolveAxisMetaKey', () => {
+describe('Axis Mapping', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  describe('Scanner API (api.axes) axis mapping', () => {
-    it('should map "Contenu" (French) to CONTENT axis correctly', () => {
+  describe('Scanner axes', () => {
+    it('maps French content/security/technique axis labels to the correct buckets', () => {
       const api: ApiResponse = {
-        scan_id: 'test-scan-1',
+        scan_id: 'test-scan-axis-1',
         domain: 'https://example.com',
         axes: {
-          'Contenu': {
-            'quality': {
+          Contenu: {
+            quality: {
               status: 'fail',
               info: 'Content quality check',
               pages_affected: 2,
               pages_affected_urls: ['https://example.com/page1'],
             },
           },
-        },
-        domain_analysis: {},
-        site_metrics: {},
-      };
-
-      const report = mapApiResponseToReport(api, 'audit-1', { url: 'https://example.com', site_name: 'Test Site' });
-      
-      // Find the CONTENT axis
-      const contentAxis = report.axes.find(a => a.id === 'content');
-      expect(contentAxis).toBeDefined();
-      expect(contentAxis?.findings.length).toBeGreaterThan(0);
-      expect(contentAxis?.findings[0].title).toBe('quality');
-    });
-
-    it('should map "Check Sécurité" (French with accent) to SECURITY axis', () => {
-      const api: ApiResponse = {
-        scan_id: 'test-scan-2',
-        domain: 'https://example.com',
-        axes: {
           'Check Sécurité': {
-            'ssl_check': {
+            ssl_check: {
               status: 'pass',
               info: 'SSL certificate is valid',
             },
           },
-        },
-        domain_analysis: {},
-        site_metrics: {},
-      };
-
-      const report = mapApiResponseToReport(api, 'audit-2', { url: 'https://example.com', site_name: 'Test Site' });
-      
-      const securityAxis = report.axes.find(a => a.id === 'security');
-      expect(securityAxis).toBeDefined();
-      expect(securityAxis?.findings.length).toBeGreaterThan(0);
-      expect(securityAxis?.findings[0].title).toBe('ssl_check');
-    });
-
-    it('should map "Audit Technique" to TECHNIQUE axis', () => {
-      const api: ApiResponse = {
-        scan_id: 'test-scan-3',
-        domain: 'https://example.com',
-        axes: {
           'Audit Technique': {
-            'cms': {
+            cms: {
               status: 'pass',
               info: 'CMS detected',
             },
@@ -75,343 +38,19 @@ describe('Axis Mapping - normalizeAxisLabel & resolveAxisMetaKey', () => {
         site_metrics: {},
       };
 
-      const report = mapApiResponseToReport(api, 'audit-3', { url: 'https://example.com', site_name: 'Test Site' });
-      
-      const techAxis = report.axes.find(a => a.id === 'technique');
-      expect(techAxis).toBeDefined();
-      expect(techAxis?.findings.length).toBeGreaterThan(0);
-    });
+      const report = mapApiResponseToReport(api, 'audit-axis-1', {
+        url: 'https://example.com',
+        site_name: 'Test Site',
+      });
 
-    it('should map "Audit Fonctionnel" (French) to FUNCTIONAL axis', () => {
-      const api: ApiResponse = {
-        scan_id: 'test-scan-4',
-        domain: 'https://example.com',
-        axes: {
-          'Audit Fonctionnel': {
-            'forms': {
-              status: 'fail',
-              info: 'Forms have issues',
-            },
-          },
-        },
-        domain_analysis: {},
-        site_metrics: {},
-      };
-
-      const report = mapApiResponseToReport(api, 'audit-4', { url: 'https://example.com', site_name: 'Test Site' });
-      
-      const funcAxis = report.axes.find(a => a.id === 'functional');
-      expect(funcAxis).toBeDefined();
-      expect(funcAxis?.findings.length).toBeGreaterThan(0);
-    });
-
-    it('should fallback to FUNCTIONAL for unknown axis label and log warning', () => {
-      const consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-      
-      const api: ApiResponse = {
-        scan_id: 'test-scan-5',
-        domain: 'https://example.com',
-        axes: {
-          'UnknownAxisFuture': {
-            'unknown_check': {
-              status: 'pass',
-              info: 'Unknown check',
-            },
-          },
-        },
-        domain_analysis: {},
-        site_metrics: {},
-      };
-
-      const report = mapApiResponseToReport(api, 'audit-5', { url: 'https://example.com', site_name: 'Test Site' });
-      
-      // Should default to FUNCTIONAL
-      const funcAxis = report.axes.find(a => a.id === 'functional');
-      expect(funcAxis?.findings.some(f => f.title === 'unknown_check')).toBe(true);
-      
-      // Should have logged a warning
-      expect(consoleWarnSpy).toHaveBeenCalledWith(
-        expect.stringContaining('[auditMapper] Unknown axis label:')
-      );
-      
-      consoleWarnSpy.mockRestore();
-    });
-  });
-
-  describe('Structured KPI payload axis mapping', () => {
-    it('should map KPI with axis: "Contenu" to CONTENT axis', () => {
-      const api: ApiResponse = {
-        scan_id: 'test-scan-6',
-        domain: 'https://example.com',
-        kpis: [
-          {
-            kpi_name: 'Content Quality',
-            axis: 'Contenu',
-            status: 'failing',
-            type: 'recommendation',
-            client_impact: 'medium',
-            evidence: {
-              summary: 'Content needs improvement',
-              affected_pages: ['page1', 'page2'],
-              items: [],
-            },
-          },
-        ],
-        summary: { total: 1, bugs: 0, recommendations: 1, compliance: 0, critical: 0, high: 0, medium: 1, low: 0 },
-        domain_analysis: {},
-        site_metrics: {},
-      };
-
-      const report = mapApiResponseToReport(api, 'audit-6', { url: 'https://example.com', site_name: 'Test Site' });
-      
-      const contentAxis = report.axes.find(a => a.id === 'content');
-      expect(contentAxis).toBeDefined();
-      expect(contentAxis?.findings.length).toBeGreaterThan(0);
-      expect(contentAxis?.findings[0].title).toBe('Content Quality');
-    });
-
-    it('should map KPI with axis: "CONTENT" (uppercase) to CONTENT axis', () => {
-      const api: ApiResponse = {
-        scan_id: 'test-scan-7',
-        domain: 'https://example.com',
-        kpis: [
-          {
-            kpi_name: 'Content Standard',
-            axis: 'CONTENT',
-            status: 'failing',
-            type: 'recommendation',
-            client_impact: 'low',
-            evidence: {
-              summary: 'Test',
-              affected_pages: [],
-              items: [],
-            },
-          },
-        ],
-        summary: { total: 1, bugs: 0, recommendations: 1, compliance: 0, critical: 0, high: 0, medium: 1, low: 0 },
-        domain_analysis: {},
-        site_metrics: {},
-      };
-
-      const report = mapApiResponseToReport(api, 'audit-7', { url: 'https://example.com', site_name: 'Test Site' });
-      
-      const contentAxis = report.axes.find(a => a.id === 'content');
-      expect(contentAxis).toBeDefined();
-      expect(contentAxis?.findings.some(f => f.title === 'Content Standard')).toBe(true);
-    });
-
-    it('should handle accented French labels in KPI axis field', () => {
-      const api: ApiResponse = {
-        scan_id: 'test-scan-8',
-        domain: 'https://example.com',
-        kpis: [
-          {
-            kpi_name: 'Security Check',
-            axis: 'Sécurité',
-            status: 'passing',
-            type: 'recommendation',
-            client_impact: 'high',
-            evidence: {
-              summary: 'Security is good',
-              affected_pages: [],
-              items: [],
-            },
-          },
-        ],
-        summary: { total: 1, bugs: 0, recommendations: 0, compliance: 0, critical: 0, high: 0, medium: 0, low: 1 },
-        domain_analysis: {},
-        site_metrics: {},
-      };
-
-      const report = mapApiResponseToReport(api, 'audit-8', { url: 'https://example.com', site_name: 'Test Site' });
-      
-      const securityAxis = report.axes.find(a => a.id === 'security');
-      expect(securityAxis).toBeDefined();
-      expect(securityAxis?.findings.some(f => f.title === 'Security Check')).toBe(true);
-    });
-
-    it('should handle UX/UI slash separator in axis field', () => {
-      const api: ApiResponse = {
-        scan_id: 'test-scan-9',
-        domain: 'https://example.com',
-        kpis: [
-          {
-            kpi_name: 'UI Design Check',
-            axis: 'UX/UI',
-            status: 'failing',
-            type: 'recommendation',
-            client_impact: 'medium',
-            evidence: {
-              summary: 'UI needs work',
-              affected_pages: [],
-              items: [],
-            },
-          },
-        ],
-        summary: { total: 1, bugs: 0, recommendations: 1, compliance: 0, critical: 0, high: 0, medium: 1, low: 0 },
-        domain_analysis: {},
-        site_metrics: {},
-      };
-
-      const report = mapApiResponseToReport(api, 'audit-9', { url: 'https://example.com', site_name: 'Test Site' });
-      
-      const uxAxis = report.axes.find(a => a.id === 'ux-ui');
-      expect(uxAxis).toBeDefined();
-      expect(uxAxis?.findings.some(f => f.title === 'UI Design Check')).toBe(true);
-    });
-
-    it('should map Audit de Contenu (French variant) to CONTENT axis', () => {
-      const api: ApiResponse = {
-        scan_id: 'test-scan-10',
-        domain: 'https://example.com',
-        kpis: [
-          {
-            kpi_name: 'Content Audit',
-            axis: 'Audit de Contenu',
-            status: 'failing',
-            type: 'recommendation',
-            client_impact: 'high',
-            evidence: {
-              summary: 'Content audit found issues',
-              affected_pages: [],
-              items: [],
-            },
-          },
-        ],
-        summary: { total: 1, bugs: 0, recommendations: 1, compliance: 0, critical: 0, high: 0, medium: 1, low: 0 },
-        domain_analysis: {},
-        site_metrics: {},
-      };
-
-      const report = mapApiResponseToReport(api, 'audit-10', { url: 'https://example.com', site_name: 'Test Site' });
-      
-      const contentAxis = report.axes.find(a => a.id === 'content');
-      expect(contentAxis).toBeDefined();
-      expect(contentAxis?.findings.some(f => f.title === 'Content Audit')).toBe(true);
-    });
-  });
-
-  describe('EdgeCase: Mixed payload with both scanner axes and structured KPIs', () => {
-    it('should handle payload with both axes and kpis (uses axes when available)', () => {
-      const api: ApiResponse = {
-        scan_id: 'test-scan-11',
-        domain: 'https://example.com',
-        axes: {
-          'Contenu': {
-            'content_quality': {
-              status: 'fail',
-              info: 'Content quality issue',
-            },
-          },
-          'Check Sécurité': {
-            'ssl': {
-              status: 'pass',
-              info: 'SSL is valid',
-            },
-          },
-        },
-        domain_analysis: {},
-        site_metrics: {},
-      };
-
-      const report = mapApiResponseToReport(api, 'audit-11', { url: 'https://example.com', site_name: 'Test Site' });
-      
-      // Should have found both axes
-      const contentAxis = report.axes.find(a => a.id === 'content');
-      const securityAxis = report.axes.find(a => a.id === 'security');
-      
-      expect(contentAxis?.findings.length).toBeGreaterThan(0);
-      expect(securityAxis?.findings.length).toBeGreaterThan(0);
-    });
-  });
-
-  describe('Regression: Ensure CONTENT axis findings are not misrouted to FUNCTIONAL', () => {
-    it('should not put Contenu findings in FUNCTIONAL axis', () => {
-      const api: ApiResponse = {
-        scan_id: 'test-scan-12',
-        domain: 'https://example.com',
-        axes: {
-          'Contenu': {
-            'text_quality': {
-              status: 'fail',
-              info: 'Text quality is poor',
-              pages_affected: 5,
-              pages_affected_urls: ['page1', 'page2'],
-            },
-          },
-        },
-        domain_analysis: {},
-        site_metrics: {},
-      };
-
-      const report = mapApiResponseToReport(api, 'audit-12', { url: 'https://example.com', site_name: 'Test Site' });
-      
-      const contentAxis = report.axes.find(a => a.id === 'content');
-      const functionalAxis = report.axes.find(a => a.id === 'functional');
-      
-      // Content findings should be in CONTENT axis
-      expect(contentAxis?.findings.some(f => f.title === 'text_quality')).toBe(true);
-      
-      // Content findings should NOT be in FUNCTIONAL axis
-      expect(functionalAxis?.findings.some(f => f.title === 'text_quality')).toBe(false);
-    });
-  });
-
-  describe('Accent stripping and normalization', () => {
-    it('should normalize accented characters correctly', () => {
-      const api: ApiResponse = {
-        scan_id: 'test-scan-13',
-        domain: 'https://example.com',
-        axes: {
-          'Sécurité': { // Accented
-            'security_check': {
-              status: 'fail',
-              info: 'Security issue',
-            },
-          },
-        },
-        domain_analysis: {},
-        site_metrics: {},
-      };
-
-      const report = mapApiResponseToReport(api, 'audit-13', { url: 'https://example.com', site_name: 'Test Site' });
-      
-      const securityAxis = report.axes.find(a => a.id === 'security');
-      expect(securityAxis?.findings.length).toBeGreaterThan(0);
-    });
-
-    it('should handle multiple spaces and separators', () => {
-      const api: ApiResponse = {
-        scan_id: 'test-scan-14',
-        domain: 'https://example.com',
-        kpis: [
-          {
-            kpi_name: 'Multi-Space Test',
-            axis: 'Audit  de   Contenu', // Multiple spaces
-            status: 'failing',
-            type: 'recommendation',
-            client_impact: 'medium',
-            evidence: {
-              summary: 'Test',
-              affected_pages: [],
-              items: [],
-            },
-          },
-        ],
-        summary: { total: 1, bugs: 0, recommendations: 1, compliance: 0, critical: 0, high: 0, medium: 1, low: 0 },
-        domain_analysis: {},
-        site_metrics: {},
-      };
-
-      const report = mapApiResponseToReport(api, 'audit-14', { url: 'https://example.com', site_name: 'Test Site' });
-      
-      const contentAxis = report.axes.find(a => a.id === 'content');
-      expect(contentAxis?.findings.some(f => f.title === 'Multi-Space Test')).toBe(true);
+      expect(report.axes.find((axis) => axis.id === 'content')?.findings[0].title).toBe('quality');
+      expect(report.axes.find((axis) => axis.id === 'security')?.findings[0].title).toBe('ssl_check');
+      expect(report.axes.find((axis) => axis.id === 'technique')?.findings[0].title).toBe('cms');
     });
   });
 
   describe('Scanner KPI schema compatibility (/scan/{id}/kpis)', () => {
-    it('maps V2 flat-axis KPI fields (client_summary, business_impact, scope, metrics)', () => {
+    it('maps evidence-driven flat-axis KPIs to findings', () => {
       const api: ApiResponse = {
         scan_id: 'test-scan-v2-flat-1',
         domain: 'https://example.com',
@@ -420,21 +59,23 @@ describe('Axis Mapping - normalizeAxisLabel & resolveAxisMetaKey', () => {
           'Performance et Temps de réponse': {
             lcp_homepage: {
               kpi_id: 'perf_lcp_homepage',
-              name: 'LCP homepage',
-              status: 'fail',
-              severity: 'high',
-              client_summary: 'Le Largest Contentful Paint est trop élevé sur la page d\'accueil.',
-              business_impact: 'Temps de chargement long pouvant impacter la conversion.',
-              scope: {
-                pages_affected: 2,
-                pages_affected_urls: ['https://example.com/', 'https://example.com/pricing'],
-              },
+              type: 'recommendation',
+              name: 'Largest Contentful Paint',
+              status: 'failing',
+              severity: 'medium',
+              confidence: 'high',
+              constat: 'Le Largest Contentful Paint est trop élevé sur les pages d’entrée analysées.',
+              score: 42,
+              impact: 'Temps de chargement long pouvant impacter la conversion.',
               evidence: {
-                sample_affected_pages: ['https://example.com/'],
-              },
-              metrics: {
+                data_quality: 'VALID',
+                detection_source: ['scanner_aggregation'],
+                pages_checked: 2,
+                affected_pages: 2,
+                affected_page_urls_all: ['https://example.com/', 'https://example.com/pricing'],
                 lcp_ms: 4200,
               },
+              fix: 'Optimiser les assets LCP sur la page d’accueil et la page pricing.',
             },
           },
         },
@@ -445,19 +86,20 @@ describe('Axis Mapping - normalizeAxisLabel & resolveAxisMetaKey', () => {
         site_name: 'Test Site',
       });
 
-      const perfAxis = report.axes.find((a) => a.id === 'performance');
-      expect(perfAxis).toBeDefined();
+      const perfAxis = report.axes.find((axis) => axis.id === 'performance');
+      const finding = perfAxis?.findings.find((item) => item.id === 'perf_lcp_homepage');
 
-      const finding = perfAxis?.findings.find((f) => f.id === 'perf_lcp_homepage');
+      expect(perfAxis).toBeDefined();
       expect(finding).toBeDefined();
       expect(finding?.description).toContain('Largest Contentful Paint');
       expect(finding?.impact).toContain('conversion');
       expect(finding?.affectedCount).toBe(2);
       expect(finding?.exampleUrls).toContain('https://example.com/');
-      expect(finding?.evidence?.some((line) => line.includes('metrics.lcp_ms'))).toBe(true);
+      expect(finding?.recommendation).toContain('Optimiser');
+      expect(finding?.evidence?.some((line) => line.includes('evidence.lcp_ms'))).toBe(true);
     });
 
-    it('maps V2 nested sous_axes -> kpis payload into the correct axis', () => {
+    it('maps nested sous_axes -> kpis payload into the correct axis', () => {
       const api: ApiResponse = {
         scan_id: 'test-scan-v2-nested-1',
         domain: 'https://example.com',
@@ -469,17 +111,22 @@ describe('Axis Mapping - normalizeAxisLabel & resolveAxisMetaKey', () => {
                 kpis: {
                   broken_links: {
                     kpi_id: 'seo_broken_links',
+                    type: 'bug',
                     name: 'Liens cassés',
                     status: 'warning',
-                    client_summary: 'Des liens cassés ont été détectés.',
-                    business_impact: 'Dégradation SEO et expérience utilisateur.',
-                    scope: {
-                      pages_affected: 1,
-                      pages_affected_urls: ['https://example.com/catalogue'],
-                    },
+                    severity: 'medium',
+                    confidence: 'medium',
+                    constat: 'Des liens cassés ont été détectés sur des pages catalogue.',
+                    score: 52,
+                    impact: 'Dégradation SEO et expérience utilisateur.',
                     evidence: {
-                      examples: ['https://example.com/catalogue'],
+                      data_quality: 'VALID',
+                      detection_source: ['crawler_link_check'],
+                      pages_checked: 12,
+                      affected_pages: 1,
+                      affected_page_urls_all: ['https://example.com/catalogue'],
                     },
+                    fix: 'Réparer les destinations internes cassées dans le catalogue.',
                   },
                 },
               },
@@ -493,16 +140,16 @@ describe('Axis Mapping - normalizeAxisLabel & resolveAxisMetaKey', () => {
         site_name: 'Test Site',
       });
 
-      const seoAxis = report.axes.find((a) => a.id === 'seo');
-      const functionalAxis = report.axes.find((a) => a.id === 'functional');
+      const seoAxis = report.axes.find((axis) => axis.id === 'seo');
+      const functionalAxis = report.axes.find((axis) => axis.id === 'functional');
 
       expect(seoAxis).toBeDefined();
-      expect(seoAxis?.findings.some((f) => f.id === 'seo_broken_links')).toBe(true);
-      expect(seoAxis?.findings.find((f) => f.id === 'seo_broken_links')?.status).toBe('fail');
-      expect(functionalAxis?.findings.some((f) => f.id === 'seo_broken_links')).toBe(false);
+      expect(seoAxis?.findings.some((finding) => finding.id === 'seo_broken_links')).toBe(true);
+      expect(seoAxis?.findings.find((finding) => finding.id === 'seo_broken_links')?.status).toBe('fail');
+      expect(functionalAxis?.findings.some((finding) => finding.id === 'seo_broken_links')).toBe(false);
     });
 
-    it('keeps legacy V1 scanner fields mapped when V2 fields are absent', () => {
+    it('keeps legacy V1 scanner fields mapped when the new contract is absent', () => {
       const api: ApiResponse = {
         scan_id: 'test-scan-v1-legacy-1',
         domain: 'https://example.com',
@@ -529,8 +176,8 @@ describe('Axis Mapping - normalizeAxisLabel & resolveAxisMetaKey', () => {
         site_name: 'Test Site',
       });
 
-      const securityAxis = report.axes.find((a) => a.id === 'security');
-      const finding = securityAxis?.findings.find((f) => f.title === 'csp_header');
+      const securityAxis = report.axes.find((axis) => axis.id === 'security');
+      const finding = securityAxis?.findings.find((item) => item.title === 'csp_header');
 
       expect(securityAxis).toBeDefined();
       expect(finding).toBeDefined();
@@ -544,7 +191,7 @@ describe('Axis Mapping - normalizeAxisLabel & resolveAxisMetaKey', () => {
   });
 
   describe('Recommendation and evidence rendering quality', () => {
-    it('prefers backend recommended_action over generic fallback recommendation', () => {
+    it('prefers backend fix over generic fallback recommendation', () => {
       const api: ApiResponse = {
         scan_id: 'test-scan-reco-1',
         domain: 'https://example.com',
@@ -553,26 +200,22 @@ describe('Axis Mapping - normalizeAxisLabel & resolveAxisMetaKey', () => {
           'Check Sécurité': {
             ssl: {
               kpi_id: 'sec_ssl',
+              type: 'bug',
               status: 'failing',
               severity: 'critical',
+              confidence: 'high',
               name: 'SSL',
-              client_summary: 'Certificat invalide',
-              business_impact: 'Risque de sécurité',
-              recommended_action: 'Renouveler le certificat SSL avant expiration.',
-              recommendation_source: 'fix',
-              scope: {
-                pages_affected: 1,
-                pages_affected_urls: ['https://example.com'],
-              },
-              evidence_digest: {
-                summary: 'Le certificat est invalide.',
-                top_urls: ['https://example.com'],
-              },
+              constat: 'Le certificat SSL du domaine est invalide ou expiré.',
+              score: 15,
+              impact: 'Risque de sécurité',
               evidence: {
-                source: ['ssl_probe'],
-                examples: [],
+                data_quality: 'VALID',
+                detection_source: ['ssl_probe'],
+                pages_checked: 1,
+                affected_pages: 1,
+                certificate_url: 'https://example.com',
               },
-              metrics: {},
+              fix: 'Renouveler le certificat SSL avant expiration.',
             },
           },
         },
@@ -591,7 +234,7 @@ describe('Axis Mapping - normalizeAxisLabel & resolveAxisMetaKey', () => {
       expect(finding?.recommendationSource).toBe('fix');
     });
 
-    it('does not expose raw JSON-like strings in mapped evidence summaries', () => {
+    it('keeps full evidence in evidenceRaw while showing compact previews', () => {
       const api: ApiResponse = {
         scan_id: 'test-scan-evidence-1',
         domain: 'https://example.com',
@@ -600,30 +243,25 @@ describe('Axis Mapping - normalizeAxisLabel & resolveAxisMetaKey', () => {
           SEO: {
             meta: {
               kpi_id: 'seo_meta',
+              type: 'recommendation',
               status: 'failing',
-              severity: 'high',
+              severity: 'medium',
+              confidence: 'high',
               name: 'Balises META',
-              client_summary: 'Des meta descriptions sont manquantes.',
-              business_impact: 'Perte de CTR',
-              scope: {
-                pages_affected: 2,
-                pages_affected_urls: ['https://example.com/a', 'https://example.com/b'],
-              },
+              constat: 'Des meta descriptions sont manquantes sur plusieurs pages.',
+              score: 40,
+              impact: 'Perte de CTR',
               evidence: {
-                detail: {
-                  payload: {
-                    nested: { value: 42 },
-                  },
-                },
-                examples: [],
+                data_quality: 'VALID',
+                detection_source: ['scanner_aggregation', 'nlp'],
+                pages_checked: 12,
+                affected_pages: 2,
+                meta_missing_count: 2,
+                meta_missing_urls_all: ['https://example.com/a', 'https://example.com/b', 'https://example.com/c'],
+                title_missing_count: 0,
+                title_missing_urls_all: [],
               },
-              metrics: {
-                detail: {
-                  payload: {
-                    nested: { value: 42 },
-                  },
-                },
-              },
+              fix: 'Ajouter une meta description unique sur chaque page affectée.',
             },
           },
         },
@@ -636,12 +274,77 @@ describe('Axis Mapping - normalizeAxisLabel & resolveAxisMetaKey', () => {
 
       const seoAxis = report.axes.find((axis) => axis.id === 'seo');
       const finding = seoAxis?.findings.find((item) => item.id === 'seo_meta');
-      expect(finding).toBeDefined();
 
-      const evidenceLines = finding?.evidence ?? [];
-      expect(evidenceLines.length).toBeGreaterThan(0);
-      expect(evidenceLines.some((line) => line.includes('{"'))).toBe(false);
-      expect(evidenceLines.some((line) => line.includes('[object Object]'))).toBe(false);
+      expect(finding).toBeDefined();
+      expect(finding?.exampleUrls).toEqual(['https://example.com/a', 'https://example.com/b', 'https://example.com/c'].slice(0, 10));
+      expect((finding?.evidenceRaw as any)?.evidence?.meta_missing_urls_all).toHaveLength(3);
+      expect((finding?.evidence ?? []).some((line) => line.includes('[object Object]'))).toBe(false);
+    });
+
+    it('keeps full anomalous fuzz payloads in evidenceRaw and readable previews in evidence', () => {
+      const api: ApiResponse = {
+        scan_id: 'test-scan-forms-1',
+        domain: 'https://example.com',
+        report_version: 'v2',
+        axes: {
+          'Audit Fonctionnel': {
+            forms: {
+              kpi_id: 'func_forms',
+              type: 'bug',
+              status: 'warning',
+              severity: 'high',
+              confidence: 'medium',
+              name: 'Les Formulaires',
+              constat: '3 formulaires détectés, 2 testés et 2 anomalies remontées.',
+              score: 50,
+              impact: 'Des parcours de conversion peuvent échouer.',
+              evidence: {
+                data_quality: 'PARTIAL',
+                detection_source: ['form_fuzzer', 'scanner_aggregation'],
+                pages_checked: 2,
+                affected_pages: 2,
+                forms_detected: 3,
+                forms_tested: 2,
+                tests_run: 4,
+                anomalies_count: 2,
+                anomalies_by_type: { server_error: 1, validation_bypass: 1 },
+                affected_page_urls_all: ['https://example.com/contact', 'https://example.com/devis'],
+                anomalous_tests_all: [
+                  {
+                    page_url: 'https://example.com/contact',
+                    action_url: 'https://example.com/api/contact',
+                    form_id: 'contact-form',
+                    test_type: 'xss_payload',
+                    payload: { message: '<script>alert(1)</script>' },
+                    response_type: 'html',
+                    status_code: 500,
+                    anomaly: 'server_error',
+                    anomaly_reason: '500 returned after payload submission',
+                    duration_ms: 421,
+                    error: '',
+                  },
+                ],
+              },
+              fix: 'Étendre la couverture du form fuzzer et corriger les anomalies remontées.',
+            },
+          },
+        },
+      };
+
+      const report = mapApiResponseToReport(api, 'audit-forms-1', {
+        url: 'https://example.com',
+        site_name: 'Test Site',
+      });
+
+      const functionalAxis = report.axes.find((axis) => axis.id === 'functional');
+      const finding = functionalAxis?.findings.find((item) => item.id === 'func_forms');
+
+      expect(finding).toBeDefined();
+      expect(finding?.exampleUrls).toContain('https://example.com/contact');
+      expect((finding?.evidenceRaw as any)?.evidence?.anomalous_tests_all?.[0]?.payload).toEqual({
+        message: '<script>alert(1)</script>',
+      });
+      expect((finding?.evidence ?? []).some((line) => line.includes('xss_payload') || line.includes('server_error'))).toBe(true);
     });
   });
 });

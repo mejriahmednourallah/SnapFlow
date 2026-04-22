@@ -21,6 +21,36 @@ func TestExtractFieldsFallsBackToIdWhenNameMissing(t *testing.T) {
 	}
 }
 
+func TestIsTransactionalFormSkipsViewsExposedFilterForms(t *testing.T) {
+	fields := []FormField{
+		{Name: "keyword", Type: "text"},
+		{Name: "filter_theme", Type: "select"},
+	}
+	if isTransactionalForm("views-exposed-form-actualites-block-1", "https://example.com/actualites", "GET", fields) {
+		t.Fatal("expected views exposed filter form to be classified as non-transactional")
+	}
+}
+
+func TestFormIdentityKeyIncludesFieldSignatureAndMethod(t *testing.T) {
+	formA := DiscoveredForm{
+		FormID:    "contact",
+		PageURL:   "https://example.com/contact",
+		ActionURL: "https://example.com/contact",
+		Method:    "POST",
+		Fields:    []FormField{{Name: "email", Type: "email"}, {Name: "message", Type: "textarea"}},
+	}
+	formB := DiscoveredForm{
+		FormID:    "contact",
+		PageURL:   "https://example.com/contact?page=2",
+		ActionURL: "https://example.com/contact",
+		Method:    "POST",
+		Fields:    []FormField{{Name: "message", Type: "textarea"}, {Name: "email", Type: "email"}},
+	}
+	if formIdentityKey(formA) != formIdentityKey(formB) {
+		t.Fatal("expected equivalent forms to share the same canonical identity")
+	}
+}
+
 // TestApplyResponseDiffingMatchingBaselineIsNotAnomaly verifies that a fuzz
 // response whose signature matches the baseline is treated as a stability signal
 // (resilient form), NOT flagged as an anomaly. The old behaviour was inverted:

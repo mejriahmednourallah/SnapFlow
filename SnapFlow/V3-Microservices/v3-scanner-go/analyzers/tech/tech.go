@@ -3,6 +3,8 @@ package tech
 import (
 	"fmt"
 	"net/http"
+	"net/url"
+	"path"
 	"regexp"
 	"strings"
 )
@@ -95,14 +97,15 @@ type CVESeverity struct {
 // TechResult no longer carries a numeric Score.
 // Passed is false only when CMS version is detectable AND is known EOL.
 type TechResult struct {
-	URL           string         `json:"url"`
-	Stack         []DetectedTech `json:"stack"`
-	CMS           string         `json:"cms,omitempty"`
-	CMSVersion    string         `json:"cms_version,omitempty"`
-	CMSVersionEOL bool           `json:"cms_version_eol"`
-	Server        string         `json:"server,omitempty"`
-	Language      string         `json:"language,omitempty"`
-	LanguageVersion string       `json:"language_version,omitempty"`
+	URL              string         `json:"url"`
+	Stack            []DetectedTech `json:"stack"`
+	CMS              string         `json:"cms,omitempty"`
+	CMSVersion       string         `json:"cms_version,omitempty"`
+	CMSVersionEOL    bool           `json:"cms_version_eol"`
+	CMSSupportStatus string         `json:"cms_support_status,omitempty"`
+	Server           string         `json:"server,omitempty"`
+	Language         string         `json:"language,omitempty"`
+	LanguageVersion  string         `json:"language_version,omitempty"`
 	// Gap #2: module versions extracted from stack
 	ModuleVersions []ModuleVersion `json:"module_versions"`
 	// Gap #3: server/language version from response headers
@@ -115,6 +118,20 @@ type TechResult struct {
 	Passed      bool        `json:"passed"`
 	Issues      []string    `json:"issues"`
 	ServiceName string      `json:"service_name"`
+}
+
+type cmsSupportInfo struct {
+	Status string
+	EOL    bool
+}
+
+var cmsSupportMatrix = map[string]map[string]cmsSupportInfo{
+	"drupal": {
+		"8":  {Status: "end_of_life", EOL: true},
+		"9":  {Status: "end_of_life", EOL: true},
+		"10": {Status: "supported", EOL: false},
+		"11": {Status: "supported", EOL: false},
+	},
 }
 
 func inferOSHintFromServerBanner(banner string) string {
@@ -243,6 +260,7 @@ func extractCMSVersion(html string, headers *http.Header, cmsKey string) string 
 
 // ─── isCMSVersionEOL ─────────────────────────────────────────────────────────
 func isCMSVersionEOL(cmsKey, version string) bool {
+	version = normalizeCMSVersion(version)
 	if version == "" {
 		return false
 	}
@@ -256,6 +274,39 @@ func isCMSVersionEOL(cmsKey, version string) bool {
 		}
 	}
 	return false
+}
+
+func normalizeCMSVersion(version string) string {
+	version = strings.TrimSpace(version)
+	if version == "" {
+		return ""
+	}
+	if regexp.MustCompile(`^\d+$`).MatchString(version) {
+		return version + ".x"
+	}
+	return version
+}
+
+func lookupCMSSupport(cmsKey, version string) (string, bool) {
+	version = normalizeCMSVersion(version)
+	if version == "" {
+		return "", false
+	}
+	majorMatch := regexp.MustCompile(`^(\d+)`).FindStringSubmatch(version)
+	if len(majorMatch) > 1 {
+		if product, ok := cmsSupportMatrix[cmsKey]; ok {
+			if info, exists := product[majorMatch[1]]; exists {
+				if info.EOL {
+					return "end_of_life", true
+				}
+				return info.Status, true
+			}
+		}
+	}
+	if isCMSVersionEOL(cmsKey, version) {
+		return "end_of_life", true
+	}
+	return "supported", true
 }
 
 // ─── DetectStack ─────────────────────────────────────────────────────────────
@@ -374,6 +425,9 @@ func collectModuleVersions(html string, stack []DetectedTech) []ModuleVersion {
 		if name == "" || version == "" {
 			return
 		}
+		if !isPlausibleModuleVersion(name, version) {
+			return
+		}
 		key := strings.ToLower(name) + "|" + version
 		if seen[key] {
 			return
@@ -389,40 +443,99 @@ func collectModuleVersions(html string, stack []DetectedTech) []ModuleVersion {
 		}
 	}
 
-	// 2) Script src URL parsing (file name or query-string version)
-	matches := scriptSrcRE.FindAllStringSubmatch(html, -1)
-	for _, match := range matches {
-		if len(match) < 2 {
-			continue
-		}
-		src := match[1]
-		srcLower := strings.ToLower(src)
-
-		for moduleName, keywords := range moduleKeywords {
-			containsKeyword := false
-			for _, kw := range keywords {
-				if strings.Contains(srcLower, kw) {
-					containsKeyword = true
-					break
-				}
-			}
-			if !containsKeyword {
+	assetSources := []struct {
+		Pattern *regexp.Regexp
+		Source  string
+	}{
+		{Pattern: scriptSrcRE, Source: "script_src"},
+		{Pattern: regexp.MustCompile(`(?is)<link[^>]+href=["']([^"']+)["']`), Source: "link_href"},
+	}
+	for _, assetSource := range assetSources {
+		matches := assetSource.Pattern.FindAllStringSubmatch(html, -1)
+		for _, match := range matches {
+			if len(match) < 2 {
 				continue
 			}
+			src := match[1]
+			srcLower := strings.ToLower(src)
 
-			if re, ok := moduleSrcVersionPatterns[moduleName]; ok {
-				if m := re.FindStringSubmatch(src); len(m) > 1 {
-					addVersion(moduleName, m[1], "script_src")
+			for moduleName, keywords := range moduleKeywords {
+				containsKeyword := false
+				for _, kw := range keywords {
+					if strings.Contains(srcLower, kw) {
+						containsKeyword = true
+						break
+					}
+				}
+				if !containsKeyword {
 					continue
 				}
-			}
-			if q := queryVersionRE.FindStringSubmatch(src); len(q) > 1 {
-				addVersion(moduleName, q[1], "script_src")
+
+				if version, ok := extractModuleVersionFromAsset(src, moduleName); ok {
+					addVersion(moduleName, version, assetSource.Source)
+				}
 			}
 		}
 	}
 
 	return versions
+}
+
+func extractModuleVersionFromAsset(assetURL, moduleName string) (string, bool) {
+	if q := queryVersionRE.FindStringSubmatch(assetURL); len(q) > 1 {
+		return strings.TrimSpace(q[1]), true
+	}
+	parsed, err := url.Parse(assetURL)
+	if err != nil {
+		return "", false
+	}
+	baseName := strings.ToLower(path.Base(parsed.Path))
+	if !looksLikeExactLibraryAsset(moduleName, baseName) {
+		return "", false
+	}
+	if re, ok := moduleSrcVersionPatterns[moduleName]; ok {
+		if m := re.FindStringSubmatch(baseName); len(m) > 1 {
+			return strings.TrimSpace(m[1]), true
+		}
+	}
+	return "", false
+}
+
+func looksLikeExactLibraryAsset(moduleName, baseName string) bool {
+	moduleAssets := map[string][]string{
+		"jQuery":    {"jquery.js", "jquery.min.js"},
+		"Bootstrap": {"bootstrap.js", "bootstrap.min.js", "bootstrap.css", "bootstrap.min.css"},
+		"React":     {"react.js", "react.min.js", "react.production.min.js"},
+		"Vue.js":    {"vue.js", "vue.min.js", "vue.runtime.js", "vue.runtime.min.js"},
+		"Angular":   {"angular.js", "angular.min.js"},
+	}
+	for _, candidate := range moduleAssets[moduleName] {
+		if baseName == candidate || strings.HasPrefix(baseName, strings.TrimSuffix(candidate, path.Ext(candidate))+"-") {
+			return true
+		}
+	}
+	return false
+}
+
+func isPlausibleModuleVersion(moduleName, version string) bool {
+	majorParts := regexp.MustCompile(`^(\d+)`).FindStringSubmatch(strings.TrimSpace(version))
+	if len(majorParts) < 2 {
+		return false
+	}
+	major := 0
+	fmt.Sscanf(majorParts[1], "%d", &major)
+	maxMajors := map[string]int{
+		"jQuery":    4,
+		"Bootstrap": 6,
+		"React":     20,
+		"Vue.js":    4,
+		"Angular":   20,
+	}
+	maxMajor, ok := maxMajors[moduleName]
+	if !ok {
+		return true
+	}
+	return major > 0 && major <= maxMajor
 }
 
 // ─── Analyze ─────────────────────────────────────────────────────────────────
@@ -471,9 +584,14 @@ func Analyze(targetURL string, html string, headers *http.Header) TechResult {
 
 	var issues []string
 	eol := false
+	cmsVersion = normalizeCMSVersion(cmsVersion)
+	cmsSupportStatus := ""
 
 	if cms != "" && cmsVersion != "" {
 		eol = isCMSVersionEOL(strings.ToLower(cms), cmsVersion)
+		if supportStatus, ok := lookupCMSSupport(strings.ToLower(cms), cmsVersion); ok {
+			cmsSupportStatus = supportStatus
+		}
 		if eol {
 			issues = append(issues, fmt.Sprintf("%s version %s is end-of-life and no longer receives security patches", cms, cmsVersion))
 		}
@@ -526,22 +644,23 @@ func Analyze(targetURL string, html string, headers *http.Header) TechResult {
 	osHint := inferOSHintFromServerBanner(serverBanner)
 
 	return TechResult{
-		URL:            targetURL,
-		Stack:          stack,
-		CMS:            cms,
-		CMSVersion:     cmsVersion,
-		CMSVersionEOL:  eol,
-		Server:         server,
-		Language:       lang,
-		LanguageVersion: langVersion,
-		ModuleVersions: moduleVersions,
-		ServerTech:     serverTech,
-		ServerVersion:  serverVersion,
-		ServerBanner:   serverBanner,
-		OSHint:         osHint,
-		CVESeverity:    CVESeverity{}, // populated by future CVE lookup service
-		Passed:         passed,
-		Issues:         issues,
-		ServiceName:    "v3-tech-detector-go",
+		URL:              targetURL,
+		Stack:            stack,
+		CMS:              cms,
+		CMSVersion:       cmsVersion,
+		CMSVersionEOL:    eol,
+		CMSSupportStatus: cmsSupportStatus,
+		Server:           server,
+		Language:         lang,
+		LanguageVersion:  langVersion,
+		ModuleVersions:   moduleVersions,
+		ServerTech:       serverTech,
+		ServerVersion:    serverVersion,
+		ServerBanner:     serverBanner,
+		OSHint:           osHint,
+		CVESeverity:      CVESeverity{}, // populated by future CVE lookup service
+		Passed:           passed,
+		Issues:           issues,
+		ServiceName:      "v3-tech-detector-go",
 	}
 }

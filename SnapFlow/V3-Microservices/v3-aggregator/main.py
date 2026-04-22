@@ -571,6 +571,25 @@ def _is_valid_cannibalization_term(stem: str, keyword: str) -> bool:
     return stem_norm not in _CANNIBALIZATION_NOISE and kw_norm not in _CANNIBALIZATION_NOISE
 
 
+def _build_brand_exclusion_terms(domain_url: str) -> set[str]:
+    parsed = urlparse(str(domain_url or "").strip())
+    host = (parsed.netloc or parsed.path or "").lower().replace("www.", "")
+    root = host.split(".")[0]
+    tokens = set()
+    for token in re.findall(r"[a-zA-Z]{3,}", root):
+        tokens.add(token.lower())
+    if root:
+        if len(root) >= 3:
+            tokens.add(root)
+        for part in re.findall(r"[a-zA-Z]{3,}", re.sub(r"[^a-zA-Z]+", " ", root)):
+            tokens.add(part.lower())
+        for size in (3, 4):
+            if len(root) >= size:
+                tokens.add(root[:size].lower())
+                tokens.add(root[-size:].lower())
+    return {t for t in tokens if t}
+
+
 def _build_broken_link_kpi(summary_row) -> dict:
     """Extract broken link KPI from scan_summaries.broken_links_summary."""
     if not summary_row:
@@ -612,7 +631,13 @@ def _load_form_fuzzer_table_stats(cur, scan_id: str) -> dict:
             """
             SELECT
                 COUNT(*) AS tests_run,
-                COUNT(DISTINCT (page_url || '|' || form_id)) AS forms_tested,
+                COUNT(
+                    DISTINCT (
+                        COALESCE(NULLIF(BTRIM(LOWER(form_id)), ''), '__missing_form_id__')
+                        || '|'
+                        || COALESCE(NULLIF(BTRIM(LOWER(action_url)), ''), '__missing_action_url__')
+                    )
+                ) AS forms_tested,
                 COUNT(*) FILTER (WHERE anomaly = TRUE) AS anomalies_count,
                 COUNT(DISTINCT page_url) FILTER (WHERE anomaly = TRUE) AS affected_pages
             FROM form_fuzz_results
@@ -666,6 +691,29 @@ def _load_form_fuzzer_table_stats(cur, scan_id: str) -> dict:
             (scan_id,),
         )
         affected_page_rows = cur.fetchall() or []
+
+        cur.execute(
+            """
+            SELECT
+                page_url,
+                action_url,
+                form_id,
+                test_type,
+                payload,
+                response_type,
+                status_code,
+                anomaly,
+                anomaly_reason,
+                duration_ms,
+                error
+            FROM form_fuzz_results
+            WHERE scan_id = %s
+              AND anomaly = TRUE
+            ORDER BY created_at DESC, id DESC
+            """,
+            (scan_id,),
+        )
+        anomalous_test_rows = cur.fetchall() or []
     except Exception:
         return {}
 
@@ -695,6 +743,31 @@ def _load_form_fuzzer_table_stats(cur, scan_id: str) -> dict:
         for r in affected_page_rows
         if isinstance(r, dict) and str(r.get("page_url") or "").strip()
     ]
+    anomalous_tests_all = []
+    for row in anomalous_test_rows:
+        if not isinstance(row, dict):
+            continue
+        payload = row.get("payload")
+        if isinstance(payload, str):
+            try:
+                payload = json.loads(payload)
+            except Exception:
+                payload = {"raw": payload}
+        elif payload is None:
+            payload = {}
+        anomalous_tests_all.append({
+            "page_url": str(row.get("page_url") or ""),
+            "action_url": str(row.get("action_url") or ""),
+            "form_id": str(row.get("form_id") or ""),
+            "test_type": str(row.get("test_type") or ""),
+            "payload": payload if isinstance(payload, dict) else payload,
+            "response_type": str(row.get("response_type") or ""),
+            "status_code": int(row.get("status_code", 0) or 0),
+            "anomaly": bool(row.get("anomaly")),
+            "anomaly_reason": str(row.get("anomaly_reason") or ""),
+            "duration_ms": int(row.get("duration_ms", 0) or 0),
+            "error": str(row.get("error") or ""),
+        })
 
     return {
         "forms_tested": int(totals.get("forms_tested", 0) or 0),
@@ -702,6 +775,7 @@ def _load_form_fuzzer_table_stats(cur, scan_id: str) -> dict:
         "anomalies_count": int(totals.get("anomalies_count", 0) or 0),
         "affected_pages": int(totals.get("affected_pages", 0) or 0),
         "affected_page_urls": affected_page_urls,
+        "anomalous_tests_all": anomalous_tests_all,
         "anomalies_by_type": anomalies_by_type,
         "top_findings": top_findings,
         "top_affected": top_affected,
@@ -717,6 +791,10 @@ def _build_functional_fuzzer_kpi(summary_row: dict | None, table_stats: dict | N
     tests_run = int(raw.get("tests_run", 0) or 0)
     forms_tested = int(raw.get("forms_tested", 0) or 0)
     forms_discovered = int(raw.get("forms_discovered", 0) or 0)
+    unique_transactional_forms_detected = int(raw.get("unique_transactional_forms_detected", 0) or 0)
+    unique_transactional_forms_tested = int(raw.get("unique_transactional_forms_tested", 0) or 0)
+    non_transactional_forms_tested = int(raw.get("non_transactional_forms_tested", 0) or 0)
+    suppressed_low_confidence_anomalies = int(raw.get("suppressed_low_confidence_anomalies", 0) or 0)
     anomalies_count = int(raw.get("anomalies_found", 0) or 0)
     affected_pages = int(raw.get("affected_pages", 0) or 0)
     affected_page_urls = [
@@ -741,6 +819,9 @@ def _build_functional_fuzzer_kpi(summary_row: dict | None, table_stats: dict | N
     anomalies_by_type = table_stats.get("anomalies_by_type", {}) if isinstance(table_stats, dict) else {}
     top_findings = table_stats.get("top_findings", []) if isinstance(table_stats, dict) else []
     top_affected = table_stats.get("top_affected", []) if isinstance(table_stats, dict) else []
+    anomalous_tests_all = raw.get("anomalous_tests_all", []) if isinstance(raw, dict) else []
+    if (not isinstance(anomalous_tests_all, list) or not anomalous_tests_all) and isinstance(table_stats, dict):
+        anomalous_tests_all = table_stats.get("anomalous_tests_all", []) or []
     affected_pages_estimated = False
     if affected_pages == 0 and anomalies_count > 0:
         # Last-resort fallback for legacy payloads that do not include explicit affected pages.
@@ -761,8 +842,12 @@ def _build_functional_fuzzer_kpi(summary_row: dict | None, table_stats: dict | N
         enabled = bool(tests_run > 0)
     else:
         enabled = bool(enabled_raw)
-    # Never report passed=True when no tests actually ran — that is not a pass.
-    if tests_run == 0:
+    if unique_transactional_forms_detected == 0 and forms_discovered > 0:
+        unique_transactional_forms_detected = forms_discovered
+    if unique_transactional_forms_tested == 0 and forms_tested > 0:
+        unique_transactional_forms_tested = forms_tested
+
+    if unique_transactional_forms_tested == 0:
         passed = None
         fuzzer_status = "non_evalue"
     else:
@@ -774,10 +859,15 @@ def _build_functional_fuzzer_kpi(summary_row: dict | None, table_stats: dict | N
         "skipped_reason": skipped_reason,
         "forms_discovered": forms_discovered,
         "total_forms_tested": forms_tested,
+        "unique_transactional_forms_detected": unique_transactional_forms_detected,
+        "unique_transactional_forms_tested": unique_transactional_forms_tested,
+        "non_transactional_forms_tested": non_transactional_forms_tested,
         "tests_run": tests_run,
         "anomalies_count": anomalies_count,
+        "suppressed_low_confidence_anomalies": suppressed_low_confidence_anomalies,
         "affected_pages": affected_pages,
         "affected_page_urls": affected_page_urls,
+        "anomalous_tests_all": anomalous_tests_all if isinstance(anomalous_tests_all, list) else [],
         "anomalies_by_type": anomalies_by_type,
         "top_findings": top_findings,
         "top_affected": top_affected,
@@ -2088,6 +2178,19 @@ def build_report(scan_id: str) -> dict:
 
     # ─── Tier 1: Domain Analysis ───────────────────────────────────────────────
     domain_analysis = {}
+    raw_priv = {}
+    privacy_kpi = {
+        "has_privacy_policy": False,
+        "has_legal_notice": False,
+        "has_cookie_policy": False,
+        "has_security_policy": False,
+        "has_information_rights": False,
+        "has_consent_checkbox": False,
+        "has_declared_purpose": False,
+        "cookie_consent": {},
+        "passed": False,
+        "issues": [],
+    }
     if summary_row:
         raw_tech = _j(summary_row.get("domain_tech"))
 
@@ -2102,6 +2205,7 @@ def build_report(scan_id: str) -> dict:
             "cms_detected":     cms_name or None,
             "cms_version":      cms_version or None,
             "cms_version_eol":  cms_eol,
+            "cms_support_status": raw_tech.get("cms_support_status", ""),
             "passed":           cms_passed,
             "issues":           cms_issues,
             # Full detected stack (servers, frameworks, analytics, CDN …)
@@ -2247,6 +2351,10 @@ def build_report(scan_id: str) -> dict:
     seo_not_url_clean = 0
     seo_without_lazy = 0
     seo_node_style_url_count = 0
+    seo_internal_links_recount = 0
+    seo_external_links_recount = 0
+    seo_contextual_internal_links_total = 0
+    seo_low_confidence_hash_pages = 0
     # Phase K: homepage H1 detection and duplicate content rate
     seo_content_hashes: dict = {}   # {hash: [url, ...]}
     homepage_h1_missing = False
@@ -2265,6 +2373,9 @@ def build_report(scan_id: str) -> dict:
     ux_raw_ip_page_urls = []
     ux_missing_product_image_pages = []
     ux_missing_contextual_link_pages = []
+    ux_mobile_checked_pages = 0
+    ux_mobile_overflow_pages = 0
+    ux_mobile_overflow_urls = []
     headless_fcp = []
     headless_lcp = []
     headless_cls = []
@@ -2315,11 +2426,14 @@ def build_report(scan_id: str) -> dict:
     nlp_rgpd_pre_consent_violation_pages = 0
     nlp_rgpd_privacy_score_low_pages = 0
     nlp_rgpd_dpo_incomplete_pages = 0
+    rgpd_privacy_policy_inferred_urls = set()
+    rgpd_declared_purpose_inferred_urls = set()
     typo_pages = 0
     typo_density_total = 0.0
     typo_density_samples = []
     cannibalization_map = defaultdict(list)
     cannibalization_keywords = defaultdict(list)
+    brand_exclusion_terms = _build_brand_exclusion_terms(scan_start_url)
     audience_segment_counts = defaultdict(int)
     audience_confidence_counts = {"low": 0, "medium": 0, "high": 0}
     menu_bad_pages = 0
@@ -2331,6 +2445,8 @@ def build_report(scan_id: str) -> dict:
         "mixed": 0,
         "unknown": 0,
     }
+    ux_content_zone_detected_pages = 0
+    ux_contextual_reliable_pages = 0
     
     # ─── Tier 3: Issues Aggregation Dictionary ──────────────────────────────
     # Structure: {"seo": {"Missing H1": {"count": 1, "urls": ["url1"]}}}
@@ -2373,6 +2489,9 @@ def build_report(scan_id: str) -> dict:
         if not seo.get("has_lazy_images", True):
             seo_without_lazy += 1
         seo_node_style_url_count += seo.get("node_style_url_count", 0)
+        links = _safe_dict(seo.get("links"))
+        seo_internal_links_recount += int(links.get("internal_links", 0) or 0)
+        seo_external_links_recount += int(links.get("external_links", 0) or 0)
 
         # Phase K-1: detect homepage H1
         if page_url.rstrip("/") == scan_start_url:
@@ -2380,9 +2499,15 @@ def build_report(scan_id: str) -> dict:
             has_h1 = any(isinstance(h, dict) and str(h.get("tag", "")).lower() == "h1" for h in headings)
             homepage_h1_missing = not has_h1
         # Phase K-2: track content hashes for duplicate rate
-        ch = seo.get("content_hash", "")
-        if ch:
+        ch = str(seo.get("content_hash", "") or "").strip()
+        try:
+            ch_conf = float(seo.get("content_hash_confidence", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            ch_conf = 0.0
+        if ch and ch_conf >= 0.45:
             seo_content_hashes.setdefault(ch, []).append(page_url)
+        else:
+            seo_low_confidence_hash_pages += 1
 
         # Aggregate UX
         missing_imgs = ux.get("product_cards_missing_images", [])
@@ -2399,6 +2524,11 @@ def build_report(scan_id: str) -> dict:
                 break
         if ux.get("has_map"):
             ux_maps += 1
+        seo_contextual_internal_links_total += int(ux.get("contextual_internal_links", 0) or 0)
+        if bool(ux.get("content_zone_detected")):
+            ux_content_zone_detected_pages += 1
+        if bool(ux.get("contextual_measurement_reliable")):
+            ux_contextual_reliable_pages += 1
         if ux.get("simulator_count", 0) > 0:
             ux_simulators += 1
         if ux.get("is_funnel_step"):
@@ -2437,6 +2567,17 @@ def build_report(scan_id: str) -> dict:
                 headless_eco.append(headless["eco_index"])
             if headless.get("invisible_links", 0) > 0:
                 ux_invisible_links_total += headless["invisible_links"]
+            mobile_overflow = headless.get("mobile_overflow")
+            if mobile_overflow is not None:
+                ux_mobile_checked_pages += 1
+                is_mobile_overflow = (
+                    mobile_overflow
+                    if isinstance(mobile_overflow, bool)
+                    else str(mobile_overflow).strip().lower() in {"1", "true", "yes"}
+                )
+                if is_mobile_overflow:
+                    ux_mobile_overflow_pages += 1
+                    ux_mobile_overflow_urls.append(page_url)
             # Phase G: console errors + non-functional buttons
             if headless.get("console_error_count", 0) > 0:
                 perf_console_error_pages += 1
@@ -2446,9 +2587,19 @@ def build_report(scan_id: str) -> dict:
                 perf_nonfunc_button_page_urls.append(page_url)
                 details = headless.get("non_functional_button_details") or []
                 if isinstance(details, list) and details:
+                    seen_button_details = set()
                     for detail in details:
                         if not isinstance(detail, dict):
                             continue
+                        detail_key = (
+                            page_url,
+                            str(detail.get("href") or "").strip().lower(),
+                            str(detail.get("label") or detail.get("label_or_text") or "").strip().lower(),
+                            str(detail.get("issue_type") or "").strip().lower(),
+                        )
+                        if detail_key in seen_button_details:
+                            continue
+                        seen_button_details.add(detail_key)
                         perf_nonfunc_button_details.append({
                             "url": page_url,
                             "label": detail.get("label") or "(unnamed)",
@@ -2570,9 +2721,12 @@ def build_report(scan_id: str) -> dict:
             stem = nlp.get("dominant_keyword_stem")
             kw = nlp.get("dominant_keyword")
             if stem and _is_valid_cannibalization_term(stem, kw):
-                cannibalization_map[stem].append(page_url)
-                if kw:
-                    cannibalization_keywords[stem].append(kw)
+                if str(stem).strip().lower() in brand_exclusion_terms or str(kw).strip().lower() in brand_exclusion_terms:
+                    pass
+                else:
+                    cannibalization_map[stem].append(page_url)
+                    if kw:
+                        cannibalization_keywords[stem].append(kw)
 
             audience = nlp.get("audience_segment", {})
             seg = audience.get("segment", "unknown")
@@ -2582,6 +2736,20 @@ def build_report(scan_id: str) -> dict:
                 audience_confidence_counts[conf] += 1
 
             rgpd_text = nlp.get("rgpd_text_analysis", {})
+            page_url_lower = page_url.lower()
+            legal_privacy_url = any(token in page_url_lower for token in (
+                "mentions-legales",
+                "conditions-generales",
+                "privacy",
+                "confidential",
+                "politique",
+                "donnees-personnelles",
+                "cookies",
+            ))
+            if legal_privacy_url and (rgpd_text.get("has_rgpd_content_signal") or rgpd_text.get("used_strong_signal")):
+                rgpd_privacy_policy_inferred_urls.add(page_url)
+            if legal_privacy_url and rgpd_text.get("purpose_mentioned"):
+                rgpd_declared_purpose_inferred_urls.add(page_url)
             if rgpd_text.get("data_retention_mentioned"):   # Gap #41
                 nlp_rgpd_retention_pages += 1
             if rgpd_text.get("data_minimization_mentioned"):  # Gap #42
@@ -2650,6 +2818,8 @@ def build_report(scan_id: str) -> dict:
                 privacy_score = privacy_score_kpi.get("privacy_policy_score")
                 if isinstance(privacy_score, int) and privacy_score < 60:
                     nlp_rgpd_privacy_score_low_pages += 1
+                if privacy_score_kpi.get("purpose_mentioned") is True:
+                    rgpd_declared_purpose_inferred_urls.add(page_url)
                 dpo_score = dpo_kpi.get("dpo_completeness_score")
                 if isinstance(dpo_score, int) and dpo_score < 2:
                     nlp_rgpd_dpo_incomplete_pages += 1
@@ -2672,11 +2842,45 @@ def build_report(scan_id: str) -> dict:
     # K-2: duplicate content rate
     total_pages = len(page_rows)
     dup_page_count = sum(len(v) for v in seo_content_hashes.values() if len(v) > 1)
-    dup_content_rate_pct = round(dup_page_count / total_pages * 100, 1) if total_pages > 0 else 0.0
-    dup_content_kpi_passed = dup_content_rate_pct <= 10.0
+    hash_eligible_pages = sum(len(v) for v in seo_content_hashes.values())
+    dup_content_rate_pct = round(dup_page_count / hash_eligible_pages * 100, 1) if hash_eligible_pages > 0 else 0.0
+    duplication_reliability = "reliable"
+    duplication_note = ""
+    if seo_low_confidence_hash_pages > 0:
+        duplication_reliability = "partial"
+        duplication_note = (
+            f"{seo_low_confidence_hash_pages} page(s) had low-confidence content extraction "
+            "and were excluded from duplicate-content computation"
+        )
+    if dup_content_rate_pct >= 80.0 and seo_low_confidence_hash_pages > 0:
+        duplication_reliability = "pipeline_suspect"
+        duplication_note = (
+            "Very high duplication rate combined with low-confidence extraction; "
+            "treat this as a pipeline-quality warning before classifying as real duplication"
+        )
+    if duplication_reliability == "pipeline_suspect":
+        dup_content_kpi_passed = None
+    else:
+        dup_content_kpi_passed = dup_content_rate_pct <= 10.0
     # K-3: unique external domains (from DB — computed by Go scanner)
     raw_seo_kpi = _j(summary_row.get("seo_kpi_extended")) if summary_row else {}
     unique_external_domains = raw_seo_kpi.get("unique_external_domains", 0)
+    contextual_reliable_coverage_pct = round((ux_contextual_reliable_pages / max(total_pages, 1)) * 100, 2) if total_pages else 0.0
+    summary_internal_links = int(raw_seo_kpi.get("total_internal_links", 0) or 0)
+    summary_external_links = int(raw_seo_kpi.get("total_external_links", 0) or 0)
+    if summary_internal_links > 0:
+        effective_total_internal_links = summary_internal_links
+        internal_linking_source = "seo_summary"
+        internal_linking_note = ""
+    else:
+        effective_total_internal_links = seo_internal_links_recount
+        internal_linking_source = "page_recount"
+        internal_linking_note = (
+            "Summary internal-link total was empty; KPI uses per-page SEO link recount fallback"
+            if effective_total_internal_links > 0 else
+            "Internal-link total could not be reconstructed from summary or per-page SEO metrics"
+        )
+    effective_total_external_links = summary_external_links if summary_external_links > 0 else seo_external_links_recount
     # ─── Phase L post-loop computations ─────────────────────────────────────
     latest_pub_date = max(content_pub_dates) if content_pub_dates else None
     # Freshness KPI: passed if latest date is within the last 365 days
@@ -2711,6 +2915,18 @@ def build_report(scan_id: str) -> dict:
     menu_passed = menu_bad_pages == 0
     footer_rgpd_alignment = evaluate_footer_rgpd_alignment(scan_id, scan_start_url, page_rows)
     multi_browser_compat = evaluate_multi_browser_compatibility(scan_start_url)
+    inferred_privacy_urls = sorted(rgpd_privacy_policy_inferred_urls)
+    inferred_purpose_urls = sorted(rgpd_declared_purpose_inferred_urls)
+    if not bool(privacy_kpi.get("has_privacy_policy")) and inferred_privacy_urls:
+        privacy_kpi["has_privacy_policy"] = True
+        raw_priv["has_privacy_policy"] = True
+        raw_priv["privacy_policy_inferred_from_content"] = True
+        raw_priv["privacy_policy_inferred_urls"] = inferred_privacy_urls
+    if not bool(privacy_kpi.get("has_declared_purpose")) and inferred_purpose_urls:
+        privacy_kpi["has_declared_purpose"] = True
+        raw_priv["has_declared_purpose"] = True
+        raw_priv["declared_purpose_inferred_from_content"] = True
+        raw_priv["declared_purpose_inferred_urls"] = inferred_purpose_urls
 
     site_metrics = {
         "seo": {
@@ -2723,8 +2939,11 @@ def build_report(scan_id: str) -> dict:
             "pages_without_lazy_loading": seo_without_lazy,
             "has_sitemap": bool(raw_seo_kpi.get("has_sitemap", False)),
             "has_robots_txt": bool(raw_seo_kpi.get("has_robots_txt", False)),
-            "total_internal_links": int(raw_seo_kpi.get("total_internal_links", 0) or 0),
-            "total_external_links": int(raw_seo_kpi.get("total_external_links", 0) or 0),
+            "total_internal_links": effective_total_internal_links,
+            "total_external_links": effective_total_external_links,
+            "total_contextual_internal_links": seo_contextual_internal_links_total,
+            "internal_linking_source": internal_linking_source,
+            "internal_linking_note": internal_linking_note,
             "node_style_url_count": seo_node_style_url_count,
             "node_style_url_kpi_passed": seo_node_style_url_count == 0,
             # Phase J: broken links KPI
@@ -2737,9 +2956,18 @@ def build_report(scan_id: str) -> dict:
             "duplicate_content_kpi": {
                 "duplicate_content_rate_pct": dup_content_rate_pct,
                 "duplicate_page_count": dup_page_count,
+                "hash_eligible_pages": hash_eligible_pages,
+                "hash_low_confidence_pages": seo_low_confidence_hash_pages,
+                "duplication_reliability": duplication_reliability,
+                "pipeline_suspect": duplication_reliability == "pipeline_suspect",
+                "note": duplication_note,
                 "passed": dup_content_kpi_passed,
             },
             "unique_external_domains": unique_external_domains,
+            "robots_url": raw_seo_kpi.get("robots_url"),
+            "robots_detected_via": raw_seo_kpi.get("robots_detected_via"),
+            "sitemap_url": raw_seo_kpi.get("sitemap_url"),
+            "sitemap_detected_via": raw_seo_kpi.get("sitemap_detected_via"),
             "multi_browser_compatibility": multi_browser_compat,
             "social_sharing_kpi": {
                 "pages_with_social_sharing": int(raw_seo_kpi.get("pages_with_social_sharing", 0) or 0),
@@ -2754,6 +2982,24 @@ def build_report(scan_id: str) -> dict:
                 "no_internal_links_pages": nlp_seo_no_internal_links_pages,
                 "schema_faq_pages": nlp_seo_schema_faq_pages,
                 "llms_txt_present_pages": nlp_seo_llms_present_pages,
+            },
+            "nlp_seo_h1_kpi": {
+                "h1_missing_pages": nlp_seo_h1_missing_pages,
+                "h1_multiple_pages": nlp_seo_h1_multiple_pages,
+            },
+            "nlp_seo_meta_kpi": {
+                "title_too_long_pages": nlp_seo_title_too_long_pages,
+                "meta_missing_pages": nlp_seo_meta_missing_pages,
+            },
+            "nlp_seo_ai_readiness_kpi": {
+                "llms_txt_present_pages": nlp_seo_llms_present_pages,
+            },
+            "contextual_link_measurement": {
+                "pages_checked": total_pages,
+                "content_zone_detected_pages": ux_content_zone_detected_pages,
+                "reliable_pages": ux_contextual_reliable_pages,
+                "reliable_coverage_pct": contextual_reliable_coverage_pct,
+                "passed": ux_contextual_reliable_pages == total_pages if total_pages else False,
             },
             "evidence_provenance": {
                 "static_pages": evidence_provenance_counts["static"],
@@ -2785,6 +3031,14 @@ def build_report(scan_id: str) -> dict:
                 "passed": menu_passed,
                 "pages_with_menu_issues": menu_bad_pages,
                 "evidence": menu_issue_samples[:5],
+            },
+            "mobile_friendly_kpi": {
+                "available": ux_mobile_checked_pages > 0,
+                "pages_checked": ux_mobile_checked_pages,
+                "pages_with_mobile_overflow": ux_mobile_overflow_pages,
+                "affected_page_urls": sorted(set(ux_mobile_overflow_urls)),
+                "passed": (ux_mobile_overflow_pages == 0) if ux_mobile_checked_pages > 0 else None,
+                "reason": None if ux_mobile_checked_pages > 0 else "mobile_overflow_not_collected",
             },
             "footer_rgpd_alignment_kpi": footer_rgpd_alignment,
         },

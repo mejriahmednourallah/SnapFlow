@@ -31,7 +31,7 @@ type SSLInfo struct {
 	Protocol string `json:"protocol,omitempty"`
 	Error    string `json:"error,omitempty"`
 	// Status is set to "non_evalue" when the probe ran but data couldn't be determined (e.g. empty cert chain).
-	Status   string `json:"status,omitempty"`
+	Status string `json:"status,omitempty"`
 }
 
 // CookieFlagResult holds a single cookie that is missing HttpOnly or Secure.
@@ -206,7 +206,7 @@ type ScanResult struct {
 	FileUploadExtensionControl FileUploadResult `json:"file_upload_extension_control"`
 
 	// ── Checks 1-10 (New): Group D - Data-Matching Check ───────────────────
-	VulnerableJSDependencies VulnerableJSResult `json:"vulnerable_js_dependencies"`
+	VulnerableJSDependencies VulnerableJSResult    `json:"vulnerable_js_dependencies"`
 	ServiceExposure          ServiceExposureResult `json:"service_exposure"`
 
 	// Overall pass/fail: SSL valid + no missing critical headers
@@ -830,7 +830,7 @@ var extendedSensitiveFiles = []string{
 	"/admin/config.php", "/system/storage/logs/error.log", "/install/index.php",
 	"/typo3conf/LocalConfiguration.php", "/typo3conf/AdditionalConfiguration.php",
 	"/config/settings.inc.php", "/config/defines.inc.php", "/admin-dev/",
-	"/sites/default/settings.php", "/sites/default/files/", "/core/install.php",
+	"/sites/default/settings.php", "/sites/default/files/",
 	"/administrator/configuration.php", "/configuration.php-dist",
 	"/ghost/api/admin/", "/content/data/", "/content/images/",
 	"/api/openapi", "/swagger.json", "/.well-known/security.txt",
@@ -1037,9 +1037,9 @@ var benignPublicFiles = map[string]bool{
 	"/LICENSE.txt": true, "/license.txt": true,
 	"/CONTRIBUTING.md": true, "/contributing.md": true,
 	"/CODE_OF_CONDUCT.md": true, "/code_of_conduct.md": true,
-	"/robots.txt": true,
-	"/sitemap.xml": true,
-	"/favicon.ico": true,
+	"/robots.txt":               true,
+	"/sitemap.xml":              true,
+	"/favicon.ico":              true,
 	"/.well-known/security.txt": true,
 }
 
@@ -1048,9 +1048,9 @@ var sensitiveContentRe = regexp.MustCompile(`(?i)(password\s*=|db_password|secre
 
 // SensitiveFileInfo carries per-file probe detail used internally.
 type sensitiveFileDetail struct {
-	path     string
-	status   int
-	isBenign bool
+	path      string
+	status    int
+	isBenign  bool
 	hasSecret bool
 }
 

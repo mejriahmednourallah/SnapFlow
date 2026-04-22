@@ -2,6 +2,7 @@ package ux
 
 import (
 	"fmt"
+	"net/url"
 	"regexp"
 	"strings"
 
@@ -9,11 +10,13 @@ import (
 )
 
 type UXResult struct {
-	ProductCardsMissingImages []string `json:"product_cards_missing_images"`
-	TextContentRatio          float64  `json:"text_content_ratio"`
-	ContextualInternalLinks   int      `json:"contextual_internal_links"`
-	IsReadable                bool     `json:"is_readable"`
-	HasMap                    bool     `json:"has_map"`
+	ProductCardsMissingImages     []string `json:"product_cards_missing_images"`
+	TextContentRatio              float64  `json:"text_content_ratio"`
+	ContextualInternalLinks       int      `json:"contextual_internal_links"`
+	ContentZoneDetected           bool     `json:"content_zone_detected"`
+	ContextualMeasurementReliable bool     `json:"contextual_measurement_reliable"`
+	IsReadable                    bool     `json:"is_readable"`
+	HasMap                        bool     `json:"has_map"`
 	// Phase E: count instead of bool
 	SimulatorCount      int      `json:"simulator_count"`
 	RawIPLinkCount      int      `json:"raw_ip_link_count"`
@@ -40,6 +43,10 @@ func Analyze(pageURL string, html string, baseDomain string) UXResult {
 	cleanDomain := strings.TrimPrefix(baseDomain, "http://")
 	cleanDomain = strings.TrimPrefix(cleanDomain, "https://")
 	cleanDomain = strings.TrimPrefix(cleanDomain, "www.")
+	if parsedBase, parseErr := url.Parse(baseDomain); parseErr == nil && parsedBase.Hostname() != "" {
+		cleanDomain = parsedBase.Hostname()
+	}
+	cleanDomain = strings.ToLower(strings.TrimPrefix(cleanDomain, "www."))
 
 	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
 	if err != nil {
@@ -99,34 +106,57 @@ func Analyze(pageURL string, html string, baseDomain string) UXResult {
 	}
 
 	// 3. Detect contextual (in-article) internal links vs. menu links (Maillage)
-	mainArea := doc.Find("main, article, .content, #content, .main, #main").First()
-	if mainArea.Length() == 0 {
-		mainArea = doc.Find("body")
-	}
+	mainArea := doc.Find("main, article, [role='main'], #content, #main, .main-content, .content").First()
+	res.ContentZoneDetected = mainArea.Length() > 0
+	res.ContextualMeasurementReliable = res.ContentZoneDetected
 
 	contextualLinks := 0
-	mainArea.Find("a[href]").Each(func(i int, s *goquery.Selection) {
-		href, exists := s.Attr("href")
-		if exists {
-			lowerHref := strings.ToLower(href)
-			if strings.HasPrefix(lowerHref, "/") || strings.Contains(lowerHref, cleanDomain) {
-				if !strings.HasPrefix(lowerHref, "#") && !strings.HasPrefix(lowerHref, "javascript:") {
-					parentName := goquery.NodeName(s.Parent())
-					// [U-3] Accept li and semantic HTML5 sections as contextual parents.
-					if parentName == "p" || parentName == "span" || parentName == "div" || parentName == "td" || parentName == "li" ||
-						parentName == "section" || parentName == "article" || parentName == "main" || parentName == "aside" {
-						// Double check it's not a button or navigation component hiding in a div/li
-						parentClass, _ := s.Parent().Attr("class")
-						if !strings.Contains(strings.ToLower(parentClass), "menu") && !strings.Contains(strings.ToLower(parentClass), "nav") {
-							contextualLinks++
-						}
-					}
-				}
-			}
+	normalizeHost := func(h string) string {
+		h = strings.ToLower(strings.TrimSpace(h))
+		h = strings.TrimPrefix(h, "www.")
+		if parsed, err := url.Parse("//" + h); err == nil && parsed.Hostname() != "" {
+			h = strings.ToLower(strings.TrimPrefix(parsed.Hostname(), "www."))
 		}
-	})
+		return h
+	}
+	baseHost := normalizeHost(cleanDomain)
+	isInternalHref := func(href string) bool {
+		href = strings.TrimSpace(strings.ToLower(href))
+		if href == "" || strings.HasPrefix(href, "#") || strings.HasPrefix(href, "javascript:") || strings.HasPrefix(href, "mailto:") || strings.HasPrefix(href, "tel:") {
+			return false
+		}
+		if strings.HasPrefix(href, "/") || strings.HasPrefix(href, "./") || strings.HasPrefix(href, "../") {
+			return true
+		}
+		if strings.HasPrefix(href, "//") {
+			href = "https:" + href
+		}
+		if strings.HasPrefix(href, "http://") || strings.HasPrefix(href, "https://") {
+			parsedHref, err := url.Parse(href)
+			if err != nil || parsedHref.Hostname() == "" {
+				return false
+			}
+			host := normalizeHost(parsedHref.Hostname())
+			return host == baseHost
+		}
+		return false
+	}
+	if mainArea.Length() > 0 {
+		mainArea.Find("a[href]").Each(func(i int, s *goquery.Selection) {
+			href, exists := s.Attr("href")
+			if !exists || !isInternalHref(href) {
+				return
+			}
+
+			if s.Closest("nav, header, footer, [role='navigation'], .menu, .nav, .navbar, .breadcrumb, .footer, .header, .tabs, .tab-nav, .accordion__nav").Length() > 0 {
+				return
+			}
+
+			contextualLinks++
+		})
+	}
 	res.ContextualInternalLinks = contextualLinks
-	if textLen > 1500 && contextualLinks == 0 {
+	if res.ContextualMeasurementReliable && textLen > 1500 && contextualLinks == 0 {
 		res.Issues = append(res.Issues, "Missing contextual internal links (Maillage default) in main content area")
 	}
 

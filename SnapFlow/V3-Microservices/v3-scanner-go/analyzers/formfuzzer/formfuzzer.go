@@ -28,56 +28,65 @@ type FormField struct {
 type SubmissionOutcome string
 
 const (
-	OutcomeSuccess           SubmissionOutcome = "success_submitted"
-	OutcomeSilentAcceptance  SubmissionOutcome = "silent_acceptance"       // [F-1] fuzz payload accepted without any validation feedback
-	OutcomeServerCrash       SubmissionOutcome = "server_error_on_fuzz"    // [F-2] 5xx response to fuzz = potential injection/crash
-	OutcomeValidationFailed  SubmissionOutcome = "validation_failed"
-	OutcomeBlockedWAF        SubmissionOutcome = "blocked_csrf_or_waf"     // 403 only
-	OutcomeAuthRequired      SubmissionOutcome = "auth_required"           // 401
-	OutcomeNotFound          SubmissionOutcome = "form_endpoint_not_found" // 404 — broken form, not WAF
-	OutcomeMethodNotAllowed  SubmissionOutcome = "method_not_allowed"      // 405 — wrong HTTP method
-	OutcomeRateLimited       SubmissionOutcome = "rate_limited"            // 429 — too many requests
-	OutcomeFalsePositive     SubmissionOutcome = "false_positive_no_reaction"
-	OutcomeInconclusiveCap   SubmissionOutcome = "inconclusive_captcha"
-	OutcomeRequestError      SubmissionOutcome = "request_error"
+	OutcomeSuccess          SubmissionOutcome = "success_submitted"
+	OutcomeSilentAcceptance SubmissionOutcome = "silent_acceptance"    // [F-1] fuzz payload accepted without any validation feedback
+	OutcomeServerCrash      SubmissionOutcome = "server_error_on_fuzz" // [F-2] 5xx response to fuzz = potential injection/crash
+	OutcomeValidationFailed SubmissionOutcome = "validation_failed"
+	OutcomeBlockedWAF       SubmissionOutcome = "blocked_csrf_or_waf"     // 403 only
+	OutcomeAuthRequired     SubmissionOutcome = "auth_required"           // 401
+	OutcomeNotFound         SubmissionOutcome = "form_endpoint_not_found" // 404 — broken form, not WAF
+	OutcomeMethodNotAllowed SubmissionOutcome = "method_not_allowed"      // 405 — wrong HTTP method
+	OutcomeRateLimited      SubmissionOutcome = "rate_limited"            // 429 — too many requests
+	OutcomeFalsePositive    SubmissionOutcome = "false_positive_no_reaction"
+	OutcomeInconclusiveCap  SubmissionOutcome = "inconclusive_captcha"
+	OutcomeRequestError     SubmissionOutcome = "request_error"
 )
 
 type DiscoveredForm struct {
-	FormID    string      `json:"form_id"`
-	PageURL   string      `json:"page_url"`
-	ActionURL string      `json:"action_url"`
-	Method    string      `json:"method"`
-	Fields    []FormField `json:"fields"`
-	IsModal   bool        `json:"is_modal,omitempty"` // Layer 5: Set to true if form discovered inside modal
+	FormID          string      `json:"form_id"`
+	PageURL         string      `json:"page_url"`
+	ActionURL       string      `json:"action_url"`
+	Method          string      `json:"method"`
+	Fields          []FormField `json:"fields"`
+	IsModal         bool        `json:"is_modal,omitempty"` // Layer 5: Set to true if form discovered inside modal
+	IsTransactional bool        `json:"is_transactional,omitempty"`
 }
 
 type FormTestResult struct {
-	PageURL       string            `json:"page_url"`
-	ActionURL     string            `json:"action_url"`
-	FormID        string            `json:"form_id"`
-	TestType      string            `json:"test_type"`
-	Payload       map[string]string `json:"payload"`
-	ResponseType  string            `json:"response_type"`
-	StatusCode    int               `json:"status_code"`
-	DurationMS    int64             `json:"duration_ms"`
-	ResponseHash  string            `json:"response_hash,omitempty"`
-	Anomaly       bool              `json:"anomaly"`
-	AnomalyReason string            `json:"anomaly_reason,omitempty"`
-	Error         string            `json:"error,omitempty"`
-	responseSig   string
-	responseBody  string // normalized body retained for diff analysis (not serialized)
+	PageURL              string            `json:"page_url"`
+	ActionURL            string            `json:"action_url"`
+	FormID               string            `json:"form_id"`
+	TestType             string            `json:"test_type"`
+	Payload              map[string]string `json:"payload"`
+	ResponseType         string            `json:"response_type"`
+	StatusCode           int               `json:"status_code"`
+	DurationMS           int64             `json:"duration_ms"`
+	ResponseHash         string            `json:"response_hash,omitempty"`
+	Anomaly              bool              `json:"anomaly"`
+	AnomalyReason        string            `json:"anomaly_reason,omitempty"`
+	FormCategory         string            `json:"form_category,omitempty"`
+	Confidence           string            `json:"confidence,omitempty"`
+	CountsTowardsMainKPI bool              `json:"counts_towards_main_kpi,omitempty"`
+	Error                string            `json:"error,omitempty"`
+	responseSig          string
+	responseBody         string // normalized body retained for diff analysis (not serialized)
 }
 
 type Summary struct {
-	Enabled          bool     `json:"enabled"`
-	SkippedReason    string   `json:"skipped_reason,omitempty"`
-	FormsDiscovered  int      `json:"forms_discovered"`
-	FormsTested      int      `json:"forms_tested"`
-	TestsRun         int      `json:"tests_run"`
-	AnomaliesFound   int      `json:"anomalies_found"`
-	AffectedPages    int      `json:"affected_pages"`
-	AffectedPageURLs []string `json:"affected_page_urls,omitempty"`
-	DurationMS       int64    `json:"duration_ms"`
+	Enabled                          bool     `json:"enabled"`
+	SkippedReason                    string   `json:"skipped_reason,omitempty"`
+	FormsDiscovered                  int      `json:"forms_discovered"`
+	FormsTested                      int      `json:"forms_tested"`
+	TestsRun                         int      `json:"tests_run"`
+	AnomaliesFound                   int      `json:"anomalies_found"`
+	UniqueTransactionalFormsDetected int      `json:"unique_transactional_forms_detected"`
+	UniqueTransactionalFormsTested   int      `json:"unique_transactional_forms_tested"`
+	NonTransactionalFormsTested      int      `json:"non_transactional_forms_tested"`
+	SuppressedLowConfidenceAnomalies int      `json:"suppressed_low_confidence_anomalies"`
+	Status                           string   `json:"status,omitempty"`
+	AffectedPages                    int      `json:"affected_pages"`
+	AffectedPageURLs                 []string `json:"affected_page_urls,omitempty"`
+	DurationMS                       int64    `json:"duration_ms"`
 }
 
 type Config struct {
@@ -135,29 +144,18 @@ func ExtractForms(pageURL, html string) []DiscoveredForm {
 			continue
 		}
 
-		// Layer 1: Skip search/filter/sort forms classified as GET with search/filter/sort in action
-		if method == http.MethodGet {
-			actionLower := strings.ToLower(actionURL)
-			if strings.Contains(actionLower, "search") || strings.Contains(actionLower, "filter") || strings.Contains(actionLower, "sort") {
-				continue
-			}
-			// Skip single search input forms (e.g., search box)
-			if len(fields) == 1 && strings.ToLower(fields[0].Type) == "search" {
-				continue
-			}
-		}
-
 		formID := strings.TrimSpace(attrs["id"])
 		if formID == "" {
 			formID = fmt.Sprintf("form_%d", i+1)
 		}
 
 		forms = append(forms, DiscoveredForm{
-			FormID:    formID,
-			PageURL:   pageURL,
-			ActionURL: actionURL,
-			Method:    method,
-			Fields:    fields,
+			FormID:          formID,
+			PageURL:         pageURL,
+			ActionURL:       actionURL,
+			Method:          method,
+			Fields:          fields,
+			IsTransactional: isTransactionalForm(formID, actionURL, method, fields),
 		})
 	}
 
@@ -185,8 +183,27 @@ func Run(ctx context.Context, forms []DiscoveredForm, cfg Config) ([]FormTestRes
 
 	selected := selectFormsInScope(forms, cfg.MaxForms, cfg.AllowedDomains)
 	summary.FormsTested = len(selected)
+	transactionalDetected := map[string]struct{}{}
+	transactionalTested := map[string]struct{}{}
+	nonTransactionalTested := map[string]struct{}{}
+	for _, form := range forms {
+		if form.IsTransactional {
+			transactionalDetected[formIdentityKey(form)] = struct{}{}
+		}
+	}
+	for _, form := range selected {
+		if form.IsTransactional {
+			transactionalTested[formIdentityKey(form)] = struct{}{}
+		} else {
+			nonTransactionalTested[formIdentityKey(form)] = struct{}{}
+		}
+	}
+	summary.UniqueTransactionalFormsDetected = len(transactionalDetected)
+	summary.UniqueTransactionalFormsTested = len(transactionalTested)
+	summary.NonTransactionalFormsTested = len(nonTransactionalTested)
 	if len(selected) == 0 {
 		summary.SkippedReason = "no_in_scope_forms"
+		summary.Status = "non_evalue"
 		summary.DurationMS = time.Since(start).Milliseconds()
 		return nil, summary
 	}
@@ -230,11 +247,13 @@ func Run(ctx context.Context, forms []DiscoveredForm, cfg Config) ([]FormTestRes
 	applyResponseDiffing(results)
 	affectedPages := map[string]struct{}{}
 	for _, r := range results {
-		if r.Anomaly {
+		if r.Anomaly && r.CountsTowardsMainKPI {
 			summary.AnomaliesFound++
 			if page := strings.TrimSpace(r.PageURL); page != "" {
 				affectedPages[page] = struct{}{}
 			}
+		} else if r.Anomaly && !r.CountsTowardsMainKPI {
+			summary.SuppressedLowConfidenceAnomalies++
 		}
 	}
 	if len(affectedPages) > 0 {
@@ -262,6 +281,13 @@ func Run(ctx context.Context, forms []DiscoveredForm, cfg Config) ([]FormTestRes
 		return results[i].TestType < results[j].TestType
 	})
 
+	if summary.UniqueTransactionalFormsTested == 0 {
+		summary.Status = "non_evalue"
+	} else if summary.AnomaliesFound > 0 {
+		summary.Status = "failing"
+	} else {
+		summary.Status = "passing"
+	}
 	summary.DurationMS = time.Since(start).Milliseconds()
 	return results, summary
 }
@@ -274,6 +300,15 @@ func runSingleTest(ctx context.Context, client *http.Client, j testJob) FormTest
 		FormID:    j.form.FormID,
 		TestType:  j.test,
 		Payload:   j.payload,
+	}
+	if j.form.IsTransactional {
+		res.FormCategory = "transactional"
+		res.Confidence = "high"
+		res.CountsTowardsMainKPI = true
+	} else {
+		res.FormCategory = "non_transactional"
+		res.Confidence = "low"
+		res.CountsTowardsMainKPI = false
 	}
 
 	statusCode, body, responseType, err := submitForm(ctx, client, j.form, j.payload)
@@ -762,16 +797,91 @@ func responseSignature(body string) string {
 
 func selectFormsInScope(forms []DiscoveredForm, max int, allowedDomains map[string]bool) []DiscoveredForm {
 	selected := make([]DiscoveredForm, 0, len(forms))
+	seenIdentities := map[string]struct{}{}
 	for _, f := range forms {
 		if !isActionInScope(f.ActionURL, allowedDomains) {
 			continue
 		}
+		identity := formIdentityKey(f)
+		if _, exists := seenIdentities[identity]; exists {
+			continue
+		}
+		seenIdentities[identity] = struct{}{}
 		selected = append(selected, f)
 		if len(selected) >= max {
 			break
 		}
 	}
 	return selected
+}
+
+func formIdentityKey(form DiscoveredForm) string {
+	formID := strings.ToLower(strings.TrimSpace(form.FormID))
+	if formID == "" {
+		formID = "__missing_form_id__"
+	}
+
+	action := strings.TrimSpace(form.ActionURL)
+	if parsed, err := url.Parse(action); err == nil && parsed != nil {
+		host := normalizeHost(parsed.Hostname())
+		path := strings.TrimSpace(parsed.EscapedPath())
+		if path == "" {
+			path = "/"
+		}
+		query := strings.TrimSpace(parsed.RawQuery)
+		if query != "" {
+			action = fmt.Sprintf("%s%s?%s", host, path, query)
+		} else {
+			action = host + path
+		}
+	} else {
+		action = strings.ToLower(strings.TrimRight(action, "/"))
+	}
+
+	if action == "" {
+		pageURL := strings.ToLower(strings.TrimSpace(form.PageURL))
+		action = "__missing_action_url__|" + pageURL
+	}
+
+	method := strings.ToUpper(strings.TrimSpace(form.Method))
+	if method == "" {
+		method = http.MethodPost
+	}
+	return formID + "|" + action + "|" + method + "|" + stableFieldSignature(form.Fields)
+}
+
+func stableFieldSignature(fields []FormField) string {
+	parts := make([]string, 0, len(fields))
+	for _, field := range fields {
+		name := strings.ToLower(strings.TrimSpace(field.Name))
+		if name == "" {
+			name = strings.ToLower(strings.TrimSpace(field.ID))
+		}
+		if name == "" {
+			continue
+		}
+		parts = append(parts, name+":"+strings.ToLower(strings.TrimSpace(field.Type)))
+	}
+	sort.Strings(parts)
+	return strings.Join(parts, ",")
+}
+
+func isTransactionalForm(formID, actionURL, method string, fields []FormField) bool {
+	formBlob := strings.ToLower(strings.TrimSpace(strings.Join([]string{formID, actionURL, method}, " ")))
+	if strings.Contains(formBlob, "views-exposed-form") || strings.Contains(formBlob, "filter") || strings.Contains(formBlob, "search") || strings.Contains(formBlob, "sort") {
+		return false
+	}
+	if strings.EqualFold(strings.TrimSpace(method), http.MethodGet) {
+		return false
+	}
+	for _, field := range fields {
+		semantic := inferFieldSemantic(field)
+		switch semantic {
+		case "email", "phone", "full_name", "first_name", "last_name", "company", "message":
+			return true
+		}
+	}
+	return false
 }
 
 func isActionInScope(actionURL string, allowedDomains map[string]bool) bool {

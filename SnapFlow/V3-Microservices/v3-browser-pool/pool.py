@@ -19,7 +19,7 @@ from playwright.async_api import async_playwright, Browser, Playwright
 
 logger = logging.getLogger("browser-pool")
 
-POOL_CONCURRENCY = int(os.getenv("BROWSER_POOL_CONCURRENCY", "3"))
+POOL_CONCURRENCY = int(os.getenv("BROWSER_POOL_CONCURRENCY", "5"))
 RECYCLE_AFTER    = int(os.getenv("BROWSER_POOL_RECYCLE_AFTER", "50"))
 DEFAULT_TIMEOUT  = int(os.getenv("BROWSER_POOL_DEFAULT_TIMEOUT_MS", "30000"))
 _CHROME_NO_SANDBOX = os.getenv("CHROME_NO_SANDBOX", "").strip().lower() in ("1", "true", "yes", "on")

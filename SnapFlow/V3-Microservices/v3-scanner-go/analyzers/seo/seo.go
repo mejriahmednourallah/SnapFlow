@@ -3,6 +3,7 @@ package seo
 import (
 	"crypto/md5"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -28,49 +29,60 @@ type HeadingInfo struct {
 }
 
 type LinkInfo struct {
-	InternalLinks int `json:"internal_links"`
-	ExternalLinks int `json:"external_links"`
-	BrokenLinks   int `json:"broken_links"`
+	InternalLinks   int      `json:"internal_links"`
+	ExternalLinks   int      `json:"external_links"`
+	BrokenLinks     int      `json:"broken_links"`
+	ExternalDomains []string `json:"external_domains,omitempty"`
+}
+
+type HTTPProbeResult struct {
+	Present     bool   `json:"present"`
+	FinalURL    string `json:"final_url,omitempty"`
+	DetectedVia string `json:"detected_via,omitempty"`
+	Body        string `json:"-"`
 }
 
 type SEOResult struct {
-	URL           string        `json:"url"`
-	RawHTML       string        `json:"-"`
-	Meta          MetaInfo      `json:"meta"`
-	Headings      []HeadingInfo `json:"headings"`
-	HeadingValid  bool          `json:"heading_hierarchy_valid"`
-	Links         LinkInfo      `json:"links"`
-	HasSitemap    bool          `json:"has_sitemap"`
-	HasRobotsTxt  bool          `json:"has_robots_txt"`
-	ImagesNoAlt   int           `json:"images_without_alt"`
-	TotalImages   int           `json:"total_images"`
-	HasLazyImages bool          `json:"has_lazy_loading"`
-	URLClean      bool          `json:"url_clean"`
-	ContentHash   string        `json:"content_hash"`
+	URL                   string        `json:"url"`
+	RawHTML               string        `json:"-"`
+	Meta                  MetaInfo      `json:"meta"`
+	Headings              []HeadingInfo `json:"headings"`
+	HeadingValid          bool          `json:"heading_hierarchy_valid"`
+	Links                 LinkInfo      `json:"links"`
+	HasSitemap            bool          `json:"has_sitemap"`
+	HasRobotsTxt          bool          `json:"has_robots_txt"`
+	ImagesNoAlt           int           `json:"images_without_alt"`
+	TotalImages           int           `json:"total_images"`
+	HasLazyImages         bool          `json:"has_lazy_loading"`
+	URLClean              bool          `json:"url_clean"`
+	ContentHash           string        `json:"content_hash"`
+	ContentHashMethod     string        `json:"content_hash_method"`
+	ContentHashConfidence float64       `json:"content_hash_confidence"`
+	ContentWordCount      int           `json:"content_word_count"`
 	// Phase F: node-style URL detection
-	NodeStyleURLCount int      `json:"node_style_url_count"`
-	NodeStyleURLs     []string `json:"node_style_urls"`
-	HasOGType         bool     `json:"has_og_type"`
-	HasTwitterCard    bool     `json:"has_twitter_card"`
+	NodeStyleURLCount  int      `json:"node_style_url_count"`
+	NodeStyleURLs      []string `json:"node_style_urls"`
+	HasOGType          bool     `json:"has_og_type"`
+	HasTwitterCard     bool     `json:"has_twitter_card"`
 	SocialShareButtons []string `json:"social_share_buttons"`
 	SocialSharingScore int      `json:"social_sharing_score"`
-	Score             int      `json:"score"`
-	Passed            bool     `json:"passed"`
-	Issues            []string `json:"issues"`
-	ServiceName       string   `json:"service_name"`
+	Score              int      `json:"score"`
+	Passed             bool     `json:"passed"`
+	Issues             []string `json:"issues"`
+	ServiceName        string   `json:"service_name"`
 }
 
 var (
-	titleRe     = regexp.MustCompile(`(?is)<title[^>]*>(.*?)</title>`)
-	metaDescRe  = regexp.MustCompile(`(?is)<meta[^>]+name=["']description["'][^>]+content=["'](.*?)["']`)
-	metaDescRe2 = regexp.MustCompile(`(?is)<meta[^>]+content=["'](.*?)["'][^>]+name=["']description["']`)
-	linkRe      = regexp.MustCompile(`(?is)<a[^>]+href=["'](.*?)["']`)
-	nodeStyleRe = regexp.MustCompile(`(?i)(/node/\d+|[?&]q=)`)
-	ogTypeRe    = regexp.MustCompile(`(?is)<meta[^>]+property=["']og:type["'][^>]*content=["']([^"']+)["']|<meta[^>]+content=["']([^"']+)["'][^>]*property=["']og:type["']`)
-	twitterCardRe = regexp.MustCompile(`(?is)<meta[^>]+name=["']twitter:card["'][^>]*content=["']([^"']+)["']|<meta[^>]+content=["']([^"']+)["'][^>]*name=["']twitter:card["']`)
+	titleRe         = regexp.MustCompile(`(?is)<title[^>]*>(.*?)</title>`)
+	metaDescRe      = regexp.MustCompile(`(?is)<meta[^>]+name=["']description["'][^>]+content=["'](.*?)["']`)
+	metaDescRe2     = regexp.MustCompile(`(?is)<meta[^>]+content=["'](.*?)["'][^>]+name=["']description["']`)
+	linkRe          = regexp.MustCompile(`(?is)<a[^>]+href=["'](.*?)["']`)
+	nodeStyleRe     = regexp.MustCompile(`(?i)(/node/\d+|[?&]q=)`)
+	ogTypeRe        = regexp.MustCompile(`(?is)<meta[^>]+property=["']og:type["'][^>]*content=["']([^"']+)["']|<meta[^>]+content=["']([^"']+)["'][^>]*property=["']og:type["']`)
+	twitterCardRe   = regexp.MustCompile(`(?is)<meta[^>]+name=["']twitter:card["'][^>]*content=["']([^"']+)["']|<meta[^>]+content=["']([^"']+)["'][^>]*name=["']twitter:card["']`)
 	facebookShareRe = regexp.MustCompile(`(?i)(facebook\.com/(?:sharer|share)|share-facebook|class=["'][^"']*(?:facebook-share|share-facebook)[^"']*["'])`)
 	linkedinShareRe = regexp.MustCompile(`(?i)(linkedin\.com/(?:shareArticle|sharing/share-offsite)|share-linkedin|class=["'][^"']*(?:linkedin-share|share-linkedin)[^"']*["'])`)
-	twitterShareRe = regexp.MustCompile(`(?i)(twitter\.com/intent/tweet|x\.com/intent/post|share-twitter|class=["'][^"']*(?:twitter-share|share-twitter)[^"']*["'])`)
+	twitterShareRe  = regexp.MustCompile(`(?i)(twitter\.com/intent/tweet|x\.com/intent/post|share-twitter|class=["'][^"']*(?:twitter-share|share-twitter)[^"']*["'])`)
 	whatsappShareRe = regexp.MustCompile(`(?i)(wa\.me/|api\.whatsapp\.com/send|share-whatsapp|class=["'][^"']*(?:whatsapp-share|share-whatsapp)[^"']*["'])`)
 )
 
@@ -176,6 +188,7 @@ func isInternalLink(href, baseURL string) bool {
 func extractLinks(html, baseURL string) LinkInfo {
 	matches := linkRe.FindAllStringSubmatch(html, -1)
 	info := LinkInfo{}
+	externalDomains := map[string]struct{}{}
 
 	for _, m := range matches {
 		href := strings.TrimSpace(m[1])
@@ -186,8 +199,19 @@ func extractLinks(html, baseURL string) LinkInfo {
 			info.InternalLinks++
 		} else {
 			info.ExternalLinks++
+			parsedHref, err := url.Parse(href)
+			if err == nil {
+				host := seoNormalizeHost(parsedHref.Hostname())
+				if host != "" {
+					externalDomains[host] = struct{}{}
+				}
+			}
 		}
 	}
+	for host := range externalDomains {
+		info.ExternalDomains = append(info.ExternalDomains, host)
+	}
+	sort.Strings(info.ExternalDomains)
 	return info
 }
 
@@ -256,23 +280,82 @@ func detectNodeStyleURLs(html, baseURL string) (int, []string) {
 }
 
 func CheckSitemap(baseURL string) bool {
-	client := &http.Client{Timeout: 5 * time.Second}
-	resp, err := client.Get(strings.TrimRight(baseURL, "/") + "/sitemap.xml")
-	if err != nil {
-		return false
-	}
-	defer resp.Body.Close()
-	return resp.StatusCode == 200
+	result := ProbeSitemap(baseURL, nil)
+	return result.Present
 }
 
 func CheckRobotsTxt(baseURL string) bool {
-	client := &http.Client{Timeout: 5 * time.Second}
-	resp, err := client.Get(strings.TrimRight(baseURL, "/") + "/robots.txt")
-	if err != nil {
-		return false
+	result := ProbeRobotsTxt(baseURL)
+	return result.Present
+}
+
+func ProbeSitemap(baseURL string, robotsProbe *HTTPProbeResult) HTTPProbeResult {
+	root := strings.TrimRight(baseURL, "/")
+	if root == "" {
+		return HTTPProbeResult{}
 	}
-	defer resp.Body.Close()
-	return resp.StatusCode == 200
+
+	client := &http.Client{Timeout: 8 * time.Second}
+
+	candidates := []string{
+		root + "/sitemap.xml",
+		root + "/sitemap_index.xml",
+	}
+	for _, candidate := range candidates {
+		if probe := probeHTTPResource(client, candidate); probe.Present {
+			return probe
+		}
+	}
+
+	robots := robotsProbe
+	if robots == nil || !robots.Present || strings.TrimSpace(robots.Body) == "" {
+		fetched := ProbeRobotsTxt(baseURL)
+		robots = &fetched
+	}
+	if robots == nil || !robots.Present || strings.TrimSpace(robots.Body) == "" {
+		return HTTPProbeResult{}
+	}
+
+	for _, line := range strings.Split(robots.Body, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		lower := strings.ToLower(line)
+		if !strings.HasPrefix(lower, "sitemap:") {
+			continue
+		}
+		sm := strings.TrimSpace(line[len("sitemap:"):])
+		if sm == "" {
+			continue
+		}
+		smURL, err := url.Parse(sm)
+		if err != nil {
+			continue
+		}
+		if !smURL.IsAbs() {
+			baseParsed, baseErr := url.Parse(root)
+			if baseErr != nil {
+				continue
+			}
+			smURL = baseParsed.ResolveReference(smURL)
+		}
+		if probe := probeHTTPResource(client, smURL.String()); probe.Present {
+			probe.DetectedVia = "robots_declared"
+			return probe
+		}
+	}
+
+	return HTTPProbeResult{}
+}
+
+func ProbeRobotsTxt(baseURL string) HTTPProbeResult {
+	root := strings.TrimRight(baseURL, "/")
+	if root == "" {
+		return HTTPProbeResult{}
+	}
+	client := &http.Client{Timeout: 8 * time.Second}
+	return probeHTTPResource(client, root+"/robots.txt")
 }
 
 func Analyze(targetURL string, html string, hasSitemap bool, hasRobots bool) SEOResult {
@@ -307,8 +390,12 @@ func Analyze(targetURL string, html string, hasSitemap bool, hasRobots bool) SEO
 	// URL structure check
 	res.URLClean = !strings.ContainsAny(targetURL, "?&=") || strings.Count(targetURL, "?") <= 1
 
-	// Content hash for duplicate detection — focus on main content, strip boilerplate.
-	res.ContentHash = computeContentHash(doc)
+	// Content hash for duplicate detection — focus on content quality first.
+	hashInfo := computeContentHash(doc)
+	res.ContentHash = hashInfo.Hash
+	res.ContentHashMethod = hashInfo.Method
+	res.ContentHashConfidence = hashInfo.Confidence
+	res.ContentWordCount = hashInfo.WordCount
 
 	score := 100
 
@@ -362,11 +449,87 @@ var boilerplateClassIDWords = []string{
 	"breadcrumb", "cookie", "banner", "widget",
 }
 
-// computeContentHash strips boilerplate from the document, focuses on the main
-// content block, and returns an MD5 hex hash suitable for duplicate detection.
-// If the extracted main content is shorter than 100 characters the function
-// falls back to the full body text (behaviour identical to the old code).
-func computeContentHash(doc *goquery.Document) string {
+type contentHashInfo struct {
+	Hash       string
+	Method     string
+	Confidence float64
+	WordCount  int
+}
+
+func probeHTTP200(client *http.Client, targetURL string) bool {
+	return probeHTTPResource(client, targetURL).Present
+}
+
+func probeHTTPResource(client *http.Client, targetURL string) HTTPProbeResult {
+	resp, err := client.Get(targetURL)
+	if err != nil {
+		return HTTPProbeResult{}
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return HTTPProbeResult{}
+	}
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024*1024))
+	detectedVia := "root"
+	if resp.Request != nil && resp.Request.URL != nil && targetURL != "" && !sameNormalizedURL(targetURL, resp.Request.URL.String()) {
+		detectedVia = "redirect"
+	}
+	finalURL := ""
+	if resp.Request != nil && resp.Request.URL != nil {
+		finalURL = resp.Request.URL.String()
+	}
+	return HTTPProbeResult{
+		Present:     true,
+		FinalURL:    finalURL,
+		DetectedVia: detectedVia,
+		Body:        string(body),
+	}
+}
+
+func fetchHTTPText(client *http.Client, targetURL string) (string, bool) {
+	probe := probeHTTPResource(client, targetURL)
+	if !probe.Present {
+		return "", false
+	}
+	return probe.Body, true
+}
+
+func sameNormalizedURL(left, right string) bool {
+	l, errLeft := url.Parse(left)
+	r, errRight := url.Parse(right)
+	if errLeft != nil || errRight != nil {
+		return strings.TrimRight(left, "/") == strings.TrimRight(right, "/")
+	}
+	return strings.EqualFold(strings.TrimRight(l.Scheme+"://"+l.Host+l.EscapedPath(), "/"), strings.TrimRight(r.Scheme+"://"+r.Host+r.EscapedPath(), "/"))
+}
+
+func normalizeForHash(text string) string {
+	return strings.Join(strings.Fields(strings.ToLower(strings.TrimSpace(text))), " ")
+}
+
+func uniqueWordRatio(text string) float64 {
+	words := strings.Fields(text)
+	if len(words) == 0 {
+		return 0
+	}
+	seen := map[string]struct{}{}
+	for _, w := range words {
+		seen[w] = struct{}{}
+	}
+	return float64(len(seen)) / float64(len(words))
+}
+
+func hashFromText(text string) string {
+	if text == "" {
+		return ""
+	}
+	return fmt.Sprintf("%x", md5.Sum([]byte(text)))
+}
+
+// computeContentHash strips boilerplate from the document, then produces a
+// quality-scored hash. Low-quality extraction returns an empty hash so downstream
+// duplicate KPIs can avoid false 100% duplication spikes.
+func computeContentHash(doc *goquery.Document) contentHashInfo {
 	// Clone the selection so removals don't affect the rest of the analysis.
 	clone := doc.Clone()
 
@@ -393,7 +556,10 @@ func computeContentHash(doc *goquery.Document) string {
 	for _, sel := range []string{"main", "article", "[role='main']", "[role=\"main\"]", ".content", "#content", "#main"} {
 		clone.Find(sel).Each(func(i int, s *goquery.Selection) {
 			if i == 0 {
-				mainContent = strings.TrimSpace(s.Text())
+				candidate := normalizeForHash(s.Text())
+				if len(candidate) > len(mainContent) {
+					mainContent = candidate
+				}
 			}
 		})
 		if mainContent != "" {
@@ -401,19 +567,72 @@ func computeContentHash(doc *goquery.Document) string {
 		}
 	}
 
-	// Normalize whitespace.
-	mainContent = strings.Join(strings.Fields(mainContent), " ")
-
-	if len(mainContent) < 100 {
-		// Fall back to full body text when the main block is too small.
-		fullBody := ""
-		clone.Find("body").Each(func(_ int, s *goquery.Selection) {
-			fullBody = strings.Join(strings.Fields(s.Text()), " ")
-		})
-		if len(fullBody) >= len(mainContent) {
-			mainContent = fullBody
+	mainWords := len(strings.Fields(mainContent))
+	if mainWords >= 40 {
+		return contentHashInfo{
+			Hash:       hashFromText(mainContent),
+			Method:     "main_content",
+			Confidence: 0.90,
+			WordCount:  mainWords,
+		}
+	}
+	if mainWords >= 25 && len(mainContent) >= 120 {
+		return contentHashInfo{
+			Hash:       hashFromText(mainContent),
+			Method:     "main_content_partial",
+			Confidence: 0.70,
+			WordCount:  mainWords,
 		}
 	}
 
-	return fmt.Sprintf("%x", md5.Sum([]byte(mainContent)))
+	// Fallback: choose the largest dense content-like block.
+	bestBlock := ""
+	clone.Find("section, article, div").Each(func(_ int, s *goquery.Selection) {
+		candidate := normalizeForHash(s.Text())
+		wc := len(strings.Fields(candidate))
+		if wc < 30 {
+			return
+		}
+		if len(candidate) > len(bestBlock) {
+			bestBlock = candidate
+		}
+	})
+	if bestBlock != "" {
+		wc := len(strings.Fields(bestBlock))
+		confidence := 0.50
+		if wc >= 40 {
+			confidence = 0.60
+		}
+		return contentHashInfo{
+			Hash:       hashFromText(bestBlock),
+			Method:     "content_block_fallback",
+			Confidence: confidence,
+			WordCount:  wc,
+		}
+	}
+
+	fullBody := ""
+	clone.Find("body").Each(func(_ int, s *goquery.Selection) {
+		fullBody = normalizeForHash(s.Text())
+	})
+	wc := len(strings.Fields(fullBody))
+	if wc < 40 || uniqueWordRatio(fullBody) < 0.20 {
+		return contentHashInfo{
+			Hash:       "",
+			Method:     "insufficient_content",
+			Confidence: 0.0,
+			WordCount:  wc,
+		}
+	}
+
+	confidence := 0.45
+	if wc >= 200 && uniqueWordRatio(fullBody) >= 0.30 {
+		confidence = 0.50
+	}
+	return contentHashInfo{
+		Hash:       hashFromText(fullBody),
+		Method:     "full_body_fallback",
+		Confidence: confidence,
+		WordCount:  wc,
+	}
 }

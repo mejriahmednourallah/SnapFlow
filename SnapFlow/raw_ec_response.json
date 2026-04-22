@@ -1,0 +1,207 @@
+{
+  "scan_id": "test-scan-001",
+  "domain": "https://example.com",
+  "pages_scanned": 15,
+  "generated_at": "2026-04-16T10:00:00Z",
+  "domain_analysis": {
+    "cms_kpi": {
+      "cms_detected": "WordPress",
+      "cms_version": "6.4.0",
+      "cms_version_eol": false,
+      "module_versions": [],
+      "cve_severity": {"critical": 0, "high": 0, "medium": 0, "low": 0},
+      "server_tech": "Apache",
+      "server_version": "2.4.63",
+      "language": "PHP",
+      "language_version": "8.2.0",
+      "issues": [],
+      "passed": true
+    },
+    "privacy_kpi": {
+      "has_privacy_policy": true,
+      "has_legal_notice": true,
+      "has_information_rights": true,
+      "has_declared_purpose": true,
+      "cookie_consent": {
+        "has_banner": true,
+        "cmp_present": true,
+        "cmp_nlp_detected": false
+      }
+    },
+    "cookie_kpi": {
+      "missing_cookie_flag_count": 0,
+      "cookies_with_missing_flags": []
+    },
+    "functional_kpi": {
+      "total_forms": 2,
+      "has_login": true,
+      "has_contact": true,
+      "has_newsletter": false,
+      "has_cart": false,
+      "has_rdv": false,
+      "has_search": true
+    },
+    "functional_fuzzer_kpi": {
+      "status": "passing",
+      "total_forms_tested": 2,
+      "tests_run": 4,
+      "anomalies_count": 0,
+      "affected_pages": 0,
+      "affected_page_urls": [],
+      "anomalies_by_type": {},
+      "anomalous_tests_all": []
+    },
+    "security": {
+      "ssl": {
+        "valid": true,
+        "expiry": "2027-01-01",
+        "protocol": "TLSv1.3",
+        "issuer": "Let's Encrypt"
+      },
+      "headers": ["Content-Security-Policy", "X-Frame-Options"],
+      "missing_headers": [],
+      "admin_sensitive_page_exposed": {
+        "exposed": [],
+        "forbidden": ["/admin"],
+        "server_errors": [],
+        "status": "passing"
+      },
+      "version_disclosure_cms": {
+        "disclosed": [],
+        "forbidden": ["/readme.txt"],
+        "server_errors": [],
+        "status": "passing"
+      },
+      "robots_txt_info_disclosure": {
+        "disclosed_paths": [],
+        "status": "passing"
+      },
+      "custom_error_page_info_leak": {
+        "leak_indicators": [],
+        "status": "passing"
+      },
+      "bruteforced_protection_login": {
+        "protected": true,
+        "status": "passing",
+        "details": "Rate limiting detected"
+      },
+      "file_upload_extension_control": {
+        "restrictions_found": true,
+        "issues": [],
+        "status": "passing"
+      },
+      "vulnerable_js_dependencies": {
+        "vulnerable_libraries": [],
+        "status": "passing"
+      },
+      "sensitive_file_exposed": {
+        "exposed": [],
+        "forbidden": [],
+        "server_errors": []
+      },
+      "http_trace_methods": {"detected": false},
+      "cors_misconfiguration": {"misconfigured": false, "details": ""},
+      "has_cache": true,
+      "cache_control": "public, max-age=3600",
+      "vulnerability_kpi": {
+        "sqli_vulnerable_count": 0,
+        "xss_vulnerable_count": 0,
+        "ddos_signal_count": 0,
+        "affected_page_count": 0,
+        "affected_page_urls": []
+      }
+    }
+  },
+  "site_metrics": {
+    "seo": {
+      "images_missing_alt": 0,
+      "pages_missing_meta_desc": 0,
+      "pages_missing_title": 0,
+      "has_sitemap": true,
+      "has_robots_txt": true,
+      "duplicate_content_kpi": {
+        "duplicate_content_rate_pct": 5.0,
+        "duplicate_page_count": 0
+      },
+      "multi_browser_compatibility": {"status": "not_available"},
+      "node_style_url_count": 0,
+      "pages_with_bad_h1": 0,
+      "homepage_h1_kpi": {"homepage_h1_missing": false},
+      "total_internal_links": 50,
+      "total_external_links": 10,
+      "unique_external_domains": 5,
+      "social_sharing_kpi": {"pages_with_social_sharing": 10, "passed": true},
+      "nlp_seo_kpis": {
+        "h1_missing_pages": 0,
+        "h1_multiple_pages": 0,
+        "meta_missing_pages": 0,
+        "llms_txt_present_pages": 0
+      },
+      "broken_link_kpi": {
+        "broken_link_count": 0,
+        "broken_links": []
+      }
+    },
+    "ux": {
+      "pages_missing_contextual_links": 2,
+      "pages_with_conversion_funnels": 3,
+      "pages_with_missing_product_images": 0
+    },
+    "performance": {
+      "avg_fcp_ms": 800.0,
+      "avg_lcp_ms": 1800.0,
+      "avg_cls": 0.05,
+      "avg_eco_index": 60.0,
+      "avg_speed_index_ms": 2000.0,
+      "html_compression_applied": true,
+      "mobile_kpi": {
+        "available": true,
+        "lcp_ms": 2200.0,
+        "cls": 0.08,
+        "fcp_ms": 1200.0,
+        "passed": true
+      },
+      "button_kpi": {
+        "pages_with_nonfunc_buttons": 0,
+        "total_nonfunc_buttons": 0,
+        "broken_buttons": [],
+        "passed": true
+      }
+    },
+    "content": {
+      "image_compression_stats": {
+        "compression_rate_pct": 85.0,
+        "unoptimised_count": 0,
+        "sampled_images": 20,
+        "unoptimised_images": []
+      },
+      "audience_segments": {
+        "counts": {"b2b": 3, "institutionnel": 2, "investisseur": 1}
+      },
+      "news_page_count": 5,
+      "freshness_kpi": {"latest_pub_date": "2026-03-15", "passed": true},
+      "pages_thin_content_nlp": 0,
+      "typo_detection": {"pages_with_typos": 0},
+      "pages_with_keyword_stuffing": 0,
+      "product_page_count": 3,
+      "faq_pages": 2,
+      "landing_page_count": 5,
+      "partenariat_page_count": 1,
+      "cannibalized_keywords": [],
+      "rgpd_retention_signal_pages": 1,
+      "rgpd_minimization_signal_pages": 1,
+      "advanced_content_kpis": {
+        "transactional_no_cta_pages": 0,
+        "high_broken_structure_pages": 0,
+        "avg_lexical_diversity": 0.72,
+        "low_lexical_diversity_pages": 0
+      },
+      "advanced_rgpd_kpis": {
+        "rights_low_pages": 0,
+        "pre_consent_violation_pages": 0,
+        "privacy_score_low_pages": 0
+      }
+    }
+  },
+  "kpis": []
+}
