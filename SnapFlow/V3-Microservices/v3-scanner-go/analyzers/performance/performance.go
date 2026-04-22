@@ -842,10 +842,14 @@ func AnalyzeHomepageMobile(targetURL string) MobilePerformanceResult {
 		const fcp = entries.find(e => e.name === 'first-contentful-paint');
 		if (fcp && fcp.startTime > 0) return fcp.startTime;
 		const t = performance.timing;
-		return t.domContentLoadedEventEnd - t.navigationStart;
+		const fallback = t.domContentLoadedEventEnd - t.navigationStart;
+		return fallback > 0 ? fallback : 0;
 	}`)
 	if err == nil {
-		res.FCPMS = math.Round(fcpVal.Value.Num()*10) / 10
+		fcp := math.Round(fcpVal.Value.Num()*10) / 10
+		if !math.IsNaN(fcp) && !math.IsInf(fcp, 0) && fcp > 0 && fcp < 120000 {
+			res.FCPMS = fcp
+		}
 	}
 
 	// LCP

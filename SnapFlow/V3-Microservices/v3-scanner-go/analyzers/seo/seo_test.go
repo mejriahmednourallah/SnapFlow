@@ -48,6 +48,25 @@ func TestCheckRobotsTxtFollowsRedirect(t *testing.T) {
 	}
 }
 
+func TestExtractLinksCapturesUniqueExternalDomains(t *testing.T) {
+	html := `
+		<a href="https://www.google.com/maps">Maps</a>
+		<a href="https://espaceclients.gat.com.tn/login">Client space</a>
+		<a href="/contact">Contact</a>
+	`
+
+	info := extractLinks(html, "https://www.gatvie.com.tn/")
+	if info.InternalLinks != 1 {
+		t.Fatalf("expected 1 internal link, got %d", info.InternalLinks)
+	}
+	if info.ExternalLinks != 2 {
+		t.Fatalf("expected 2 external links, got %d", info.ExternalLinks)
+	}
+	if len(info.ExternalDomains) != 2 {
+		t.Fatalf("expected 2 unique external domains, got %v", info.ExternalDomains)
+	}
+}
+
 func TestComputeContentHashLowQualityReturnsEmptyHash(t *testing.T) {
 	doc, err := goquery.NewDocumentFromReader(strings.NewReader(`<html><body><nav>Menu links</nav><footer>Footer</footer></body></html>`))
 	if err != nil {

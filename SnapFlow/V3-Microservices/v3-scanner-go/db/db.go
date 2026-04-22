@@ -204,7 +204,9 @@ func UpdateSEOKPIExtended(scanID string, kpi interface{}) error {
 		return fmt.Errorf("failed to marshal seo_kpi_extended: %v", err)
 	}
 	_, err = conn.Exec(`
-		UPDATE scan_summaries SET seo_kpi_extended = $1 WHERE scan_id = $2
+		UPDATE scan_summaries
+		SET seo_kpi_extended = COALESCE(seo_kpi_extended::jsonb, '{}'::jsonb) || $1::jsonb
+		WHERE scan_id = $2
 	`, string(data), scanID)
 	return err
 }

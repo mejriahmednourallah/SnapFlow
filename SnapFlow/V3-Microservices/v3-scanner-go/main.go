@@ -763,6 +763,32 @@ func startScan(ctx context.Context, config ScannerConfig) {
 	analyzeWg.Wait()
 	domainAnalysisMS := time.Since(domainAnalyzeStart).Milliseconds()
 
+	if !hasRobots && strings.TrimSpace(robotsTxtContent) != "" {
+		hasRobots = true
+		if !robotsProbe.Present {
+			robotsProbe = seo.HTTPProbeResult{
+				Present:     true,
+				FinalURL:    strings.TrimRight(baseURL, "/") + "/robots.txt",
+				DetectedVia: "content_reuse",
+				Body:        robotsTxtContent,
+			}
+		}
+	}
+	if !hasRobots && len(domainSecRes.RobotsTxtInfoDisclosure.DisclosedPaths) > 0 {
+		hasRobots = true
+		if !robotsProbe.Present {
+			robotsProbe = seo.HTTPProbeResult{
+				Present:     true,
+				FinalURL:    strings.TrimRight(baseURL, "/") + "/robots.txt",
+				DetectedVia: "security_reuse",
+			}
+		}
+	}
+	if !hasSitemap && hasRobots && strings.TrimSpace(robotsTxtContent) != "" {
+		sitemapProbe = seo.ProbeSitemap(baseURL, &robotsProbe)
+		hasSitemap = sitemapProbe.Present
+	}
+
 	// Persist domain-level summary to database
 	if err := db.InsertSummary(scanID, baseURL, domainSecRes, domainTechRes, domainPrivacyRes, domainFuncRes); err != nil {
 		log.Printf("⚠ Failed to save domain summary: %v", err)

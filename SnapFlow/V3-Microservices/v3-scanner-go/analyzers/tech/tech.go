@@ -218,7 +218,7 @@ var signatures = []Signature{
 	{Name: "Vue.js", Category: "framework", Patterns: []string{`vue.min.js`, `vue.runtime`, `__vue__`}},
 	{Name: "Angular", Category: "framework", Patterns: []string{`ng-version`, `angular.min.js`}},
 	{Name: "jQuery", Category: "framework", Patterns: []string{`jquery.min.js`, `jquery-`}},
-	{Name: "Bootstrap", Category: "framework", Patterns: []string{`bootstrap.min.css`, `bootstrap.min.js`}},
+	{Name: "Bootstrap", Category: "framework", Patterns: []string{`bootstrap.min.css`, `bootstrap.min.js`, `bootstrap-`}},
 	{Name: "Tailwind CSS", Category: "framework", Patterns: []string{`tailwindcss`, `tailwind.min.css`}},
 
 	// ── Analytics ─────────────────────────────────────────────────────────────
@@ -373,6 +373,8 @@ func DetectStack(html string, headers *http.Header) []DetectedTech {
 			if sig.Category == "cms" {
 				// version from HTML/header CMS-specific patterns
 				version = extractCMSVersion(html, headers, strings.ToLower(sig.Name))
+			} else if sig.Category == "framework" {
+				version = extractDetectedFrameworkVersion(html, sig.Name)
 			} else if vp, ok := versionPatterns[sig.Name]; ok {
 				if vm := vp.FindStringSubmatch(html); len(vm) > 1 {
 					version = vm[1]
@@ -414,6 +416,25 @@ func DetectStack(html string, headers *http.Header) []DetectedTech {
 	}
 
 	return detected
+}
+
+func extractDetectedFrameworkVersion(html, frameworkName string) string {
+	assetSources := []*regexp.Regexp{
+		scriptSrcRE,
+		regexp.MustCompile(`(?is)<link[^>]+href=["']([^"']+)["']`),
+	}
+	for _, re := range assetSources {
+		matches := re.FindAllStringSubmatch(html, -1)
+		for _, match := range matches {
+			if len(match) < 2 {
+				continue
+			}
+			if version, ok := extractModuleVersionFromAsset(match[1], frameworkName); ok && isPlausibleModuleVersion(frameworkName, version) {
+				return version
+			}
+		}
+	}
+	return ""
 }
 
 func collectModuleVersions(html string, stack []DetectedTech) []ModuleVersion {

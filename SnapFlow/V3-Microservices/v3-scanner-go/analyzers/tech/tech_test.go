@@ -1,6 +1,9 @@
 package tech
 
-import "testing"
+import (
+	"net/http"
+	"testing"
+)
 
 func TestDrupalMajorVersionIsMarkedEOL(t *testing.T) {
 	if !isCMSVersionEOL("drupal", "8") {
@@ -39,4 +42,33 @@ func TestCollectModuleVersionsPrefersQueryParamAndIgnoresDrupalAggregatePathVers
 			t.Fatalf("unexpected Drupal aggregate version leaked into module versions: %+v", version)
 		}
 	}
+}
+
+func TestDetectStackIgnoresDrupalAggregateVersionForBootstrap(t *testing.T) {
+	html := `
+		<link href="/sites/default/files/css/css_bootstrap_8.9.20_hash.css" rel="stylesheet" />
+		<script src="/core/assets/vendor/jquery/jquery.min.js?ver=3.5.1"></script>
+	`
+
+	stack := DetectStack(html, &http.Header{})
+	for _, tech := range stack {
+		if tech.Name == "Bootstrap" && tech.Version == "8.9.20" {
+			t.Fatalf("expected Drupal aggregate version not to be attributed to Bootstrap: %+v", tech)
+		}
+	}
+}
+
+func TestDetectStackUsesExactBootstrapAssetVersion(t *testing.T) {
+	html := `<link href="/themes/custom/site/vendor/bootstrap-4.2.1.min.css" rel="stylesheet" />`
+
+	stack := DetectStack(html, &http.Header{})
+	for _, tech := range stack {
+		if tech.Name == "Bootstrap" {
+			if tech.Version != "4.2.1" {
+				t.Fatalf("expected Bootstrap version 4.2.1, got %+v", tech)
+			}
+			return
+		}
+	}
+	t.Fatalf("expected Bootstrap to be detected")
 }

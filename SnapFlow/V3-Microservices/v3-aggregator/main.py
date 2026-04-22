@@ -2353,6 +2353,7 @@ def build_report(scan_id: str) -> dict:
     seo_node_style_url_count = 0
     seo_internal_links_recount = 0
     seo_external_links_recount = 0
+    seo_external_domains_recount = set()
     seo_contextual_internal_links_total = 0
     seo_low_confidence_hash_pages = 0
     # Phase K: homepage H1 detection and duplicate content rate
@@ -2492,6 +2493,14 @@ def build_report(scan_id: str) -> dict:
         links = _safe_dict(seo.get("links"))
         seo_internal_links_recount += int(links.get("internal_links", 0) or 0)
         seo_external_links_recount += int(links.get("external_links", 0) or 0)
+        for domain in _safe_list(links.get("external_domains", [])):
+            if not isinstance(domain, str):
+                continue
+            normalized = domain.strip().lower()
+            if normalized.startswith("www."):
+                normalized = normalized[4:]
+            if normalized:
+                seo_external_domains_recount.add(normalized)
 
         # Phase K-1: detect homepage H1
         if page_url.rstrip("/") == scan_start_url:
@@ -2864,7 +2873,17 @@ def build_report(scan_id: str) -> dict:
         dup_content_kpi_passed = dup_content_rate_pct <= 10.0
     # K-3: unique external domains (from DB — computed by Go scanner)
     raw_seo_kpi = _j(summary_row.get("seo_kpi_extended")) if summary_row else {}
-    unique_external_domains = raw_seo_kpi.get("unique_external_domains", 0)
+    unique_external_domains = int(raw_seo_kpi.get("unique_external_domains", 0) or 0)
+    if unique_external_domains <= 0 and seo_external_domains_recount:
+        unique_external_domains = len(seo_external_domains_recount)
+    seo_has_robots_txt = bool(raw_seo_kpi.get("has_robots_txt", False) or raw_seo_kpi.get("robots_url"))
+    if not seo_has_robots_txt:
+        robots_disclosure = _safe_dict(raw_sec.get("robots_txt_info_disclosure", {}))
+        if _safe_list(robots_disclosure.get("disclosed_paths")):
+            seo_has_robots_txt = True
+            raw_seo_kpi["robots_detected_via"] = raw_seo_kpi.get("robots_detected_via") or "security_reuse"
+            raw_seo_kpi["robots_url"] = raw_seo_kpi.get("robots_url") or f"{scan_start_url.rstrip('/')}/robots.txt"
+    seo_has_sitemap = bool(raw_seo_kpi.get("has_sitemap", False) or raw_seo_kpi.get("sitemap_url"))
     contextual_reliable_coverage_pct = round((ux_contextual_reliable_pages / max(total_pages, 1)) * 100, 2) if total_pages else 0.0
     summary_internal_links = int(raw_seo_kpi.get("total_internal_links", 0) or 0)
     summary_external_links = int(raw_seo_kpi.get("total_external_links", 0) or 0)
@@ -2937,8 +2956,8 @@ def build_report(scan_id: str) -> dict:
             "pages_with_bad_h1": seo_bad_h1,
             "pages_not_url_clean": seo_not_url_clean,
             "pages_without_lazy_loading": seo_without_lazy,
-            "has_sitemap": bool(raw_seo_kpi.get("has_sitemap", False)),
-            "has_robots_txt": bool(raw_seo_kpi.get("has_robots_txt", False)),
+            "has_sitemap": seo_has_sitemap,
+            "has_robots_txt": seo_has_robots_txt,
             "total_internal_links": effective_total_internal_links,
             "total_external_links": effective_total_external_links,
             "total_contextual_internal_links": seo_contextual_internal_links_total,
