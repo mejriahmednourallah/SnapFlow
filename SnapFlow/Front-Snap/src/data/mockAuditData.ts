@@ -491,3 +491,146 @@ export function getAuditGlobalScore(audit: AuditReport): number {
   if (totalY > 0) return Math.round((totalX / totalY) * 100);
   return audit.globalScore ?? 0;
 }
+
+function resolveFindingStatus(finding: AuditFinding): FindingStatus {
+  return finding.status ?? (finding.type === 'pass' ? 'pass' : finding.type === 'bug' ? 'fail' : 'not_measured');
+}
+
+function toAuditActionItem(finding: AuditFinding, typeOverride?: string): AuditActionItem {
+  const effort = finding.effort?.trim();
+  const normalizedEffort = effort && effort.length > 0
+    ? effort
+    : finding.priority === 'long-terme'
+      ? 'high'
+      : 'medium';
+
+  return {
+    id: finding.id,
+    title: finding.title,
+    type: typeOverride ?? finding.type,
+    severity: finding.criticality,
+    scope: finding.scope || 'global',
+    description: finding.description,
+    impact: finding.risk || finding.impact || '',
+    effort: normalizedEffort,
+    affected_count: finding.affectedCount ?? finding.exampleUrls?.length ?? 0,
+    example_urls: finding.exampleUrls ?? [],
+    fix: finding.recommendation,
+    source_kpi: finding.sourceKpi || finding.id,
+    evidence: finding.evidence ?? finding.annexes ?? [],
+  };
+}
+
+export function recomputeAuditReport(audit: AuditReport): AuditReport {
+  const axes = audit.axes.map((axis) => {
+    const breakdown = getAxisScoreBreakdown(axis);
+    return {
+      ...axis,
+      score: breakdown.x,
+      maxScore: breakdown.y,
+    };
+  });
+
+  const findingsWithStatus = axes.flatMap((axis) =>
+    axis.findings.map((finding) => ({
+      finding,
+      status: resolveFindingStatus(finding),
+    })),
+  );
+
+  const passingFindings = findingsWithStatus
+    .filter((entry) => entry.status === 'pass')
+    .map((entry) => entry.finding);
+
+  const failedFindings = findingsWithStatus
+    .filter((entry) => entry.status === 'fail')
+    .map((entry) => entry.finding);
+
+  const coverageFindings = findingsWithStatus
+    .filter((entry) => {
+      return entry.status === 'not_measured' || entry.status === 'not_available' || entry.status === 'not_evaluated';
+    })
+    .map((entry) => entry.finding);
+
+  const bugFindings: AuditFinding[] = [];
+  const recommendationFindings: AuditFinding[] = [];
+  const complianceFindings: AuditFinding[] = [];
+
+  failedFindings.forEach((finding) => {
+    if (finding.origin === 'RGPD') {
+      complianceFindings.push(finding);
+      return;
+    }
+
+    if (finding.type === 'bug' || finding.origin === 'bug') {
+      bugFindings.push(finding);
+      return;
+    }
+
+    recommendationFindings.push(finding);
+  });
+
+  const bugs = bugFindings.map((finding) => toAuditActionItem(finding, 'bug'));
+  const recommendations = recommendationFindings.map((finding) => toAuditActionItem(finding, 'recommendation'));
+  const compliance = complianceFindings.map((finding) => toAuditActionItem(finding, 'RGPD'));
+
+  const passingKpis: AuditPassingKpi[] = passingFindings.map((finding) => ({
+    id: finding.id,
+    label: finding.title,
+    source_kpi: finding.sourceKpi || finding.id,
+    observed_value: finding.description,
+    status: 'pass',
+    evidence: finding.evidence ?? finding.annexes ?? [],
+  }));
+
+  const auditCoverage: AuditCoverageItem[] = coverageFindings.map((finding) => {
+    const status = resolveFindingStatus(finding);
+    return {
+      id: finding.id,
+      label: finding.title,
+      status: status === 'not_available' ? 'not_available' : 'not_measured',
+      evidence: finding.evidence ?? finding.annexes ?? [],
+    };
+  });
+
+  const passCount = passingFindings.length;
+  const failCount = failedFindings.length;
+  const coverageCount = coverageFindings.length;
+  const total = passCount + failCount + coverageCount;
+  const globalScore = total > 0 ? Math.round((passCount / total) * 100) : 0;
+
+  const summary: AuditSummary = {
+    total,
+    bugs: bugFindings.length,
+    recommendations: recommendationFindings.length,
+    compliance: complianceFindings.length,
+    critical: failedFindings.filter((finding) => finding.criticality === 'critical').length,
+    high: failedFindings.filter((finding) => finding.criticality === 'high').length,
+    medium: failedFindings.filter((finding) => finding.criticality === 'medium').length,
+    low: failedFindings.filter((finding) => finding.criticality === 'low').length,
+  };
+
+  const quickWinsDerived = [...bugFindings, ...recommendationFindings, ...complianceFindings]
+    .filter((finding) => finding.priority === 'quick-win')
+    .slice(0, 6)
+    .map((finding) => {
+      if (finding.origin === 'RGPD') return toAuditActionItem(finding, 'RGPD');
+      if (finding.type === 'bug' || finding.origin === 'bug') return toAuditActionItem(finding, 'bug');
+      return toAuditActionItem(finding, 'recommendation');
+    });
+
+  return {
+    ...audit,
+    axes,
+    globalScore,
+    maturityLevel: globalScore >= 75 ? 'Avancé' : globalScore >= 50 ? 'Intermédiaire' : 'En développement',
+    riskLevel: getRiskLevelFromScore(globalScore),
+    summary,
+    bugs,
+    recommendations,
+    compliance,
+    passingKpis,
+    auditCoverage,
+    quickWins: quickWinsDerived.length > 0 ? quickWinsDerived : audit.quickWins,
+  };
+}

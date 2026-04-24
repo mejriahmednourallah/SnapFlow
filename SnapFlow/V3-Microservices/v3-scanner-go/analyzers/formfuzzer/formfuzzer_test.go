@@ -125,3 +125,39 @@ func TestApplyResponseDiffingFlagsDiffWithSuspiciousContent(t *testing.T) {
 		t.Fatalf("unexpected anomaly reason: %q", results[1].AnomalyReason)
 	}
 }
+
+func TestClassifySubmissionOutcomeTreatsValidationMarkupAsRejected(t *testing.T) {
+	form := DiscoveredForm{
+		Fields: []FormField{{Name: "email", Type: "email", Required: true}},
+	}
+	payload := map[string]string{"email": "not-an-email"}
+
+	outcome := classifySubmissionOutcome(form, "fuzz", payload, 200, `<div class="form-item--error">Adresse email invalide</div>`)
+	if outcome != OutcomeValidationFailed {
+		t.Fatalf("expected validation failure, got %q", outcome)
+	}
+}
+
+func TestClassifySubmissionOutcomeRequiresExplicitSuccessForSilentAcceptance(t *testing.T) {
+	form := DiscoveredForm{
+		Fields: []FormField{{Name: "email", Type: "email", Required: true}},
+	}
+	payload := map[string]string{"email": "not-an-email"}
+
+	outcome := classifySubmissionOutcome(form, "fuzz", payload, 200, `<form><input name="email" value="not-an-email"></form>`)
+	if outcome != OutcomeSuccess {
+		t.Fatalf("expected inconclusive 200 response without success markers to stay non-anomalous, got %q", outcome)
+	}
+}
+
+func TestClassifySubmissionOutcomeFlagsConfirmedSilentAcceptance(t *testing.T) {
+	form := DiscoveredForm{
+		Fields: []FormField{{Name: "email", Type: "email", Required: true}},
+	}
+	payload := map[string]string{"email": "not-an-email"}
+
+	outcome := classifySubmissionOutcome(form, "fuzz", payload, 200, `Merci, votre demande a bien été envoyée. Nous vous contacterons prochainement.`)
+	if outcome != OutcomeSilentAcceptance {
+		t.Fatalf("expected confirmed success response to be silent acceptance, got %q", outcome)
+	}
+}

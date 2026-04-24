@@ -72,3 +72,32 @@ func TestDetectStackUsesExactBootstrapAssetVersion(t *testing.T) {
 	}
 	t.Fatalf("expected Bootstrap to be detected")
 }
+
+func TestBootstrapDoesNotInheritJQueryQueryVersion(t *testing.T) {
+	html := `
+		<script src="/core/assets/vendor/jquery/jquery.min.js?ver=3.7.3"></script>
+		<link href="/themes/custom/site/vendor/bootstrap/bootstrap.min.css" rel="stylesheet" />
+	`
+
+	stack := DetectStack(html, &http.Header{})
+	for _, tech := range stack {
+		if tech.Name != "Bootstrap" {
+			continue
+		}
+		if tech.Version != "" {
+			t.Fatalf("expected Bootstrap version to stay empty without a Bootstrap-owned version source, got %+v", tech)
+		}
+		return
+	}
+	t.Fatalf("expected Bootstrap to be detected")
+}
+
+func TestBootstrapAcceptsOwnedQueryVersion(t *testing.T) {
+	version, ok := extractModuleVersionFromAsset("/themes/custom/site/vendor/bootstrap/bootstrap.min.css?ver=4.2.1", "Bootstrap")
+	if !ok {
+		t.Fatalf("expected Bootstrap-owned query version to be accepted")
+	}
+	if version != "4.2.1" {
+		t.Fatalf("expected Bootstrap version 4.2.1, got %q", version)
+	}
+}

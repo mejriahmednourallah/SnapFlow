@@ -28,7 +28,7 @@ func buildMobile(fcp, lcp, cls float64) performance.MobilePerformanceResult {
 		CLS:   cls,
 	}
 	issues := []string{}
-	if r.FCPMS == 0 || r.FCPMS >= 3000 {
+	if r.FCPMS > 0 && r.FCPMS >= 3000 {
 		issues = append(issues, fmt.Sprintf("FCP %.0f ms exceeds 3000 ms threshold on mobile", r.FCPMS))
 	}
 	if r.LCPMS == 0 || r.LCPMS >= 4000 {

@@ -106,7 +106,7 @@ func Analyze(pageURL string, html string, baseDomain string) UXResult {
 	}
 
 	// 3. Detect contextual (in-article) internal links vs. menu links (Maillage)
-	mainArea := doc.Find("main, article, [role='main'], #content, #main, .main-content, .content").First()
+	mainArea := doc.Find("main, article, [role='main'], #content, #main, .main-content, .content, .region-content, .layout-content, .node__content").First()
 	res.ContentZoneDetected = mainArea.Length() > 0
 	res.ContextualMeasurementReliable = res.ContentZoneDetected
 
@@ -141,6 +141,12 @@ func Analyze(pageURL string, html string, baseDomain string) UXResult {
 		}
 		return false
 	}
+	isTemplateNavigationLink := func(s *goquery.Selection) bool {
+		if s.Closest("nav, header, footer, [role='navigation'], .menu, .navbar, .breadcrumb, .footer, .header, .tab-nav, .accordion__nav, .nav-tabs, .nav-pills").Length() > 0 {
+			return true
+		}
+		return s.Closest("[role='tablist']").Length() > 0
+	}
 	if mainArea.Length() > 0 {
 		mainArea.Find("a[href]").Each(func(i int, s *goquery.Selection) {
 			href, exists := s.Attr("href")
@@ -148,7 +154,7 @@ func Analyze(pageURL string, html string, baseDomain string) UXResult {
 				return
 			}
 
-			if s.Closest("nav, header, footer, [role='navigation'], .menu, .nav, .navbar, .breadcrumb, .footer, .header, .tabs, .tab-nav, .accordion__nav").Length() > 0 {
+			if isTemplateNavigationLink(s) {
 				return
 			}
 

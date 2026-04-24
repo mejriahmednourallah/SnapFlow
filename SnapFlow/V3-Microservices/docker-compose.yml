@@ -83,7 +83,7 @@ services:
       - "8084:8084"
     environment:
       CHROME_NO_SANDBOX: "true"
-      BROWSER_POOL_CONCURRENCY: "5"
+      BROWSER_POOL_CONCURRENCY: "10"
       BROWSER_POOL_RECYCLE_AFTER: "50"
       BROWSER_POOL_DEFAULT_TIMEOUT_MS: "30000"
     restart: unless-stopped

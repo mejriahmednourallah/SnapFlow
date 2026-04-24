@@ -1,5 +1,6 @@
 import { supabase } from '@/integrations/supabase/client';
 import { mapApiResponseToReport, type ApiResponse } from '@/lib/auditMapper';
+import type { AuditReport } from '@/data/mockAuditData';
 
 export interface PendingJob {
   auditId: string;
@@ -137,5 +138,18 @@ export async function archiveAudit(auditId: string): Promise<void> {
     .from('audits')
     .update({ archived_at: new Date().toISOString() } as any)
     .eq('id', auditId);
+  if (error) throw error;
+}
+
+/** Persist manual report edits for an existing audit row. */
+export async function updateAuditReportData(auditId: string, reportData: AuditReport): Promise<void> {
+  const { error } = await supabase
+    .from('audits')
+    .update({
+      report_data: reportData as unknown as any,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', auditId);
+
   if (error) throw error;
 }

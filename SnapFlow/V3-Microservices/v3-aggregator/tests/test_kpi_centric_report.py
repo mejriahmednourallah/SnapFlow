@@ -263,6 +263,46 @@ class TestKPICentricReport(unittest.TestCase):
         self.assertEqual(evidence["broken_buttons_all"][0]["page_url"], "https://example.com/login")
         self.assertIsInstance(evidence["broken_buttons_all"][0]["href"], dict)
 
+    def test_internal_linking_sitewide_zero_contextual_is_downgraded_to_warning(self):
+        report = json.loads(json.dumps(self.report))
+        metrics = report.setdefault("site_metrics", {})
+        metrics.setdefault("seo", {}).update({
+            "total_internal_links": 6105,
+            "total_contextual_internal_links": 0,
+            "internal_linking_source": "seo_summary",
+            "contextual_link_measurement": {
+                "pages_checked": 112,
+                "reliable_coverage_pct": 100.0,
+            },
+        })
+        metrics.setdefault("ux", {}).update({
+            "pages_missing_contextual_links": 112,
+        })
+
+        rebuilt = build_kpi_centric_report(report)
+        linking = rebuilt["axes"]["SEO"]["Linking Interne"]
+
+        self.assertEqual(linking["status"], "warning")
+        self.assertEqual(linking["evidence"]["data_quality"], "PARTIAL")
+        self.assertIn("qualité de données", linking["constat"])
+
+    def test_mobile_status_ignores_zero_fcp_when_other_metrics_are_good(self):
+        report = json.loads(json.dumps(self.report))
+        perf = report.setdefault("site_metrics", {}).setdefault("performance", {})
+        perf["mobile_kpi"] = {
+            "available": True,
+            "passed": None,
+            "fcp_ms": 0,
+            "lcp_ms": 1400,
+            "cls": 0.01,
+            "issues": [],
+        }
+
+        rebuilt = build_kpi_centric_report(report)
+        mobile = rebuilt["axes"]["Audit de Performance et Temps de Réponse"]["Temps de Chargement Mobile"]
+
+        self.assertEqual(mobile["status"], "passing")
+
     def test_forms_kpi_keeps_full_fuzz_payload_and_status_rules(self):
         report = json.loads(json.dumps(self.report))
         da = report.setdefault("domain_analysis", {})

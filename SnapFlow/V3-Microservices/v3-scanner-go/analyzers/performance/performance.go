@@ -471,12 +471,23 @@ func analyzePageHeadless(browser *rod.Browser, targetURL string) HeadlessResult 
 				const actionableAnchor = !!hrefAttr || hasClickBehavior || hasVisibleLabel || /\b(btn|button|cta)\b/.test(classLower);
 				const hasInteractiveBehavior = hasClickBehavior || !!el.getAttribute('aria-controls') || !!el.getAttribute('data-bs-target') || !!el.getAttribute('data-drupal-selector') || roleLower === 'tab' || roleLower === 'switch';
 				const hashFragment = isHashLink ? hrefLower.slice(1) : '';
-				const hashTargetLooksUIState = !!hashFragment && (/^[!?]/.test(hashFragment) || /\b(tab|pane|collapse|accordion|faq|question|garantie|presentation|avantage|fiscal|step|slide|modal|section)\b/i.test(hashFragment));
+				const normalizeFragment = (value) => (value || '')
+					.toLowerCase()
+					.normalize('NFD')
+					.replace(/[\u0300-\u036f]/g, '')
+					.replace(/[^a-z0-9]+/g, '');
+				const hashFragmentWords = hashFragment.replace(/[_-]+/g, ' ');
+				const hashTargetLooksUIState = !!hashFragment && (/^[!?]/.test(hashFragment) || /\b(tab|pane|collapse|accordion|faq|question|garantie|presentation|avantage|fiscal|step|slide|modal|section)\b/i.test(hashFragmentWords));
 				const hasUICues = /\b(btn|button|btn-border|tab|tabs|accordion|collapse|toggle|pill|dropdown|cta|nav-link)\b/.test(classLower) || !!el.getAttribute('data-drupal-selector');
 				const insideStatefulUI = !!el.closest('[role="tablist"], [role="tabpanel"], .tabs, .nav-tabs, .nav-pills, .accordion, .faq, .tab-content, .tab-pane');
 				const safeHashFragment = (window.CSS && typeof window.CSS.escape === 'function') ? window.CSS.escape(hashFragment) : hashFragment;
 				const targetExistsByName = !!(hashFragment && document.querySelector('[name="' + safeHashFragment + '"]'));
-				hashTargetExists = hashTargetExists || targetExistsByName;
+				const normalizedHashFragment = normalizeFragment(hashFragment);
+				const fuzzyHashTargetExists = !!(normalizedHashFragment && Array.from(document.querySelectorAll('[id], [name]')).some((node) => {
+					const candidate = normalizeFragment(node.id || node.getAttribute('name') || '');
+					return candidate && candidate === normalizedHashFragment;
+				}));
+				hashTargetExists = hashTargetExists || targetExistsByName || fuzzyHashTargetExists;
 				const isLikelyJSAnchor = isHashLink && (hasInteractiveBehavior || hasUICues || hashTargetLooksUIState || insideStatefulUI);
 				const isDeadHref = actionableAnchor && (!href || href === '#' || /^javascript:.*\s*$/i.test(href) || (isHashLink && !hashTargetExists && !isSkipAnchor && !isLikelyJSAnchor));
 				// Ensure it's not a generic anchor we shouldn't care about.
@@ -899,7 +910,7 @@ func AnalyzeHomepageMobile(targetURL string) MobilePerformanceResult {
 	// Threshold checks
 	issues := []string{}
 	// G10: Mobile CWV FCP threshold (Good < 1800ms)
-	if res.FCPMS == 0 || res.FCPMS >= 1800 {
+	if res.FCPMS > 0 && res.FCPMS >= 1800 {
 		issues = append(issues, fmt.Sprintf("FCP %.0f ms exceeds 1800 ms threshold on mobile", res.FCPMS))
 	}
 	// G10: Mobile CWV LCP threshold (Good < 2500ms)

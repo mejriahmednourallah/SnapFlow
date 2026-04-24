@@ -1,27 +1,58 @@
 import { useState } from 'react';
-import { getAxisScoreBreakdown, getScoreColor, getPagesWithoutMeta, getPagesWithLongMeta, getRecentNews, type Criticality, type FindingStatus, type AuditReport } from '@/data/mockAuditData';
+import { getAxisScoreBreakdown, getScoreColor, getPagesWithoutMeta, getPagesWithLongMeta, getRecentNews, type AuditFinding, type AuditReport, type Criticality, type FindingStatus, type Priority } from '@/data/mockAuditData';
 import { CriticalityBadge } from '@/components/CriticalityBadge';
 import { PriorityBadge } from '@/components/PriorityBadge';
 import { ScoreGauge } from '@/components/ScoreGauge';
-import { ExternalLink, ChevronDown, ChevronRight, AlertCircle, Image, FileText, Newspaper, CheckCircle, XCircle, AlertTriangle, ShieldAlert, Paperclip, Bug, Lightbulb, Search, Camera, FlaskConical } from 'lucide-react';
+import { ExternalLink, ChevronDown, ChevronRight, AlertCircle, Image, FileText, Newspaper, CheckCircle, XCircle, AlertTriangle, ShieldAlert, Paperclip, Bug, Lightbulb, Search, Camera, FlaskConical, Pencil, Save } from 'lucide-react';
 import { AxisIcon } from '@/components/audit/AxisIcon';
 import { EvidenceDetailsDialog } from '@/components/audit/EvidenceDetailsDialog';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 
 interface TabDetailsProps {
   audit: AuditReport;
   selectedAxisId?: string;
+  isEditMode?: boolean;
+  onUpdateFinding?: (axisId: string, findingId: string, updates: Partial<AuditFinding>) => void;
 }
 
-export function TabDetails({ audit, selectedAxisId }: TabDetailsProps) {
+type EditableFindingDraft = {
+  title: string;
+  description: string;
+  recommendation: string;
+  risk: string;
+  criticality: Criticality;
+  priority: Priority;
+  status: FindingStatus;
+};
+
+function resolveFindingStatus(finding: AuditFinding): FindingStatus {
+  return finding.status ?? (finding.type === 'pass' ? 'pass' : finding.type === 'bug' ? 'fail' : 'not_measured');
+}
+
+export function TabDetails({ audit, selectedAxisId, isEditMode = false, onUpdateFinding }: TabDetailsProps) {
   const [expandedAxis, setExpandedAxis] = useState<string | null>(selectedAxisId || audit.axes[0]?.id || null);
   const [filterCriticality, setFilterCriticality] = useState<Criticality | 'all'>('all');
   const [filterState, setFilterState] = useState<FindingStatus | 'all'>('all');
-  const [showPassingKpis, setShowPassingKpis] = useState(false);
+  const [editorState, setEditorState] = useState<{ axisId: string; findingId: string } | null>(null);
+  const [editorDraft, setEditorDraft] = useState<EditableFindingDraft | null>(null);
+
   const isRiskPassingFinding = (finding: AuditReport['axes'][number]['findings'][number]) => {
     if (finding.origin !== 'passing_kpi' && finding.status !== 'pass') return false;
     const searchable = `${finding.title ?? ''} ${finding.sourceKpi ?? ''}`.toLowerCase();
     return /\brisk\b|risque|risk_level|niveau_risque/.test(searchable);
   };
+
+  const canEditFindings = Boolean(isEditMode && onUpdateFinding);
 
   const critFilters: Array<Criticality | 'all'> = ['all', 'critical', 'high', 'medium', 'low'];
   const stateFilters: Array<FindingStatus | 'all'> = ['all', 'pass', 'fail', 'not_measured', 'not_available'];
@@ -34,6 +65,65 @@ export function TabDetails({ audit, selectedAxisId }: TabDetailsProps) {
   const [showSeoMeta, setShowSeoMeta] = useState(false);
   const [showSeoImages, setShowSeoImages] = useState(false);
   const [showContentNews, setShowContentNews] = useState(false);
+
+  const openFindingEditor = (axisId: string, finding: AuditFinding) => {
+    setEditorState({ axisId, findingId: finding.id });
+    setEditorDraft({
+      title: finding.title || '',
+      description: finding.description || '',
+      recommendation: finding.recommendation || '',
+      risk: finding.risk || '',
+      criticality: finding.criticality,
+      priority: finding.priority,
+      status: resolveFindingStatus(finding),
+    });
+  };
+
+  const closeFindingEditor = () => {
+    setEditorState(null);
+    setEditorDraft(null);
+  };
+
+  const handleSaveFindingEdit = () => {
+    if (!editorState || !editorDraft || !onUpdateFinding) return;
+
+    const axis = audit.axes.find((item) => item.id === editorState.axisId);
+    const currentFinding = axis?.findings.find((item) => item.id === editorState.findingId);
+    if (!currentFinding) {
+      closeFindingEditor();
+      return;
+    }
+
+    const nextStatus = editorDraft.status;
+    const nextType: AuditFinding['type'] = nextStatus === 'pass'
+      ? 'pass'
+      : nextStatus === 'fail'
+        ? (currentFinding.type === 'bug' || currentFinding.origin === 'bug' ? 'bug' : 'recommendation')
+        : 'recommendation';
+
+    let nextOrigin = currentFinding.origin;
+    if (nextStatus === 'pass') {
+      nextOrigin = 'passing_kpi';
+    } else if (nextStatus === 'not_measured' || nextStatus === 'not_available' || nextStatus === 'not_evaluated') {
+      nextOrigin = 'coverage';
+    } else if (currentFinding.origin === 'passing_kpi' || currentFinding.origin === 'coverage') {
+      nextOrigin = nextType === 'bug' ? 'bug' : 'recommendation';
+    }
+
+    onUpdateFinding(editorState.axisId, editorState.findingId, {
+      title: editorDraft.title.trim() || currentFinding.title,
+      description: editorDraft.description.trim() || currentFinding.description,
+      recommendation: editorDraft.recommendation.trim() || currentFinding.recommendation,
+      risk: nextStatus === 'pass' ? undefined : (editorDraft.risk.trim() || undefined),
+      criticality: editorDraft.criticality,
+      priority: editorDraft.priority,
+      status: nextStatus,
+      type: nextType,
+      origin: nextOrigin,
+    });
+
+    closeFindingEditor();
+  };
 
   const getStatusIcon = (status: 'pass' | 'fail' | 'warning') => {
     if (status === 'pass') return <CheckCircle className="w-3.5 h-3.5 text-emerald-400" />;
@@ -77,6 +167,12 @@ export function TabDetails({ audit, selectedAxisId }: TabDetailsProps) {
           </button>
         ))}
       </div>
+
+      {canEditFindings && (
+        <div className="text-xs text-muted-foreground border border-primary/20 bg-primary/5 rounded-md px-3 py-2">
+          Mode edition actif: utilisez le bouton Modifier sur un constat pour changer son contenu.
+        </div>
+      )}
 
       {/* Axes */}
       {audit.axes.map(ax => {
@@ -259,6 +355,17 @@ export function TabDetails({ audit, selectedAxisId }: TabDetailsProps) {
                           )}
                         </div>
                         <div className="flex items-center gap-2 flex-shrink-0">
+                          {canEditFindings && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-7 px-2 text-xs"
+                              onClick={() => openFindingEditor(ax.id, f)}
+                            >
+                              <Pencil className="w-3 h-3 mr-1" />
+                              Modifier
+                            </Button>
+                          )}
                           {(() => {
                             if (f.status === 'pass' || f.origin === 'passing_kpi') {
                               return (
@@ -412,6 +519,129 @@ export function TabDetails({ audit, selectedAxisId }: TabDetailsProps) {
           </div>
         );
       })}
+
+      {canEditFindings && editorState && editorDraft && (
+        <Dialog open={Boolean(editorState)} onOpenChange={(open) => { if (!open) closeFindingEditor(); }}>
+          <DialogContent className="max-w-2xl">
+            <DialogHeader>
+              <DialogTitle>Modifier le constat</DialogTitle>
+              <DialogDescription>
+                Mettez a jour les informations du constat puis enregistrez.
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-4 max-h-[70vh] overflow-y-auto pr-1">
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Titre</label>
+                <Input
+                  value={editorDraft.title}
+                  onChange={(event) => setEditorDraft({ ...editorDraft, title: event.target.value })}
+                  placeholder="Titre du constat"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Description</label>
+                <Textarea
+                  value={editorDraft.description}
+                  onChange={(event) => setEditorDraft({ ...editorDraft, description: event.target.value })}
+                  className="min-h-[100px]"
+                  placeholder="Description du constat"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Recommandation</label>
+                <Textarea
+                  value={editorDraft.recommendation}
+                  onChange={(event) => setEditorDraft({ ...editorDraft, recommendation: event.target.value })}
+                  className="min-h-[100px]"
+                  placeholder="Action recommandee"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Risque / manque a gagner (optionnel)</label>
+                <Textarea
+                  value={editorDraft.risk}
+                  onChange={(event) => setEditorDraft({ ...editorDraft, risk: event.target.value })}
+                  className="min-h-[90px]"
+                  placeholder="Impact metier attendu"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Statut</label>
+                  <select
+                    value={editorDraft.status}
+                    onChange={(event) => {
+                      setEditorDraft({
+                        ...editorDraft,
+                        status: event.target.value as FindingStatus,
+                      });
+                    }}
+                    className="h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                  >
+                    <option value="pass">Pass</option>
+                    <option value="fail">Fail</option>
+                    <option value="not_measured">Non mesure</option>
+                    <option value="not_available">Non disponible</option>
+                    <option value="not_evaluated">Non evalue</option>
+                  </select>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Criticite</label>
+                  <select
+                    value={editorDraft.criticality}
+                    onChange={(event) => {
+                      setEditorDraft({
+                        ...editorDraft,
+                        criticality: event.target.value as Criticality,
+                      });
+                    }}
+                    className="h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                  >
+                    <option value="critical">Critique</option>
+                    <option value="high">Eleve</option>
+                    <option value="medium">Moyen</option>
+                    <option value="low">Faible</option>
+                  </select>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Priorite</label>
+                  <select
+                    value={editorDraft.priority}
+                    onChange={(event) => {
+                      setEditorDraft({
+                        ...editorDraft,
+                        priority: event.target.value as Priority,
+                      });
+                    }}
+                    className="h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                  >
+                    <option value="quick-win">Quick win</option>
+                    <option value="moyen-terme">Moyen terme</option>
+                    <option value="long-terme">Long terme</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            <DialogFooter>
+              <Button variant="outline" onClick={closeFindingEditor}>
+                Annuler
+              </Button>
+              <Button onClick={handleSaveFindingEdit}>
+                <Save className="w-3.5 h-3.5 mr-1.5" />
+                Enregistrer
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
     </div>
   );
 }

@@ -110,7 +110,9 @@ var (
 	selectRe     = regexp.MustCompile(`(?is)<select\b[^>]*>(.*?)</select>`)
 	optionValRe  = regexp.MustCompile(`(?is)<option\b[^>]*value=["']([^"']*)["'][^>]*>`) // only explicit values
 	attrKVRe     = regexp.MustCompile(`(?i)([a-zA-Z_:][-a-zA-Z0-9_:.]*)\s*=\s*["']([^"']*)["']`)
-	feedbackHint = regexp.MustCompile(`(?i)(required|invalid|obligatoire|erreur|merci de|please enter|please provide|champ)`)
+	feedbackHint = regexp.MustCompile(`(?i)(required|invalid|obligatoire|erreur|merci de|please enter|please provide|champ|field is required|form-item--error|has-error|alert-danger|alert-error|messages--error|aria-invalid|captcha incorrect|code de s[ée]curit[ée]|adresse e-?mail invalide|email invalide)`)
+	successHint  = regexp.MustCompile(`(?i)(thank you|merci|nous vous contacterons|we will get back to you|message envoy[ée]|demande envoy[ée]|soumission r[ée]ussie|submission received|votre demande a bien [ée]t[ée] envoy[ée]|confirmation)`)
+	captchaHint  = regexp.MustCompile(`(?i)(recaptcha|hcaptcha|captcha)`)
 )
 
 func ExtractForms(pageURL, html string) []DiscoveredForm {
@@ -367,7 +369,7 @@ func classifySubmissionOutcome(form DiscoveredForm, testType string, payload map
 	}
 
 	// Check for defensive barriers (CAPTCHA)
-	if strings.Contains(body, "recaptcha") || strings.Contains(body, "hcaptcha") {
+	if captchaHint.MatchString(body) {
 		return OutcomeInconclusiveCap
 	}
 
@@ -408,22 +410,26 @@ func classifySubmissionOutcome(form DiscoveredForm, testType string, payload map
 		return OutcomeSuccess
 	}
 
+	if hasValidationFeedback(body) {
+		return OutcomeValidationFailed
+	}
+
 	// Check for validation rejection (payload validation failed)
 	if hasReflectedPayload(body, payload) {
 		return OutcomeValidationFailed
 	}
 
 	if requiredFieldsAccepted(form.Fields, payload, statusCode, body) {
-		return OutcomeValidationFailed
+		return OutcomeSilentAcceptance
 	}
 
 	if invalidEmailAccepted(form.Fields, payload, statusCode, body) {
-		return OutcomeValidationFailed
+		return OutcomeSilentAcceptance
 	}
 
-	// [F-1] 2xx/3xx on a fuzz test with no feedback = silent acceptance.
-	// The server accepted the malicious payload without any validation rejection.
-	if testType == "fuzz" {
+	// Plain 2xx responses without either validation markers or explicit success
+	// cues are treated as inconclusive/non-anomalous to avoid overstating form bugs.
+	if hasSubmissionSuccess(body) || requiredFieldsAccepted(form.Fields, payload, statusCode, body) || invalidEmailAccepted(form.Fields, payload, statusCode, body) {
 		return OutcomeSilentAcceptance
 	}
 	return OutcomeSuccess
@@ -556,7 +562,7 @@ func requiredFieldsAccepted(fields []FormField, payload map[string]string, statu
 			break
 		}
 	}
-	return hadRequired && allRequiredEmpty && !feedbackHint.MatchString(body)
+	return hadRequired && allRequiredEmpty && hasSubmissionSuccess(body) && !hasValidationFeedback(body)
 }
 
 func invalidEmailAccepted(fields []FormField, payload map[string]string, statusCode int, body string) bool {
@@ -568,10 +574,18 @@ func invalidEmailAccepted(fields []FormField, payload map[string]string, statusC
 			continue
 		}
 		if v := strings.TrimSpace(payload[f.Name]); v != "" && !strings.Contains(v, "@") {
-			return !feedbackHint.MatchString(body)
+			return hasSubmissionSuccess(body) && !hasValidationFeedback(body)
 		}
 	}
 	return false
+}
+
+func hasValidationFeedback(body string) bool {
+	return feedbackHint.MatchString(body)
+}
+
+func hasSubmissionSuccess(body string) bool {
+	return successHint.MatchString(body)
 }
 
 func hasReflectedPayload(body string, payload map[string]string) bool {

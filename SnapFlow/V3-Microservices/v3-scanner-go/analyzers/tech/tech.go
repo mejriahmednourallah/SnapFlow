@@ -503,12 +503,15 @@ func collectModuleVersions(html string, stack []DetectedTech) []ModuleVersion {
 }
 
 func extractModuleVersionFromAsset(assetURL, moduleName string) (string, bool) {
-	if q := queryVersionRE.FindStringSubmatch(assetURL); len(q) > 1 {
-		return strings.TrimSpace(q[1]), true
-	}
 	parsed, err := url.Parse(assetURL)
 	if err != nil {
 		return "", false
+	}
+	if !assetBelongsToLibrary(moduleName, parsed) {
+		return "", false
+	}
+	if q := queryVersionRE.FindStringSubmatch(assetURL); len(q) > 1 {
+		return strings.TrimSpace(q[1]), true
 	}
 	baseName := strings.ToLower(path.Base(parsed.Path))
 	if !looksLikeExactLibraryAsset(moduleName, baseName) {
@@ -520,6 +523,29 @@ func extractModuleVersionFromAsset(assetURL, moduleName string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+func assetBelongsToLibrary(moduleName string, parsed *url.URL) bool {
+	if parsed == nil {
+		return false
+	}
+	baseName := strings.ToLower(path.Base(parsed.Path))
+	if looksLikeExactLibraryAsset(moduleName, baseName) {
+		return true
+	}
+	pathLower := strings.ToLower(parsed.Path)
+	for _, keyword := range moduleKeywords[moduleName] {
+		if keyword == "" {
+			continue
+		}
+		if strings.Contains(pathLower, "/"+keyword+"/") ||
+			strings.Contains(pathLower, keyword+"-") ||
+			strings.Contains(pathLower, keyword+".") ||
+			strings.Contains(pathLower, keyword+"_") {
+			return true
+		}
+	}
+	return false
 }
 
 func looksLikeExactLibraryAsset(moduleName, baseName string) bool {

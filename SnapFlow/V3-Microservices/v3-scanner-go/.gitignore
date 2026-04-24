@@ -2,3 +2,4 @@
 *.log
 scan_report.json
 *.gocache
+*.gocache*

@@ -69,6 +69,32 @@ func TestAnalyzeFlagsMissingContextualLinksWhenOnlyNavLinks(t *testing.T) {
 	}
 }
 
+func TestAnalyzeCountsTabPaneLinksButSkipsTabNavigation(t *testing.T) {
+	longText := strings.Repeat("content words for body section ", 120)
+	html := `
+		<html><body>
+			<main>
+				<div class="nav-tabs">
+					<a href="/tab-summary">Résumé</a>
+				</div>
+				<div class="tab-pane">
+					<p>` + longText + `</p>
+					<a href="/product-details">Voir le détail</a>
+				</div>
+			</main>
+		</body></html>
+	`
+
+	res := Analyze("https://example.com/page", html, "https://example.com")
+
+	if res.ContextualInternalLinks != 1 {
+		t.Fatalf("expected 1 contextual internal link from tab content, got %d", res.ContextualInternalLinks)
+	}
+	if hasIssue(res.Issues, "Maillage default") {
+		t.Fatalf("did not expect missing contextual links issue when tab content contains a real internal link")
+	}
+}
+
 func TestAnalyzeMarksContextualMeasurementUnreliableWithoutContentZone(t *testing.T) {
 	html := `<html><body><div class="shell"><a href="/inside">Inside</a></div></body></html>`
 

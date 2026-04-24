@@ -72,7 +72,7 @@ def _resolve_mobile_kpi_status(mobile_kpi):
     lcp_ms = _safe_float(mobile.get("lcp_ms"))
     cls = _safe_float(mobile.get("cls"))
     fcp_ms = _safe_float(mobile.get("fcp_ms"))
-    if lcp_ms > 2500 or cls > 0.1 or fcp_ms > 1800:
+    if lcp_ms > 2500 or cls > 0.1 or (fcp_ms > 0 and fcp_ms > 1800):
         return "failing"
     return "passing"
 
@@ -1473,7 +1473,8 @@ def _build_contract_evidence(kpi_id: str, kpi_obj: dict, pages_scanned: int, dom
         total_contextual_links = _safe_int(data.get("total_contextual_internal_links"))
         internal_linking_source = _clean_text(data.get("internal_linking_source"))
         internal_linking_note = _clean_text(data.get("internal_linking_note"))
-        measurement = _safe_dict(data.get("contextual_link_measurement"))
+        measurement = dict(_safe_dict(data.get("contextual_link_measurement")))
+        pages_checked = _safe_int(measurement.get("pages_checked"))
         reliable_coverage_pct = _safe_float(measurement.get("reliable_coverage_pct"))
         if missing_count > 0 and not urls:
             data_quality = "PARTIAL"
@@ -1487,6 +1488,21 @@ def _build_contract_evidence(kpi_id: str, kpi_obj: dict, pages_scanned: int, dom
             data_quality = "PARTIAL"
             confidence_penalty = max(confidence_penalty, 2)
             status_override = "not_evaluated"
+        sitewide_zero_contextual_suspect = (
+            pages_checked > 0
+            and reliable_coverage_pct >= 90.0
+            and total_internal_links > 0
+            and total_contextual_links == 0
+            and missing_count * 10 >= pages_checked * 9
+        )
+        if sitewide_zero_contextual_suspect:
+            data_quality = "PARTIAL"
+            confidence_penalty = max(confidence_penalty, 2)
+            if status_override is None and missing_count > 0:
+                status_override = "warning"
+            if not internal_linking_note:
+                internal_linking_note = "Le recomptage remonte 0 lien contextuel malgré un volume élevé de liens internes. Le résultat est traité comme une alerte de qualité de données plutôt qu'un échec confirmé."
+            measurement["sitewide_zero_contextual_suspect"] = True
         if internal_linking_source == "page_recount" and not internal_linking_note:
             internal_linking_note = "Le total des liens internes provient d'un recomptage page-par-page (agrégat scanner absent)."
         evidence.update({
@@ -1817,6 +1833,8 @@ def _build_contract_constat(kpi_id: str, kpi_name: str, status: str, kpi_type: s
             return "Le KPI de maillage interne n'a pas pu être évalué de manière fiable sur ce scan."
         if total_internal_links == 0 and total_contextual_links > 0:
             return f"Le volume global de liens internes est incohérent avec le comptage contextuel ({total_contextual_links} liens contextuels détectés). Le résultat est traité comme une alerte de qualité de données."
+        if measurement.get("sitewide_zero_contextual_suspect"):
+            return f"Le maillage contextuel remonte 0 lien contextuel pour {total_internal_links} liens internes agrégés, avec une couverture annoncée à {reliable_coverage_pct:.1f}% des pages. Le résultat est dégradé en alerte de qualité de données plutôt qu'en échec confirmé."
         suffix = f" Exemples : {', '.join(urls[:2])}." if urls else ""
         return f"{missing_count} page(s) manquent de liens contextuels dans la zone de contenu principale.{suffix}"
 
@@ -2630,6 +2648,19 @@ def build_kpi_centric_report(report: dict) -> dict:
     }
 
     # ─── SEO ──────────────────────────────────────────────────────────────────────
+    internal_link_measurement = _safe_dict(seo.get("contextual_link_measurement", {}))
+    internal_link_pages_checked = _safe_int(internal_link_measurement.get("pages_checked"))
+    internal_link_reliable_coverage_pct = _safe_float(internal_link_measurement.get("reliable_coverage_pct"))
+    internal_link_total = _safe_int(seo.get("total_internal_links", 0))
+    contextual_link_total = _safe_int(seo.get("total_contextual_internal_links", 0))
+    missing_contextual_pages = _safe_int(ux.get("pages_missing_contextual_links", 0))
+    sitewide_zero_contextual_suspect = (
+        internal_link_pages_checked > 0
+        and internal_link_reliable_coverage_pct >= 90.0
+        and internal_link_total > 0
+        and contextual_link_total == 0
+        and missing_contextual_pages * 10 >= internal_link_pages_checked * 9
+    )
     axes["SEO"] = {
         "Balise Alts": {
             "info": f"Images sans ALT: {seo.get('images_missing_alt', 0)} images",
@@ -2754,11 +2785,12 @@ def build_kpi_centric_report(report: dict) -> dict:
             "pages_affected_urls": _safe_list(internal_contextual_links_evidence.get("affected_pages")),
             "status": (
                 "non_evalue" if (
-                    _safe_int(seo.get("contextual_link_measurement", {}).get("pages_checked")) > 0
-                    and _safe_float(seo.get("contextual_link_measurement", {}).get("reliable_coverage_pct")) < 50.0
+                    internal_link_pages_checked > 0
+                    and internal_link_reliable_coverage_pct < 50.0
                 )
                 else "warning" if (
-                    _safe_int(seo.get("total_internal_links", 0)) == 0 and _safe_int(seo.get("total_contextual_internal_links", 0)) > 0
+                    (internal_link_total == 0 and contextual_link_total > 0)
+                    or sitewide_zero_contextual_suspect
                 )
                 else "failing" if ux.get("pages_missing_contextual_links", 0) > report.get("pages_scanned", 1) * 0.30
                 else "warning" if ux.get("pages_missing_contextual_links", 0) > report.get("pages_scanned", 1) * 0.15
@@ -2766,18 +2798,19 @@ def build_kpi_centric_report(report: dict) -> dict:
             ),
             "type": (
                 None if (
-                    _safe_int(seo.get("contextual_link_measurement", {}).get("pages_checked")) > 0
-                    and _safe_float(seo.get("contextual_link_measurement", {}).get("reliable_coverage_pct")) < 50.0
+                    internal_link_pages_checked > 0
+                    and internal_link_reliable_coverage_pct < 50.0
                 )
                 else
                 "recommendation" if (
-                    (_safe_int(seo.get("total_internal_links", 0)) == 0 and _safe_int(seo.get("total_contextual_internal_links", 0)) > 0)
+                    (internal_link_total == 0 and contextual_link_total > 0)
+                    or sitewide_zero_contextual_suspect
                     or ux.get("pages_missing_contextual_links", 0) > report.get("pages_scanned", 1) * 0.15
                 )
                 else None
             ),
             "severity": (
-                "medium" if (_safe_int(seo.get("total_internal_links", 0)) == 0 and _safe_int(seo.get("total_contextual_internal_links", 0)) > 0)
+                "medium" if ((internal_link_total == 0 and contextual_link_total > 0) or sitewide_zero_contextual_suspect)
                 else "high" if ux.get("pages_missing_contextual_links", 0) > report.get("pages_scanned", 1) * 0.30
                 else "medium" if ux.get("pages_missing_contextual_links", 0) > report.get("pages_scanned", 1) * 0.15
                 else None
