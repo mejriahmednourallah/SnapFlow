@@ -25,6 +25,11 @@ interface TicketStatus {
   error?: string;
 }
 
+function getRedmineIssueUrl(issueId?: number): string {
+  if (!issueId) return 'https://maintenance.medianet.tn/issues';
+  return new URL(String(issueId), 'https://maintenance.medianet.tn/issues/').toString();
+}
+
 // Statuses that mean ticket is "closed" and can be recreated
 const CLOSED_STATUSES = ['fermé', 'closed', 'résolu', 'resolved', 'bloqué', 'blocked', 'annulé', 'cancelled', 'rejected', 'rejeté'];
 const BATCH_SIZE = 5;
@@ -189,21 +194,63 @@ export const TabTickets = ({ audit, projectUrl, projectId }: Props) => {
         newStatuses.set(ticket.findingId, { status: 'creating' });
         setTicketStatuses(new Map(newStatuses));
 
+        // Prefer the Supabase project UUID — the edge function resolves it via
+        // the local DB (projects.redmine_url) to get the correct Redmine slug,
+        // then to the numeric project_id. Falling back to the URL-extracted slug
+        // only when no UUID is available.
+        const resolvedIdentifier = projectId ?? projectIdentifier;
+
         const description = `**${ticket.description}**\n\n**Criticité:** ${ticket.criticality}\n**Priorité:** ${ticket.priority}\n**Axe:** ${ticket.axisName}\n\n**Recommandation:**\n${ticket.recommendation}\n\n---\n_Créé automatiquement depuis l'audit Snapflow du ${audit.date}_`;
 
-        const createData = await createRedmineIssue({
-          projectIdentifier,
+        const createPayload = {
+          projectIdentifier: resolvedIdentifier!,
           subject: ticket.title,
           description,
           assignedToId: assignedRedmineUserId || undefined,
+        };
+
+        console.info('[TabTickets][createRedmineIssue] creating ticket — full payload', {
+          findingId: ticket.findingId,
+          axisName: ticket.axisName,
+          projectId_prop: projectId ?? null,
+          projectIdentifier_from_url: projectIdentifier ?? null,
+          resolved_identifier_sent: resolvedIdentifier,
+          subject: createPayload.subject,
+          assignedToId: createPayload.assignedToId ?? null,
+          descriptionLength: createPayload.description.length,
         });
 
+        const createData = await createRedmineIssue(createPayload);
+
         if (createData?.issue || createData?.success) {
+          console.info('[TabTickets][createRedmineIssue] ticket created', {
+            findingId: ticket.findingId,
+            subject: ticket.title,
+            redmineId: createData.issue?.id ?? null,
+            redmineStatus: createData.redmine_status ?? null,
+          });
           newStatuses.set(ticket.findingId, { status: 'created', redmineId: createData.issue?.id });
         } else {
-          throw new Error(createData?.error || createData?.details?.errors?.join(', ') || 'Erreur inconnue');
+          const details = createData?.details as { errors?: string[] } | undefined;
+          console.error('[TabTickets][createRedmineIssue] rejected by backend', {
+            findingId: ticket.findingId,
+            subject: ticket.title,
+            projectIdentifier,
+            redmineStatus: createData?.redmine_status ?? null,
+            edgeError: createData?.error ?? null,
+            responsePreview: createData?.response_preview ?? null,
+            details: createData?.details ?? null,
+          });
+          throw new Error(createData?.error || details?.errors?.join(', ') || 'Erreur inconnue');
         }
       } catch (err: any) {
+        console.error('[TabTickets][createRedmineIssue] failed', {
+          findingId: ticket.findingId,
+          subject: ticket.title,
+          projectIdentifier,
+          message: err?.message || String(err),
+          stack: err?.stack || null,
+        });
         newStatuses.set(ticket.findingId, { status: 'error', error: err.message || 'Erreur' });
       }
 
@@ -238,7 +285,7 @@ export const TabTickets = ({ audit, projectUrl, projectId }: Props) => {
         return (
           <span className="flex items-center gap-1 text-xs text-yellow-600">
             <AlertCircle className="w-3.5 h-3.5" />
-            <a href={`https://maintenance.medianet.tn/issues/${st.redmineId}`} target="_blank" rel="noopener noreferrer" className="hover:underline">
+            <a href={getRedmineIssueUrl(st.redmineId)} target="_blank" rel="noopener noreferrer" className="hover:underline">
               #{st.redmineId} ({st.redmineStatus})
             </a>
           </span>
@@ -247,7 +294,7 @@ export const TabTickets = ({ audit, projectUrl, projectId }: Props) => {
         return (
           <span className="flex items-center gap-1 text-xs text-emerald-600">
             <CheckCircle2 className="w-3.5 h-3.5" />
-            <a href={`https://maintenance.medianet.tn/issues/${st.redmineId}`} target="_blank" rel="noopener noreferrer" className="hover:underline">
+            <a href={getRedmineIssueUrl(st.redmineId)} target="_blank" rel="noopener noreferrer" className="hover:underline">
               #{st.redmineId}
             </a>
           </span>

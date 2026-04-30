@@ -145,7 +145,7 @@ var rgpdKeywords = []string{
 	"droit à l'effacement", "droit à la portabilité", "droit de suppression",
 	"droit au retrait du consentement", "droit d'introduire une réclamation",
 	"autorité de contrôle", "base légale",
-	"délégué à la protection", "DPO", "RGPD", "CNIL",
+	"délégué à la protection", "DPO", "RGPD", "CNIL", "INPDP",
 	"consentement", "données personnelles", "traitement des données",
 	"durée de conservation", "finalité du traitement",
 	// English

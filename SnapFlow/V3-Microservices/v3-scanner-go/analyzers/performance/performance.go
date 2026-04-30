@@ -1,6 +1,7 @@
 package performance
 
 import (
+	"context"
 	"fmt"
 	"math"
 	"math/rand"
@@ -8,6 +9,9 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"snapflow/v3-scanner-go/analyzers/browserutil"
+	"snapflow/v3-scanner-go/browserpool"
 
 	"github.com/go-rod/rod"
 	"github.com/go-rod/rod/lib/launcher"
@@ -89,15 +93,7 @@ type MobilePerformanceResult struct {
 // otherwise auto-download a fresh Chromium binary at runtime, blocking the
 // scan for 30-60 seconds and leaving stray files on disk.
 func findChromePath() (string, bool) {
-	if p := os.Getenv("CHROME_PATH"); p != "" {
-		if _, err := os.Stat(p); err == nil {
-			return p, true
-		}
-	}
-	if p, found := launcher.LookPath(); found {
-		return p, true
-	}
-	return "", false
+	return browserutil.ResolveBrowserBinary()
 }
 
 func newLauncher() *launcher.Launcher {
@@ -170,6 +166,9 @@ func RunHeadlessPool(urls []string, concurrency int) []HeadlessResult {
 
 	launchURL, err := launchBrowserWithFallback()
 	if err != nil {
+		if browserpool.IsEnabled() {
+			return renderPagesViaBrowserPool(urls, concurrency)
+		}
 		// Return error results for all URLs
 		var results []HeadlessResult
 		for _, u := range urls {
@@ -196,10 +195,6 @@ func RunHeadlessPool(urls []string, concurrency int) []HeadlessResult {
 	for i, pageURL := range urls {
 		wg.Add(1)
 		sem <- struct{}{} // acquire semaphore slot
-
-		// Stagger launches with 1–3 s jitter to avoid overwhelming the target server.
-		jitterSleep(1000, 5000)
-
 		go func(idx int, targetURL string) {
 			defer wg.Done()
 			defer func() { <-sem }()
@@ -215,7 +210,7 @@ func launchBrowserWithFallback() (string, error) {
 	// Guard: abort immediately when no system Chromium is present.
 	// Without this, rod auto-downloads a fresh binary and blocks the scan.
 	if _, found := findChromePath(); !found {
-		return "", fmt.Errorf("no Chromium binary found — set CHROME_PATH or install chromium")
+		return "", fmt.Errorf("no local Chromium-based browser found — set CHROME_PATH, configure BROWSER_POOL_URL, or install Chrome/Edge/Chromium")
 	}
 
 	launchers := []*launcher.Launcher{newLauncher()}
@@ -241,6 +236,95 @@ func launchBrowserWithFallback() (string, error) {
 		lastErr = fmt.Errorf("failed to launch browser")
 	}
 	return "", lastErr
+}
+
+func renderPagesViaBrowserPool(urls []string, concurrency int) []HeadlessResult {
+	if len(urls) == 0 {
+		return nil
+	}
+	if concurrency <= 0 {
+		concurrency = 1
+	}
+
+	results := make([]HeadlessResult, len(urls))
+	sem := make(chan struct{}, concurrency)
+	var wg sync.WaitGroup
+
+	for i, pageURL := range urls {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(idx int, targetURL string) {
+			defer wg.Done()
+			defer func() { <-sem }()
+
+			res := HeadlessResult{
+				URL:                   targetURL,
+				ConsoleErrorKPIPassed: true,
+				ButtonKPIPassed:       true,
+			}
+			renderResult, err := browserpool.Render(context.Background(), targetURL, 45000, "networkidle")
+			if err != nil {
+				renderResult, err = browserpool.Render(context.Background(), targetURL, 30000, "domcontentloaded")
+			} else if renderResult != nil && renderResult.Error != "" {
+				fallbackResult, fallbackErr := browserpool.Render(context.Background(), targetURL, 30000, "domcontentloaded")
+				if fallbackErr == nil && fallbackResult != nil && fallbackResult.Error == "" {
+					renderResult = fallbackResult
+				}
+			}
+			if err != nil {
+				res.Error = fmt.Sprintf("Browser-pool render failed: %v", err)
+				results[idx] = res
+				return
+			}
+			if renderResult.Error != "" {
+				res.Error = renderResult.Error
+				results[idx] = res
+				return
+			}
+			res.FCPMS = renderResult.FCPMS
+			res.LCPMS = renderResult.LCPMS
+			res.CLS = renderResult.CLS
+			res.DOMNodes = renderResult.DOMNodes
+			res.HTTPRequests = renderResult.HTTPRequests
+			res.TransferSizeKB = renderResult.TransferSizeKB
+			res.AssetBreakdown = map[string]AssetCategory{}
+			for category, item := range renderResult.AssetBreakdown {
+				asset := AssetCategory{
+					SizeBytes: item.SizeBytes,
+					Count:     item.Count,
+					CO2Grams:  item.CO2Grams,
+				}
+				if asset.SizeBytes > 0 && asset.CO2Grams == 0 {
+					asset.CO2Grams = calculateSWDCarbon(asset.SizeBytes)
+				}
+				res.AssetBreakdown[category] = asset
+				res.EmissionsPerPageLoad += asset.CO2Grams
+			}
+			res.EmissionsPerPageLoad = math.Round(res.EmissionsPerPageLoad*1000) / 1000
+			res.DesktopOverflow = renderResult.DesktopOverflow
+			res.TabletOverflow = renderResult.TabletOverflow
+			res.MobileOverflow = renderResult.MobileOverflow
+			res.InvisibleLinks = renderResult.InvisibleLinks
+			res.ConsoleErrors = renderResult.ConsoleErrors
+			res.ConsoleErrorCount = renderResult.ConsoleErrorCount
+			if res.ConsoleErrorCount == 0 && len(res.ConsoleErrors) > 0 {
+				res.ConsoleErrorCount = len(res.ConsoleErrors)
+			}
+			res.ConsoleErrorKPIPassed = res.ConsoleErrorCount == 0
+			if res.FCPMS > 0 && res.LCPMS > 0 {
+				res.SpeedIndexMS = math.Round((res.FCPMS*0.3+res.LCPMS*0.7)*10) / 10
+				res.SpeedIndexSynthetic = true
+			}
+			if res.DOMNodes > 0 || res.HTTPRequests > 0 || res.TransferSizeKB > 0 {
+				res.EcoIndex, res.EcoScore = calculateEcoIndex(res.DOMNodes, res.HTTPRequests, res.TransferSizeKB)
+			}
+			res.RenderedHTML = renderResult.RenderedHTML
+			results[idx] = res
+		}(i, pageURL)
+	}
+
+	wg.Wait()
+	return results
 }
 
 // analyzePageHeadless analyzes a single page
@@ -353,9 +437,6 @@ func analyzePageHeadless(browser *rod.Browser, targetURL string) HeadlessResult 
 	if err != nil {
 		// Even if idle fails, we might still have data, just log and continue
 	}
-
-	// Short jittered wait for metrics to settle (1–3 s replaces fixed 5 s).
-	jitterSleep(1000, 5000)
 
 	// G-3: Collect console errors gathered during page load
 	consoleMu.Lock()
@@ -588,37 +669,87 @@ func analyzePageHeadless(browser *rod.Browser, targetURL string) HeadlessResult 
 		result.FCPMS = math.Round(fcpVal.Value.Num()*10) / 10
 	}
 
-	// Extract LCP from buffered entries
-	lcpVal, err := page.Eval(`() => {
-		return new Promise((resolve) => {
-			let lcp = 0;
-			const observer = new PerformanceObserver((list) => {
-				const entries = list.getEntries();
-				if (entries.length > 0) lcp = entries[entries.length - 1].startTime;
-			});
-			try { observer.observe({type: 'largest-contentful-paint', buffered: true}); } catch(e) {}
-			// [5.5] Increased from 1000ms to 3000ms for desktop.
-			// LCP can arrive up to 2.5s on standard connections; 1s missed lazy-loaded images.
-			setTimeout(() => { observer.disconnect(); resolve(lcp); }, 3000);
-		});
-	}`)
-	if err == nil {
-		result.LCPMS = lcpVal.Value.Num()
+	// Viewport overflow checks run as 3 parallel pages so they overlap with the
+	// LCP/CLS observation window and add zero sequential wall time for fast sites.
+	overflowEvalScript := `() => {
+		const vw = Math.max(document.documentElement.clientWidth, window.innerWidth || 0);
+		return document.documentElement.scrollWidth > (vw + 5);
+	}`
+	deskOverflowCh := make(chan bool, 1)
+	tabOverflowCh := make(chan bool, 1)
+	mobOverflowCh := make(chan bool, 1)
+	for _, vp := range []struct {
+		w, h int
+		mob  bool
+		ch   chan bool
+	}{
+		{1366, 768, false, deskOverflowCh},
+		{768, 1024, true, tabOverflowCh},
+		{375, 812, true, mobOverflowCh},
+	} {
+		vp := vp
+		go func() {
+			p, err := browser.Page(proto.TargetCreateTarget{URL: "about:blank"})
+			if err != nil {
+				vp.ch <- false
+				return
+			}
+			defer p.Close()
+			p.MustSetViewport(vp.w, vp.h, 1.0, vp.mob)
+			if err := p.Timeout(15 * time.Second).Navigate(targetURL); err != nil {
+				vp.ch <- false
+				return
+			}
+			_ = p.WaitLoad()
+			v, err := p.Eval(overflowEvalScript)
+			if err != nil {
+				vp.ch <- false
+				return
+			}
+			vp.ch <- v.Value.Bool()
+		}()
 	}
 
-	// Extract CLS from buffered entries
-	clsVal, err := page.Eval(`() => {
-		return new Promise((resolve) => {
+	// LCP + CLS measured concurrently via channels: each goroutine fires a JS
+	// Promise that runs in the page event loop independently.  Total wall time =
+	// max(LCP window, CLS window) instead of the previous sequential 3 s + 3 s.
+	// LCP resolves early via a 400 ms debounce after the last entry, capped at
+	// 1500 ms. CLS accumulates over 2000 ms with no early exit.
+	lcpCh := make(chan float64, 1)
+	clsCh := make(chan float64, 1)
+	go func() {
+		v, err := page.Eval(`() => new Promise((resolve) => {
+			let lcp = 0, debounceId;
+			const obs = new PerformanceObserver((list) => {
+				const e = list.getEntries();
+				if (e.length > 0) lcp = e[e.length - 1].startTime;
+				// Early-exit: resolve 400 ms after the last LCP entry to catch
+				// lazy-loaded images while skipping unnecessary waiting.
+				clearTimeout(debounceId);
+				debounceId = setTimeout(() => { obs.disconnect(); resolve(lcp); }, 400);
+			});
+			try { obs.observe({type: 'largest-contentful-paint', buffered: true}); } catch(e) {}
+			// Hard deadline 1500 ms — covers standard connections without a 3 s stall.
+			setTimeout(() => { clearTimeout(debounceId); obs.disconnect(); resolve(lcp); }, 1500);
+		})`)
+		if err == nil && v != nil {
+			lcpCh <- v.Value.Num()
+		} else {
+			lcpCh <- 0
+		}
+	}()
+	go func() {
+		v, err := page.Eval(`() => new Promise((resolve) => {
 			let cls = 0;
-			const observer = new PerformanceObserver((list) => {
+			const obs = new PerformanceObserver((list) => {
 				for (const entry of list.getEntries()) {
 					if (!entry.hadRecentInput) {
-						// BL-10: Ignore shifts caused by sliders, carousels, or accordions
+						// BL-10: Ignore shifts from sliders, carousels, and accordions.
 						let isIntentional = false;
 						if (entry.sources) {
-							for (const source of entry.sources) {
-								if (source.node && typeof source.node.className === 'string') {
-									const c = source.node.className.toLowerCase();
+							for (const src of entry.sources) {
+								if (src.node && typeof src.node.className === 'string') {
+									const c = src.node.className.toLowerCase();
 									if (c.includes('carousel') || c.includes('slide') || c.includes('accordion') || c.includes('collapse') || c.includes('drawer')) {
 										isIntentional = true;
 									}
@@ -629,14 +760,17 @@ func analyzePageHeadless(browser *rod.Browser, targetURL string) HeadlessResult 
 					}
 				}
 			});
-			try { observer.observe({type: 'layout-shift', buffered: true}); } catch(e) {}
-			// [5.5] Match desktop LCP timeout so all Core Web Vitals are measured over same window.
-			setTimeout(() => { observer.disconnect(); resolve(cls); }, 3000);
-		});
-	}`)
-	if err == nil {
-		result.CLS = math.Round(clsVal.Value.Num()*1000) / 1000
-	}
+			try { obs.observe({type: 'layout-shift', buffered: true}); } catch(e) {}
+			setTimeout(() => { obs.disconnect(); resolve(cls); }, 2000);
+		})`)
+		if err == nil && v != nil {
+			clsCh <- v.Value.Num()
+		} else {
+			clsCh <- 0
+		}
+	}()
+	result.LCPMS = <-lcpCh
+	result.CLS = math.Round((<-clsCh)*1000) / 1000
 
 	// Extract DOM node count
 	domVal, err := page.Eval(`() => document.querySelectorAll('*').length`)
@@ -712,49 +846,10 @@ func analyzePageHeadless(browser *rod.Browser, targetURL string) HeadlessResult 
 	result.EmissionsPerPageLoad = math.Round(totalEmissions*1000) / 1000
 	networkMu.Unlock()
 
-	overflowEvalScript := `() => {
-		const vw = Math.max(document.documentElement.clientWidth, window.innerWidth || 0);
-		return document.documentElement.scrollWidth > (vw + 5);
-	}`
-
-	// Desktop responsiveness check (current viewport)
-	overflowDesk, err := page.Eval(overflowEvalScript)
-	if err == nil {
-		result.DesktopOverflow = overflowDesk.Value.Bool()
-	}
-
-	// Tablet responsiveness check
-	page.MustSetViewport(768, 1024, 1.0, true)
-	time.Sleep(200 * time.Millisecond)
-	overflowTab, err := page.Eval(overflowEvalScript)
-	if err == nil && overflowTab.Value.Bool() {
-		// Adaptive settle: only retry with longer delay when initial read is overflow.
-		time.Sleep(600 * time.Millisecond)
-		overflowTab2, err2 := page.Eval(overflowEvalScript)
-		if err2 == nil {
-			overflowTab = overflowTab2
-		}
-	}
-	if err == nil {
-		result.TabletOverflow = overflowTab.Value.Bool()
-	}
-
-	// Mobile responsiveness check (viewport 375px)
-	page.MustSetViewport(375, 812, 1.0, true)
-	time.Sleep(200 * time.Millisecond)
-
-	overflowVal, err := page.Eval(overflowEvalScript)
-	if err == nil && overflowVal.Value.Bool() {
-		// Adaptive settle: only retry with longer delay when initial read is overflow.
-		time.Sleep(600 * time.Millisecond)
-		overflowVal2, err2 := page.Eval(overflowEvalScript)
-		if err2 == nil {
-			overflowVal = overflowVal2
-		}
-	}
-	if err == nil {
-		result.MobileOverflow = overflowVal.Value.Bool()
-	}
+	// Collect viewport overflow results (goroutines started alongside LCP/CLS above).
+	result.DesktopOverflow = <-deskOverflowCh
+	result.TabletOverflow = <-tabOverflowCh
+	result.MobileOverflow = <-mobOverflowCh
 
 	// 5. UX / Visual: Check for Invisible Links (CSS display none, hidden, or size 0)
 	invisibleLinksVal, err := page.Eval(`() => {
@@ -788,27 +883,10 @@ func analyzePageHeadless(browser *rod.Browser, targetURL string) HeadlessResult 
 	return result
 }
 
-// AnalyzeHomepageMobile launches a headless browser with 3G mobile emulation and measures
-// FCP, LCP, CLS, and Speed Index for the given homepage URL.
-// Thresholds (mobile 3G): FCP < 3000 ms, LCP < 4000 ms, CLS < 0.25
-func AnalyzeHomepageMobile(targetURL string) MobilePerformanceResult {
+// AnalyzeHomepageMobile measures FCP, LCP, CLS, and Speed Index under 3G mobile
+// emulation using the supplied browser. The caller owns the browser lifecycle.
+func AnalyzeHomepageMobile(br *rod.Browser, targetURL string) MobilePerformanceResult {
 	res := MobilePerformanceResult{}
-
-	// Guard: skip immediately when no system Chromium is available.
-	// rod auto-downloads a fresh binary otherwise, burning the scan budget.
-	if _, found := findChromePath(); !found {
-		res.Error = "no Chromium binary available — set CHROME_PATH or install chromium"
-		return res
-	}
-
-	launchURL, err := launchBrowserWithFallback()
-	if err != nil {
-		res.Error = fmt.Sprintf("launcher: %v", err)
-		return res
-	}
-	url := launchURL
-	br := rod.New().ControlURL(url).MustConnect()
-	defer br.Close()
 
 	page, err := br.Page(proto.TargetCreateTarget{URL: "about:blank"})
 	if err != nil {
@@ -831,23 +909,20 @@ func AnalyzeHomepageMobile(targetURL string) MobilePerformanceResult {
 	_ = proto.NetworkEmulateNetworkConditions{
 		Offline:            false,
 		Latency:            300,
-		DownloadThroughput: 1.5 * 1024 * 1024 / 8, // 1.5 Mbps in bytes/s
-		UploadThroughput:   750 * 1024 / 8,        // 750 Kbps in bytes/s
+		DownloadThroughput: 1.5 * 1024 * 1024 / 8,
+		UploadThroughput:   750 * 1024 / 8,
 		ConnectionType:     proto.NetworkConnectionTypeCellular3g,
 	}.Call(page)
 
 	_ = proto.NetworkEnable{}.Call(page)
 
-	err = page.Timeout(90 * time.Second).Navigate(targetURL)
-	if err != nil {
+	if err = page.Timeout(90 * time.Second).Navigate(targetURL); err != nil {
 		res.Error = fmt.Sprintf("navigate: %v", err)
 		return res
 	}
 	_ = page.Timeout(90 * time.Second).WaitIdle(3 * time.Second)
-	// Short jittered wait for metrics to settle (1–3 s replaces fixed 5 s).
-	jitterSleep(1000, 5000)
 
-	// FCP
+	// FCP (sync — available immediately after WaitIdle)
 	fcpVal, err := page.Eval(`() => {
 		const entries = performance.getEntriesByType('paint');
 		const fcp = entries.find(e => e.name === 'first-contentful-paint');
@@ -863,27 +938,30 @@ func AnalyzeHomepageMobile(targetURL string) MobilePerformanceResult {
 		}
 	}
 
-	// LCP
-	lcpVal, err := page.Eval(`() => {
-		return new Promise((resolve) => {
-			let lcp = 0;
+	// LCP + CLS in parallel: total wall time = max(3500 ms, 3000 ms) = 3500 ms
+	// instead of 5000 ms + 5000 ms sequential.
+	mobLcpCh := make(chan float64, 1)
+	mobClsCh := make(chan float64, 1)
+	go func() {
+		v, err := page.Eval(`() => new Promise((resolve) => {
+			let lcp = 0, debounceId;
 			const obs = new PerformanceObserver((list) => {
-				const entries = list.getEntries();
-				if (entries.length > 0) lcp = entries[entries.length - 1].startTime;
+				const e = list.getEntries();
+				if (e.length > 0) lcp = e[e.length - 1].startTime;
+				clearTimeout(debounceId);
+				debounceId = setTimeout(() => { obs.disconnect(); resolve(lcp); }, 700);
 			});
 			try { obs.observe({type: 'largest-contentful-paint', buffered: true}); } catch(e) {}
-			// [5.5] Increased from 1500ms to 5000ms for mobile.
-			// On 3G or slow servers LCP legitimately arrives at 3-4s.
-			setTimeout(() => { obs.disconnect(); resolve(lcp); }, 5000);
-		});
-	}`)
-	if err == nil {
-		res.LCPMS = lcpVal.Value.Num()
-	}
-
-	// CLS
-	clsVal, err := page.Eval(`() => {
-		return new Promise((resolve) => {
+			setTimeout(() => { clearTimeout(debounceId); obs.disconnect(); resolve(lcp); }, 3500);
+		})`)
+		if err == nil && v != nil {
+			mobLcpCh <- v.Value.Num()
+		} else {
+			mobLcpCh <- 0
+		}
+	}()
+	go func() {
+		v, err := page.Eval(`() => new Promise((resolve) => {
 			let cls = 0;
 			const obs = new PerformanceObserver((list) => {
 				for (const entry of list.getEntries()) {
@@ -891,15 +969,18 @@ func AnalyzeHomepageMobile(targetURL string) MobilePerformanceResult {
 				}
 			});
 			try { obs.observe({type: 'layout-shift', buffered: true}); } catch(e) {}
-			// [5.5] Increased from 1500ms to 5000ms to match mobile LCP window.
-			setTimeout(() => { obs.disconnect(); resolve(cls); }, 5000);
-		});
-	}`)
-	if err == nil {
-		res.CLS = math.Round(clsVal.Value.Num()*1000) / 1000
-	}
+			setTimeout(() => { obs.disconnect(); resolve(cls); }, 3000);
+		})`)
+		if err == nil && v != nil {
+			mobClsCh <- v.Value.Num()
+		} else {
+			mobClsCh <- 0
+		}
+	}()
+	res.LCPMS = <-mobLcpCh
+	res.CLS = math.Round((<-mobClsCh)*1000) / 1000
 
-	// Speed Index (synthetic: 30% FCP + 70% LCP — Core Web Vitals only, DCL removed)
+	// Speed Index (synthetic: 30% FCP + 70% LCP)
 	if res.FCPMS > 0 && res.LCPMS > 0 {
 		si := res.FCPMS*0.3 + res.LCPMS*0.7
 		if !math.IsNaN(si) && !math.IsInf(si, 0) && si > 0 {
@@ -907,13 +988,10 @@ func AnalyzeHomepageMobile(targetURL string) MobilePerformanceResult {
 		}
 	}
 
-	// Threshold checks
 	issues := []string{}
-	// G10: Mobile CWV FCP threshold (Good < 1800ms)
 	if res.FCPMS > 0 && res.FCPMS >= 1800 {
 		issues = append(issues, fmt.Sprintf("FCP %.0f ms exceeds 1800 ms threshold on mobile", res.FCPMS))
 	}
-	// G10: Mobile CWV LCP threshold (Good < 2500ms)
 	if res.LCPMS == 0 || res.LCPMS >= 2500 {
 		issues = append(issues, fmt.Sprintf("LCP %.0f ms exceeds 2500 ms threshold on mobile", res.LCPMS))
 	}
@@ -924,6 +1002,48 @@ func AnalyzeHomepageMobile(targetURL string) MobilePerformanceResult {
 	res.Passed = len(issues) == 0
 
 	return res
+}
+
+// RunMobileTraces analyzes multiple URLs under 3G mobile emulation sharing one
+// browser instance. Results are returned in the same order as the input slice.
+func RunMobileTraces(urls []string) []MobilePerformanceResult {
+	results := make([]MobilePerformanceResult, len(urls))
+	if len(urls) == 0 {
+		return results
+	}
+
+	if _, found := findChromePath(); !found {
+		for i := range results {
+			if browserpool.IsEnabled() {
+				results[i].Error = "mobile CWV capture still requires a local Chromium-based browser even when BROWSER_POOL_URL is configured"
+				continue
+			}
+			results[i].Error = "no local Chromium-based browser available — set CHROME_PATH, configure BROWSER_POOL_URL, or install Chrome/Edge/Chromium"
+		}
+		return results
+	}
+
+	launchURL, err := launchBrowserWithFallback()
+	if err != nil {
+		for i := range results {
+			results[i].Error = fmt.Sprintf("launcher: %v", err)
+		}
+		return results
+	}
+
+	br := rod.New().ControlURL(launchURL).MustConnect()
+	defer br.Close()
+
+	var wg sync.WaitGroup
+	for i, u := range urls {
+		wg.Add(1)
+		go func(idx int, targetURL string) {
+			defer wg.Done()
+			results[idx] = AnalyzeHomepageMobile(br, targetURL)
+		}(i, u)
+	}
+	wg.Wait()
+	return results
 }
 
 // SWD v4 Carbon Calculation

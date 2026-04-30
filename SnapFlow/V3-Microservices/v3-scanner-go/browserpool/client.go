@@ -4,10 +4,11 @@
 // launching its own Chromium instances.
 //
 // Feature flags
-//   BROWSER_POOL_URL          Service base URL (e.g. "http://v3-browser-pool:8084").
-//                             Empty → pool disabled; all callers fall back to
-//                             their local browser logic.
-//   BROWSER_POOL_TIMEOUT_MS   Per-request HTTP timeout (default 90 000 ms).
+//
+//	BROWSER_POOL_URL          Service base URL (e.g. "http://v3-browser-pool:8084").
+//	                          Empty → pool disabled; all callers fall back to
+//	                          their local browser logic.
+//	BROWSER_POOL_TIMEOUT_MS   Per-request HTTP timeout (default 90 000 ms).
 package browserpool
 
 import (
@@ -42,15 +43,34 @@ var client = &http.Client{} // timeout set per-request via context
 // ── Response types ─────────────────────────────────────────────────────────────
 
 // RenderResult mirrors the /render response body.
+type AssetCategory struct {
+	SizeBytes int     `json:"size_bytes"`
+	Count     int     `json:"count"`
+	CO2Grams  float64 `json:"co2_grams"`
+}
+
 type RenderResult struct {
-	Status       string `json:"status"`
-	URL          string `json:"url"`
-	RenderedHTML string `json:"rendered_html"`
-	Title        string `json:"title"`
-	PageHeight   int    `json:"page_height"`
-	PageWidth    int    `json:"page_width"`
-	FinalURL     string `json:"final_url"`
-	Error        string `json:"error"`
+	Status            string                   `json:"status"`
+	URL               string                   `json:"url"`
+	RenderedHTML      string                   `json:"rendered_html"`
+	Title             string                   `json:"title"`
+	PageHeight        int                      `json:"page_height"`
+	PageWidth         int                      `json:"page_width"`
+	FinalURL          string                   `json:"final_url"`
+	FCPMS             float64                  `json:"fcp_ms"`
+	LCPMS             float64                  `json:"lcp_ms"`
+	CLS               float64                  `json:"cls"`
+	DOMNodes          int                      `json:"dom_nodes"`
+	HTTPRequests      int                      `json:"http_requests"`
+	TransferSizeKB    float64                  `json:"transfer_size_kb"`
+	AssetBreakdown    map[string]AssetCategory `json:"asset_breakdown"`
+	DesktopOverflow   bool                     `json:"desktop_overflow"`
+	TabletOverflow    bool                     `json:"tablet_overflow"`
+	MobileOverflow    bool                     `json:"mobile_overflow"`
+	InvisibleLinks    int                      `json:"invisible_links"`
+	ConsoleErrors     []string                 `json:"console_errors"`
+	ConsoleErrorCount int                      `json:"console_error_count"`
+	Error             string                   `json:"error"`
 }
 
 // ScreenshotResult mirrors the /screenshot response body.

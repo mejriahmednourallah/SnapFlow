@@ -29,10 +29,9 @@ import (
 	"snapflow/v3-scanner-go/analyzers/seo"
 	"snapflow/v3-scanner-go/analyzers/tech"
 	"snapflow/v3-scanner-go/analyzers/ux"
+	"snapflow/v3-scanner-go/browserpool"
 	"snapflow/v3-scanner-go/db"
 
-	"github.com/go-rod/rod"
-	"github.com/go-rod/rod/lib/launcher"
 	"github.com/gocolly/colly/v2"
 )
 
@@ -1125,7 +1124,7 @@ func startScan(ctx context.Context, config ScannerConfig) {
 		if r.StatusCode == http.StatusGatewayTimeout {
 			atomic.AddInt32(&gatewayTimeoutCount, 1)
 		}
-		targetURL := r.Request.URL.String()
+		targetURL := strings.TrimSpace(r.Request.URL.String())
 
 		if strings.HasSuffix(targetURL, "/") && strings.Count(targetURL, "/") > 3 {
 			targetURL = strings.TrimSuffix(targetURL, "/")
@@ -1331,18 +1330,44 @@ func startScan(ctx context.Context, config ScannerConfig) {
 		}
 
 		if browserTimeout > 0 {
-			log.Printf("No HTTP forms found with Cloudflare challenge markers, trying Rod fallback...")
-			fallbackForms, err := formbrowser.AnalyzeWithBrowser(ctx, config.StartURL, formbrowser.Config{
-				Timeout:  browserTimeout,
-				MaxForms: formBrowserCfg.MaxForms,
-				Headless: formBrowserCfg.Headless,
-			})
-			if err != nil {
-				log.Printf("⚠ Rod fallback failed: %v", err)
-			} else if len(fallbackForms) > 0 {
-				discoveredForms = fallbackForms
-				formFuzzerSummary.FormsDiscovered = len(discoveredForms)
-				log.Printf("✓ Rod fallback recovered %d forms", len(discoveredForms))
+			if browserpool.IsEnabled() {
+				log.Printf("No HTTP forms found with Cloudflare challenge markers, trying browser-pool render fallback...")
+				timeoutMS := int(browserTimeout.Milliseconds())
+				renderResult, renderErr := browserpool.Render(ctx, config.StartURL, timeoutMS, "networkidle")
+				if renderErr != nil {
+					log.Printf("⚠ Browser-pool render fallback failed: %v", renderErr)
+				} else if renderResult.Error != "" {
+					log.Printf("⚠ Browser-pool render returned error: %s", renderResult.Error)
+				} else {
+					finalURL := renderResult.FinalURL
+					if finalURL == "" {
+						finalURL = config.StartURL
+					}
+					fallbackForms, parseErr := formbrowser.AnalyzeFromHTML(ctx, finalURL, renderResult.RenderedHTML, formbrowser.Config{
+						MaxForms: formBrowserCfg.MaxForms,
+					})
+					if parseErr != nil {
+						log.Printf("⚠ Browser-pool form parse failed: %v", parseErr)
+					} else if len(fallbackForms) > 0 {
+						discoveredForms = fallbackForms
+						formFuzzerSummary.FormsDiscovered = len(discoveredForms)
+						log.Printf("✓ Browser-pool fallback recovered %d forms", len(fallbackForms))
+					}
+				}
+			} else {
+				log.Printf("No HTTP forms found with Cloudflare challenge markers, trying Rod fallback...")
+				fallbackForms, err := formbrowser.AnalyzeWithBrowser(ctx, config.StartURL, formbrowser.Config{
+					Timeout:  browserTimeout,
+					MaxForms: formBrowserCfg.MaxForms,
+					Headless: formBrowserCfg.Headless,
+				})
+				if err != nil {
+					log.Printf("⚠ Rod fallback failed: %v", err)
+				} else if len(fallbackForms) > 0 {
+					discoveredForms = fallbackForms
+					formFuzzerSummary.FormsDiscovered = len(discoveredForms)
+					log.Printf("✓ Rod fallback recovered %d forms", len(discoveredForms))
+				}
 			}
 		}
 	}
@@ -1585,69 +1610,64 @@ func startScan(ctx context.Context, config ScannerConfig) {
 			}
 
 			if browserTimeout > 0 && ctx.Err() == nil {
-				// Require an explicit local Chromium binary to avoid runtime auto-download.
-				modalBin := strings.TrimSpace(os.Getenv("CHROME_PATH"))
-				if modalBin == "" {
-					if path, found := launcher.LookPath(); found {
-						modalBin = path
+				var modalForms []formfuzzer.DiscoveredForm
+
+				if browserpool.IsEnabled() {
+					// Pool path: render the page with networkidle and parse any forms
+					// that are visible after JS execution (auto-open modals, lazy content).
+					// Click-triggered modals require a future /render-with-clicks pool
+					// endpoint; until then they are discovered by the NLP/visual worker.
+					log.Printf("🔍 Browser-pool modal/JS form discovery (networkidle render)...")
+					timeoutMS := int(browserTimeout.Milliseconds())
+					renderResult, renderErr := browserpool.Render(ctx, config.StartURL, timeoutMS, "networkidle")
+					if renderErr != nil {
+						log.Printf("⚠ Browser-pool modal render failed: %v", renderErr)
+					} else if renderResult.Error != "" {
+						log.Printf("⚠ Browser-pool modal render returned error: %s", renderResult.Error)
+					} else {
+						finalURL := renderResult.FinalURL
+						if finalURL == "" {
+							finalURL = config.StartURL
+						}
+						cap := formFuzzerCfg.MaxForms - len(discoveredForms)
+						parsed, parseErr := formbrowser.AnalyzeFromHTML(ctx, finalURL, renderResult.RenderedHTML, formbrowser.Config{
+							MaxForms: cap,
+						})
+						if parseErr != nil {
+							log.Printf("⚠ Browser-pool modal form parse failed: %v", parseErr)
+						} else {
+							modalForms = parsed
+						}
+					}
+				} else {
+					// Local rod path: launch Chromium, click CTA buttons, extract modal forms.
+					var localErr error
+					modalForms, localErr = formfuzzer.DiscoverModalsWithLocalBrowser(ctx, config.StartURL)
+					if localErr != nil {
+						log.Printf("⚠ Modal discovery failed: %v", localErr)
 					}
 				}
-				if modalBin == "" {
-					log.Printf("⚠ Modal discovery skipped: no Chromium binary found (set CHROME_PATH)")
-				} else {
-					modalLauncher := launcher.New().Headless(true).Bin(modalBin)
-					if os.Getuid() == 0 {
-						modalLauncher.
-							Set("no-sandbox").
-							Set("disable-dev-shm-usage").
-							Set("disable-gpu")
-					}
-					modalLaunchURL, modalLaunchErr := modalLauncher.Launch()
-					var browser *rod.Browser
-					if modalLaunchErr != nil {
-						log.Printf("⚠ Modal browser launch failed, skipping modal discovery: %v", modalLaunchErr)
-					} else {
-						browser = rod.New().ControlURL(modalLaunchURL)
-					}
-					if browser != nil {
-						var err error
-						err = browser.Connect()
-						if err != nil {
-							log.Printf("⚠ Modal browser connect failed, skipping modal discovery: %v", err)
-						} else {
-							defer func() {
-								if closeErr := browser.Close(); closeErr != nil {
-									log.Printf("⚠ Modal browser close error: %v", closeErr)
-								}
-							}()
-							modalForms, err := formfuzzer.DiscoverModalForms(ctx, browser, config.StartURL)
-							if err != nil {
-								log.Printf("⚠ Modal discovery failed: %v", err)
-							} else if len(modalForms) > 0 {
-								// Merge modal forms with HTTP-extracted forms (deduplicate)
-								seenForms := map[string]bool{}
-								for _, f := range discoveredForms {
-									key := f.PageURL + "|" + f.FormID + "|" + f.ActionURL
-									seenForms[key] = true
-								}
 
-								addedCount := 0
-								for _, mf := range modalForms {
-									if addedCount >= formFuzzerCfg.MaxForms-len(discoveredForms) {
-										break
-									}
-									key := mf.PageURL + "|" + mf.FormID + "|" + mf.ActionURL
-									if !seenForms[key] {
-										discoveredForms = append(discoveredForms, mf)
-										addedCount++
-									}
-								}
-								if addedCount > 0 {
-									log.Printf("✓ Modal discovery found %d new forms (total: %d)", addedCount, len(discoveredForms))
-									formFuzzerSummary.FormsDiscovered = len(discoveredForms)
-								}
-							}
+				if len(modalForms) > 0 {
+					seenForms := map[string]bool{}
+					for _, f := range discoveredForms {
+						key := f.PageURL + "|" + f.FormID + "|" + f.ActionURL
+						seenForms[key] = true
+					}
+					addedCount := 0
+					for _, mf := range modalForms {
+						if addedCount >= formFuzzerCfg.MaxForms-len(discoveredForms) {
+							break
 						}
+						key := mf.PageURL + "|" + mf.FormID + "|" + mf.ActionURL
+						if !seenForms[key] {
+							discoveredForms = append(discoveredForms, mf)
+							addedCount++
+						}
+					}
+					if addedCount > 0 {
+						log.Printf("✓ Modal/JS form discovery added %d new forms (total: %d)", addedCount, len(discoveredForms))
+						formFuzzerSummary.FormsDiscovered = len(discoveredForms)
 					}
 				}
 			}
@@ -1793,10 +1813,10 @@ func startScan(ctx context.Context, config ScannerConfig) {
 		url    string
 		result performance.MobilePerformanceResult
 	}
+	mobileRawResults := performance.RunMobileTraces(mobileTestURLs)
 	mobileEntries := make([]mobileEntry, 0, len(mobileTestURLs))
-	for _, mURL := range mobileTestURLs {
-		mr := performance.AnalyzeHomepageMobile(mURL)
-		mobileEntries = append(mobileEntries, mobileEntry{url: mURL, result: mr})
+	for i, mURL := range mobileTestURLs {
+		mobileEntries = append(mobileEntries, mobileEntry{url: mURL, result: mobileRawResults[i]})
 	}
 
 	// Attach individual mobile results to matching headless results; also

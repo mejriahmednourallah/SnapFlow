@@ -10,6 +10,15 @@ const corsHeaders = {
 const REDMINE_BASE = "https://maintenance.medianet.tn";
 const REDMINE_KEY = Deno.env.get("REDMINE_API_KEY") || "";
 
+const previewText = (value: string, maxLength = 1200): string => {
+  if (!value) return "";
+  return value.length > maxLength ? `${value.slice(0, maxLength)}…` : value;
+};
+
+if (!REDMINE_KEY) {
+  console.warn("[fetch-redmine] REDMINE_API_KEY is empty; create_issue calls will fail against Redmine.");
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -726,22 +735,148 @@ serve(async (req) => {
     if (type === "create_issue") {
       const { project_identifier, subject, description, tracker_id, priority_id, custom_fields, assigned_to_id } = body;
 
-      // First, resolve numeric project id from identifier if needed
-      let projectId: number | string = project_identifier;
-      
-      // If project_identifier is a string (not a number), look up the numeric id
-      if (typeof project_identifier === 'string' && isNaN(Number(project_identifier))) {
+      console.log("[fetch-redmine][create_issue] incoming request", {
+        project_identifier,
+        subject,
+        tracker_id: tracker_id ?? null,
+        priority_id: priority_id ?? null,
+        assigned_to_id: assigned_to_id ?? null,
+        description_length: typeof description === "string" ? description.length : 0,
+        custom_fields_count: Array.isArray(custom_fields) ? custom_fields.length : 0,
+        has_redmine_key: Boolean(REDMINE_KEY),
+      });
+
+      // Resolve project_id to Redmine numeric id only (never local UUIDs).
+      let projectId: number | null = null;
+      let resolvedProjectIdentifier: string | null = null;
+      let projectLookupStatus: number | null = null;
+      let projectLookupPreview = "";
+
+      const asTrimmedString = typeof project_identifier === "string" ? project_identifier.trim() : "";
+      const isUuidLike = (value: string): boolean =>
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+
+      if (typeof project_identifier === "number" || (asTrimmedString && !isNaN(Number(asTrimmedString)))) {
+        projectId = Number(project_identifier);
+      } else if (asTrimmedString) {
+        // 1) Accept full Redmine project URL and extract identifier.
+        let identifierCandidate = extractRedmineProjectId(asTrimmedString);
+
+        // 2) If caller passed local DB UUID, map it to project.redmine_url/url then extract identifier.
+        if (!identifierCandidate && isUuidLike(asTrimmedString)) {
+          try {
+            const serviceClient = getServiceClient();
+            const { data: localProject, error: localProjectError } = await serviceClient
+              .from("projects")
+              .select("id, redmine_url, url")
+              .eq("id", asTrimmedString)
+              .maybeSingle();
+
+            if (localProjectError) {
+              console.warn("[fetch-redmine][create_issue] local project lookup failed", {
+                local_project_id: asTrimmedString,
+                error: localProjectError.message,
+              });
+            } else if (localProject) {
+              identifierCandidate =
+                extractRedmineProjectId(localProject.redmine_url || "") ||
+                extractRedmineProjectId(localProject.url || "") ||
+                null;
+
+              console.log("[fetch-redmine][create_issue] local project mapped to Redmine identifier", {
+                local_project_id: asTrimmedString,
+                mapped_identifier: identifierCandidate,
+                redmine_url: localProject.redmine_url || null,
+              });
+            }
+          } catch (e) {
+            console.error("[fetch-redmine][create_issue] local project UUID mapping error", e);
+          }
+        }
+
+        // 3) Fallback: treat raw string as Redmine identifier.
+        if (!identifierCandidate) {
+          identifierCandidate = asTrimmedString;
+        }
+        resolvedProjectIdentifier = identifierCandidate;
+
+        // 4) Resolve Redmine identifier to strict numeric project id.
         try {
           const projRes = await fetch(
-            `${REDMINE_BASE}/projects/${project_identifier}.json?key=${REDMINE_KEY}`
+            `${REDMINE_BASE}/projects/${identifierCandidate}.json?key=${REDMINE_KEY}`
           );
+          projectLookupStatus = projRes.status;
+          console.log("[fetch-redmine][create_issue] project lookup response", {
+            project_identifier,
+            identifier_candidate: identifierCandidate,
+            status: projRes.status,
+            ok: projRes.ok,
+          });
+
+          const lookupText = await projRes.text();
+          projectLookupPreview = previewText(lookupText);
+
           if (projRes.ok) {
-            const projData = await projRes.json();
-            projectId = projData.project?.id || project_identifier;
+            try {
+              const projData = lookupText ? JSON.parse(lookupText) : {};
+              const resolvedProjectId = Number(projData?.project?.id);
+              const resolvedIdentifier = typeof projData?.project?.identifier === "string"
+                ? projData.project.identifier
+                : null;
+
+              if (resolvedIdentifier) {
+                resolvedProjectIdentifier = resolvedIdentifier;
+              }
+
+              if (Number.isFinite(resolvedProjectId) && resolvedProjectId > 0) {
+                projectId = resolvedProjectId;
+              }
+            } catch (parseErr) {
+              console.warn("[fetch-redmine][create_issue] project lookup JSON parse failed", {
+                project_identifier,
+                parse_error: parseErr instanceof Error ? parseErr.message : String(parseErr),
+                body_preview: projectLookupPreview,
+              });
+            }
+          } else {
+            console.warn("[fetch-redmine][create_issue] project lookup failed", {
+              project_identifier,
+              identifier_candidate: identifierCandidate,
+              status: projRes.status,
+              body_preview: projectLookupPreview,
+            });
           }
         } catch (e) {
-          console.error("Error fetching project id:", e);
+          console.error("[fetch-redmine][create_issue] error fetching project id", e);
         }
+      }
+
+      console.log("[fetch-redmine][create_issue] resolved project mapping", {
+        incoming_project_identifier: project_identifier,
+        resolved_project_identifier: resolvedProjectIdentifier,
+        resolved_project_id: projectId,
+      });
+
+      if (!Number.isFinite(projectId) || (projectId as number) <= 0) {
+        console.error("[fetch-redmine][create_issue] unresolved numeric project id", {
+          project_identifier,
+          projectLookupStatus,
+          projectLookupPreview,
+        });
+        return new Response(JSON.stringify({
+          error: "Projet Redmine introuvable ou inaccessible",
+          details: {
+            project_identifier,
+            lookup_status: projectLookupStatus,
+            lookup_response_preview: projectLookupPreview || null,
+            reason: "Impossible de resoudre un project_id numerique pour Redmine",
+          },
+          response_preview: projectLookupPreview || null,
+          redmine_status: projectLookupStatus,
+          success: false,
+        }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
       }
 
       // Default custom fields required by this Redmine instance
@@ -753,19 +888,142 @@ serve(async (req) => {
         { id: 17, value: "" },         // Nature
       ];
 
+      // Some Redmine setups require a numeric field for project id.
+      // Detect any "ID PROJET" variants and enforce numeric value.
+      // Strategy: try project-scoped endpoint first; if it returns no matching
+      // fields, fall back to the global /custom_fields.json endpoint.
+      const projectIdCustomFieldIds = new Set<number>();
+
+      const isProjectIdFieldName = (fieldName: unknown): boolean => {
+        const normalizedName = normalizeIdentity(fieldName);
+        return (
+          /id.*projet/.test(normalizedName) ||
+          /projet.*id/.test(normalizedName) ||
+          /id.*project/.test(normalizedName) ||
+          /project.*id/.test(normalizedName) ||
+          /identifiant.*projet/.test(normalizedName) ||
+          /projet.*identifiant/.test(normalizedName) ||
+          /numero.*projet/.test(normalizedName) ||
+          /no.*projet/.test(normalizedName) ||
+          /ref.*projet/.test(normalizedName)
+        );
+      };
+
+      try {
+        const projectLookupKey = resolvedProjectIdentifier || String(projectId);
+        const projectMetaRes = await fetch(
+          `${REDMINE_BASE}/projects/${projectLookupKey}.json?key=${REDMINE_KEY}&include=trackers,enabled_modules,issue_custom_fields,custom_fields`
+        );
+        const projectMeta = await safeJson(projectMetaRes, { project: null });
+        const issueCustomFields = Array.isArray(projectMeta?.project?.issue_custom_fields)
+          ? projectMeta.project.issue_custom_fields
+          : [];
+        const genericCustomFields = Array.isArray(projectMeta?.project?.custom_fields)
+          ? projectMeta.project.custom_fields
+          : [];
+        const allProjectCustomFields = [...issueCustomFields, ...genericCustomFields];
+
+        for (const field of allProjectCustomFields) {
+          if (field?.id && isProjectIdFieldName(field?.name)) {
+            projectIdCustomFieldIds.add(Number(field.id));
+          }
+        }
+
+        console.log("[fetch-redmine][create_issue] project custom fields analysis (project-scoped)", {
+          total_issue_custom_fields: issueCustomFields.length,
+          total_generic_custom_fields: genericCustomFields.length,
+          project_id_custom_field_ids: Array.from(projectIdCustomFieldIds),
+          all_field_names: allProjectCustomFields.map((f: any) => ({ id: f?.id, name: f?.name })),
+        });
+
+        // Fallback: if the project-scoped endpoint didn't expose "ID PROJET"-like
+        // fields, query the global /custom_fields.json (requires Redmine admin or
+        // manager role — silently skipped on 403/404).
+        if (projectIdCustomFieldIds.size === 0) {
+          try {
+            const globalCfRes = await fetch(
+              `${REDMINE_BASE}/custom_fields.json?key=${REDMINE_KEY}`
+            );
+            if (globalCfRes.ok) {
+              const globalCfData = await safeJson(globalCfRes, { custom_fields: [] });
+              const globalFields: any[] = Array.isArray(globalCfData?.custom_fields)
+                ? globalCfData.custom_fields
+                : [];
+              for (const field of globalFields) {
+                if (field?.id && isProjectIdFieldName(field?.name)) {
+                  projectIdCustomFieldIds.add(Number(field.id));
+                }
+              }
+              console.log("[fetch-redmine][create_issue] global custom_fields.json fallback", {
+                total_global_fields: globalFields.length,
+                project_id_custom_field_ids_after_fallback: Array.from(projectIdCustomFieldIds),
+                matching_fields: globalFields
+                  .filter((f: any) => isProjectIdFieldName(f?.name))
+                  .map((f: any) => ({ id: f?.id, name: f?.name })),
+              });
+            } else {
+              console.warn("[fetch-redmine][create_issue] global custom_fields.json not accessible", {
+                status: globalCfRes.status,
+              });
+            }
+          } catch (fallbackErr) {
+            console.warn("[fetch-redmine][create_issue] global custom_fields.json fetch failed", {
+              error: fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr),
+            });
+          }
+        }
+      } catch (e) {
+        console.warn("[fetch-redmine][create_issue] unable to inspect issue custom fields", {
+          error: e instanceof Error ? e.message : String(e),
+        });
+      }
+
+      const effectiveCustomFields = Array.isArray(custom_fields)
+        ? [...custom_fields]
+        : [...defaultCustomFields];
+
+      if (projectIdCustomFieldIds.size > 0) {
+        const projectValue = Number(projectId);
+
+        for (let i = 0; i < effectiveCustomFields.length; i += 1) {
+          const currentId = Number((effectiveCustomFields[i] as any)?.id);
+          if (projectIdCustomFieldIds.has(currentId)) {
+            effectiveCustomFields[i] = {
+              ...(effectiveCustomFields[i] as any),
+              value: projectValue,
+            };
+          }
+        }
+
+        for (const projectFieldId of projectIdCustomFieldIds) {
+          const alreadyPresent = effectiveCustomFields.some((field: any) => Number(field?.id) === projectFieldId);
+          if (!alreadyPresent) {
+            effectiveCustomFields.push({ id: projectFieldId, value: projectValue });
+          }
+        }
+      }
+
       const issueData: any = {
         issue: {
           project_id: projectId,
           subject,
           description: description || "",
           tracker_id: tracker_id ? Number(tracker_id) : 2, // Default to "Feature" tracker
-          custom_fields: custom_fields || defaultCustomFields,
+          custom_fields: effectiveCustomFields,
         },
       };
       if (priority_id) issueData.issue.priority_id = Number(priority_id);
       if (assigned_to_id) issueData.issue.assigned_to_id = Number(assigned_to_id);
 
       console.log("Creating issue with payload:", JSON.stringify(issueData));
+      console.log("[fetch-redmine][create_issue] payload type check", {
+        project_id: issueData?.issue?.project_id,
+        project_id_type: typeof issueData?.issue?.project_id,
+        project_id_custom_field_ids: Array.from(projectIdCustomFieldIds),
+        sent_custom_fields: Array.isArray(issueData?.issue?.custom_fields)
+          ? issueData.issue.custom_fields.map((field: any) => ({ id: field?.id, value: field?.value, value_type: typeof field?.value }))
+          : [],
+      });
 
       const res = await fetch(`${REDMINE_BASE}/issues.json`, {
         method: "POST",
@@ -775,14 +1033,208 @@ serve(async (req) => {
         },
         body: JSON.stringify(issueData),
       });
-      const data = await res.json();
-      console.log("Redmine response status:", res.status, "body:", JSON.stringify(data));
+      const responseText = await res.text();
+      let data: unknown = null;
+      try {
+        data = responseText ? JSON.parse(responseText) : null;
+      } catch (parseErr) {
+        console.warn("[fetch-redmine][create_issue] Redmine returned non-JSON body", {
+          status: res.status,
+          statusText: res.statusText,
+          parse_error: parseErr instanceof Error ? parseErr.message : String(parseErr),
+          body_preview: previewText(responseText),
+        });
+      }
+
+      console.log("[fetch-redmine][create_issue] Redmine response", {
+        status: res.status,
+        statusText: res.statusText,
+        contentType: res.headers.get("content-type"),
+        body_preview: previewText(responseText),
+      });
+
       if (!res.ok) {
-        return new Response(JSON.stringify({ error: "Erreur Redmine", details: data, success: false }), {
+        console.error("[fetch-redmine][create_issue] issue creation rejected by Redmine", {
+          project_identifier,
+          projectId,
+          subject,
+          tracker_id: tracker_id ?? null,
+          priority_id: priority_id ?? null,
+          assigned_to_id: assigned_to_id ?? null,
+          resolved_project_identifier: resolvedProjectIdentifier,
+          project_id_custom_field_ids: Array.from(projectIdCustomFieldIds),
+          response_preview: previewText(responseText),
+          parsed_details: data,
+        });
+
+        // ── Retry-on-422: resolve numeric custom-field values ──────────────────
+        // When Redmine rejects with "<field> n'est pas un nombre" it means a
+        // required integer custom field was missing or non-numeric. We look up
+        // the field by name and retry once with the corrected payload.
+        if (res.status === 422 && typeof data === "object" && data !== null) {
+          const errors422: string[] = Array.isArray((data as any).errors)
+            ? (data as any).errors
+            : [];
+          const numericFieldErrors = errors422.filter((e: string) =>
+            /n[''`]est pas un nombre/i.test(e) || /is not a number/i.test(e)
+          );
+
+          if (numericFieldErrors.length > 0) {
+            // Extract the field label from the error string.
+            // French: "ID PROJET n'est pas un nombre" → "ID PROJET"
+            const extractFieldLabel = (msg: string): string | null => {
+              const m =
+                msg.match(/^(.+?)\s+n[''`]est pas/i) ||
+                msg.match(/^(.+?)\s+is not/i);
+              return m ? m[1].trim() : null;
+            };
+            const errorFieldLabels = numericFieldErrors
+              .map(extractFieldLabel)
+              .filter((n): n is string => Boolean(n));
+
+            console.log("[fetch-redmine][create_issue] 422 numeric field errors — attempting patched retry", {
+              errorFieldLabels,
+              numericFieldErrors,
+            });
+
+            try {
+              const lookupKey = resolvedProjectIdentifier || String(projectId);
+              const cfRes = await fetch(
+                `${REDMINE_BASE}/projects/${lookupKey}.json?key=${REDMINE_KEY}&include=issue_custom_fields`
+              );
+              const cfData = await safeJson(cfRes, { project: null });
+              let allCFs: any[] = Array.isArray(cfData?.project?.issue_custom_fields)
+                ? cfData.project.issue_custom_fields
+                : [];
+
+              // If project-scoped lookup didn't return any fields, try the global endpoint.
+              if (allCFs.length === 0) {
+                try {
+                  const globalCfRes = await fetch(`${REDMINE_BASE}/custom_fields.json?key=${REDMINE_KEY}`);
+                  if (globalCfRes.ok) {
+                    const globalCfData = await safeJson(globalCfRes, { custom_fields: [] });
+                    allCFs = Array.isArray(globalCfData?.custom_fields) ? globalCfData.custom_fields : [];
+                    console.log("[fetch-redmine][create_issue] retry using global custom_fields fallback", {
+                      total: allCFs.length,
+                    });
+                  }
+                } catch { /* silently ignore */ }
+              }
+
+              const retryCustomFields: any[] = issueData.issue.custom_fields
+                ? [...issueData.issue.custom_fields]
+                : [...effectiveCustomFields];
+              let patchCount = 0;
+
+              for (const label of errorFieldLabels) {
+                const normalizedLabel = normalizeIdentity(label);
+                const matchedCF = allCFs.find(
+                  (cf: any) => normalizeIdentity(cf?.name) === normalizedLabel
+                );
+                if (matchedCF?.id) {
+                  const cfId = Number(matchedCF.id);
+                  const numericValue = Number(projectId);
+                  const existingIdx = retryCustomFields.findIndex(
+                    (f: any) => Number(f?.id) === cfId
+                  );
+                  if (existingIdx >= 0) {
+                    retryCustomFields[existingIdx] = {
+                      ...retryCustomFields[existingIdx],
+                      value: numericValue,
+                    };
+                  } else {
+                    retryCustomFields.push({ id: cfId, value: numericValue });
+                  }
+                  patchCount += 1;
+                  console.log("[fetch-redmine][create_issue] patched custom field for retry", {
+                    label,
+                    cfId,
+                    numericValue,
+                  });
+                } else {
+                  console.warn(
+                    "[fetch-redmine][create_issue] could not resolve custom field id for error label",
+                    {
+                      label,
+                      availableCFs: allCFs.map((cf: any) => ({ id: cf?.id, name: cf?.name })),
+                    }
+                  );
+                }
+              }
+
+              if (patchCount > 0) {
+                const retryPayload = {
+                  issue: { ...issueData.issue, custom_fields: retryCustomFields },
+                };
+                console.log(
+                  "[fetch-redmine][create_issue] retrying POST with patched custom fields",
+                  JSON.stringify(retryPayload)
+                );
+                const retryRes = await fetch(`${REDMINE_BASE}/issues.json`, {
+                  method: "POST",
+                  headers: {
+                    "Content-Type": "application/json",
+                    "X-Redmine-API-Key": REDMINE_KEY,
+                  },
+                  body: JSON.stringify(retryPayload),
+                });
+                const retryText = await retryRes.text();
+                let retryData: unknown = null;
+                try {
+                  retryData = retryText ? JSON.parse(retryText) : null;
+                } catch { /* non-JSON body */ }
+
+                console.log("[fetch-redmine][create_issue] retry result", {
+                  status: retryRes.status,
+                  ok: retryRes.ok,
+                  preview: previewText(retryText),
+                });
+
+                if (retryRes.ok) {
+                  return new Response(
+                    JSON.stringify({
+                      ...(typeof retryData === "object" && retryData !== null ? retryData : {}),
+                      success: true,
+                      redmine_status: retryRes.status,
+                    }),
+                    { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+                  );
+                }
+
+                // Retry also failed — surface the retry error.
+                return new Response(
+                  JSON.stringify({
+                    error: `Erreur Redmine (${retryRes.status})`,
+                    details: retryData ?? { raw_response: retryText },
+                    response_preview: previewText(retryText),
+                    redmine_status: retryRes.status,
+                    success: false,
+                  }),
+                  { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+                );
+              }
+            } catch (retryErr) {
+              console.error(
+                "[fetch-redmine][create_issue] retry attempt threw an exception",
+                { error: retryErr instanceof Error ? retryErr.message : String(retryErr) }
+              );
+            }
+          }
+        }
+        // ── End retry-on-422 ───────────────────────────────────────────────────
+
+        return new Response(JSON.stringify({
+          error: `Erreur Redmine (${res.status})`,
+          details: data ?? { raw_response: responseText },
+          response_preview: previewText(responseText),
+          redmine_status: res.status,
+          success: false,
+        }), {
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
-      return new Response(JSON.stringify({ ...data, success: true }), {
+
+      return new Response(JSON.stringify({ ...(typeof data === "object" && data !== null ? data : {}), success: true, redmine_status: res.status }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }

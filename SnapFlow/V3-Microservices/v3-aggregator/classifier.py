@@ -1020,7 +1020,7 @@ def classify_report(report: dict) -> dict:
             fix_complexity="content",
         ))
 
-    # COMPLIANCE — no information rights (RGPD Art.13/14)
+    # COMPLIANCE — no information rights
     if not bool(privacy_kpi.get("has_information_rights")):
         findings.append(_mk_finding(
             finding_id="missing_information_rights",
@@ -1028,8 +1028,8 @@ def classify_report(report: dict) -> dict:
             finding_type="COMPLIANCE",
             severity="HIGH",
             scope="DOMAIN",
-            description="Aucune mention des droits RGPD (accès, rectification, opposition, effacement) n'a été détectée.",
-            impact="Non-conformité RGPD Art.13/14 sur l'information des personnes concernées.",
+            description="Aucune mention des droits des personnes (accès, rectification, opposition, effacement) n'a été détectée.",
+            impact="Non-conformité sur l'obligation légale d'informer les personnes de leurs droits sur leurs données.",
             fix="Documenter explicitement les droits des personnes dans la politique de confidentialité.",
             source_kpi="domain_analysis.privacy_kpi.has_information_rights",
             affected_count=1,
@@ -1045,7 +1045,7 @@ def classify_report(report: dict) -> dict:
             severity="MEDIUM",
             scope="DOMAIN",
             description="La finalité du traitement des données n'est pas explicitement mentionnée.",
-            impact="Risque de non-conformité sur la base légale et la transparence RGPD.",
+            impact="Risque de non-conformité sur la transparence du traitement des données personnelles.",
             fix="Préciser la finalité de chaque collecte de données personnelles.",
             source_kpi="domain_analysis.privacy_kpi.has_declared_purpose",
             affected_count=1,

@@ -25,6 +25,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      v3-browser-pool:
+        condition: service_healthy
     ports:
       - "8081:8081"
     environment:
@@ -34,6 +36,8 @@ services:
       DB_USER: snapflow
       DB_PASS: snapflow
       CHROME_NO_SANDBOX: "true"
+      BROWSER_POOL_URL: http://v3-browser-pool:8084
+      BROWSER_POOL_TIMEOUT_MS: "90000"
       ENABLE_PORT_SCAN: "true"
       PORT_SCAN_TIMEOUT_MS: "900"
       PORT_SCAN_PORTS: "21,22,25,53,80,443,3306,5432,6379,8080,8443,3389"
@@ -83,7 +87,7 @@ services:
       - "8084:8084"
     environment:
       CHROME_NO_SANDBOX: "true"
-      BROWSER_POOL_CONCURRENCY: "10"
+      BROWSER_POOL_CONCURRENCY: "15"
       BROWSER_POOL_RECYCLE_AFTER: "50"
       BROWSER_POOL_DEFAULT_TIMEOUT_MS: "30000"
     restart: unless-stopped

@@ -3,10 +3,15 @@ package formfuzzer
 import (
 	"context"
 	"fmt"
+	"log"
+	"os"
 	"strings"
 	"time"
 
+	"snapflow/v3-scanner-go/analyzers/browserutil"
+
 	"github.com/go-rod/rod"
+	"github.com/go-rod/rod/lib/launcher"
 	"github.com/go-rod/rod/lib/proto"
 )
 
@@ -346,4 +351,39 @@ func isUIKeyword(text string) bool {
 		}
 	}
 	return false
+}
+
+// DiscoverModalsWithLocalBrowser encapsulates the Chromium launcher setup for
+// modal-form discovery so callers (e.g. main.go) do not need to import go-rod
+// directly. It mirrors the browser lifecycle that was previously managed inline
+// in main.go, delegating form extraction to DiscoverModalForms once connected.
+func DiscoverModalsWithLocalBrowser(ctx context.Context, pageURL string) ([]DiscoveredForm, error) {
+	modalBin, found := browserutil.ResolveBrowserBinary()
+	if !found {
+		return nil, fmt.Errorf("no local Chromium-based browser found — set CHROME_PATH, configure BROWSER_POOL_URL, or install Chrome/Edge/Chromium")
+	}
+
+	l := launcher.New().Headless(true).Bin(modalBin)
+	if os.Getuid() == 0 {
+		l.Set("no-sandbox").
+			Set("disable-dev-shm-usage").
+			Set("disable-gpu")
+	}
+
+	launchURL, err := l.Launch()
+	if err != nil {
+		return nil, fmt.Errorf("browser launch failed: %w", err)
+	}
+
+	browser := rod.New().ControlURL(launchURL)
+	if err := browser.Connect(); err != nil {
+		return nil, fmt.Errorf("browser connect failed: %w", err)
+	}
+	defer func() {
+		if closeErr := browser.Close(); closeErr != nil {
+			log.Printf("⚠ Modal browser close error: %v", closeErr)
+		}
+	}()
+
+	return DiscoverModalForms(ctx, browser, pageURL)
 }

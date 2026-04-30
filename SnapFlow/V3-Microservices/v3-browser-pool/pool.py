@@ -19,7 +19,7 @@ from playwright.async_api import async_playwright, Browser, Playwright
 
 logger = logging.getLogger("browser-pool")
 
-POOL_CONCURRENCY = int(os.getenv("BROWSER_POOL_CONCURRENCY", "10"))
+POOL_CONCURRENCY = int(os.getenv("BROWSER_POOL_CONCURRENCY", "15"))
 RECYCLE_AFTER    = int(os.getenv("BROWSER_POOL_RECYCLE_AFTER", "50"))
 DEFAULT_TIMEOUT  = int(os.getenv("BROWSER_POOL_DEFAULT_TIMEOUT_MS", "30000"))
 _CHROME_NO_SANDBOX = os.getenv("CHROME_NO_SANDBOX", "").strip().lower() in ("1", "true", "yes", "on")
@@ -50,6 +50,19 @@ class RenderResult:
     page_height:   Optional[int] = None
     page_width:    Optional[int] = None
     final_url:     Optional[str] = None
+    fcp_ms:        float = 0.0
+    lcp_ms:        float = 0.0
+    cls:           float = 0.0
+    dom_nodes:     int = 0
+    http_requests: int = 0
+    transfer_size_kb: float = 0.0
+    asset_breakdown: Optional[dict] = None
+    desktop_overflow: bool = False
+    tablet_overflow:  bool = False
+    mobile_overflow:  bool = False
+    invisible_links:  int = 0
+    console_errors: Optional[list[str]] = None
+    console_error_count: int = 0
     error:         Optional[str] = None
 
 
@@ -114,7 +127,11 @@ class BrowserPool:
 
     async def _maybe_recycle(self) -> None:
         """Recycle the browser every RECYCLE_AFTER pages to cap memory growth."""
-        if self._pages_served > 0 and self._pages_served % RECYCLE_AFTER == 0:
+        if (
+            self._pages_served > 0
+            and self._pages_served % RECYCLE_AFTER == 0
+            and self._active_sessions <= 1
+        ):
             logger.info("Recycling browser after %d pages served", self._pages_served)
             try:
                 await self._browser.close()
@@ -128,6 +145,22 @@ class BrowserPool:
                 logger.error("Browser recycle failed: %s", e)
                 self._crash_count += 1
 
+    async def _safe_close_page(self, page) -> None:
+        if page is None:
+            return
+        try:
+            await page.close()
+        except Exception as exc:
+            logger.debug("Ignoring page close error: %s", exc)
+
+    async def _safe_close_context(self, context) -> None:
+        if context is None:
+            return
+        try:
+            await context.close()
+        except Exception as exc:
+            logger.debug("Ignoring context close error: %s", exc)
+
     def _classify_error(self, exc: Exception) -> PageStatus:
         msg = str(exc).lower()
         if "timeout" in msg or "timed out" in msg:
@@ -139,6 +172,141 @@ class BrowserPool:
         if any(k in msg for k in ("403", "blocked", "forbidden", "access denied")):
             return PageStatus.BLOCKED
         return PageStatus.NAVIGATION_ERROR
+
+    async def _measure_render_metrics(self, page) -> dict:
+        metrics = await page.evaluate(
+            """async () => {
+                const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+                const round = (value, places = 2) => {
+                    if (!Number.isFinite(value) || value < 0) return 0;
+                    const scale = Math.pow(10, places);
+                    return Math.round(value * scale) / scale;
+                };
+                const nav = performance.getEntriesByType('navigation')[0];
+                const timing = performance.timing || {};
+                const dcl = nav && nav.domContentLoadedEventEnd > 0
+                    ? nav.domContentLoadedEventEnd
+                    : (timing.domContentLoadedEventEnd > timing.navigationStart
+                        ? timing.domContentLoadedEventEnd - timing.navigationStart
+                        : 0);
+                const paint = performance.getEntriesByType('paint')
+                    .find((entry) => entry.name === 'first-contentful-paint');
+                const fcp = paint && paint.startTime > 0 ? paint.startTime : dcl;
+
+                const lcpPromise = new Promise((resolve) => {
+                    let lcp = 0;
+                    let debounceId = null;
+                    try {
+                        const observer = new PerformanceObserver((list) => {
+                            const entries = list.getEntries();
+                            if (entries.length > 0) {
+                                lcp = entries[entries.length - 1].startTime || 0;
+                            }
+                            if (debounceId) clearTimeout(debounceId);
+                            debounceId = setTimeout(() => {
+                                observer.disconnect();
+                                resolve(lcp);
+                            }, 500);
+                        });
+                        observer.observe({type: 'largest-contentful-paint', buffered: true});
+                        setTimeout(() => {
+                            if (debounceId) clearTimeout(debounceId);
+                            observer.disconnect();
+                            resolve(lcp);
+                        }, 2000);
+                    } catch (e) {
+                        resolve(0);
+                    }
+                });
+
+                const clsPromise = new Promise((resolve) => {
+                    let cls = 0;
+                    try {
+                        const observer = new PerformanceObserver((list) => {
+                            for (const entry of list.getEntries()) {
+                                if (!entry.hadRecentInput) cls += entry.value || 0;
+                            }
+                        });
+                        observer.observe({type: 'layout-shift', buffered: true});
+                        setTimeout(() => {
+                            observer.disconnect();
+                            resolve(cls);
+                        }, 2000);
+                    } catch (e) {
+                        resolve(0);
+                    }
+                });
+
+                const [lcp, cls] = await Promise.all([lcpPromise, clsPromise]);
+                const breakdown = {
+                    html: {size_bytes: 0, count: 0, co2_grams: 0},
+                    scripts: {size_bytes: 0, count: 0, co2_grams: 0},
+                    stylesheets: {size_bytes: 0, count: 0, co2_grams: 0},
+                    images: {size_bytes: 0, count: 0, co2_grams: 0},
+                    fonts: {size_bytes: 0, count: 0, co2_grams: 0},
+                    other: {size_bytes: 0, count: 0, co2_grams: 0},
+                };
+                const classify = (entry) => {
+                    const type = (entry.initiatorType || '').toLowerCase();
+                    const name = (entry.name || '').toLowerCase();
+                    if (type === 'navigation' || type === 'iframe') return 'html';
+                    if (type === 'script' || name.endsWith('.js')) return 'scripts';
+                    if (type === 'css' || type === 'link' || name.endsWith('.css')) return 'stylesheets';
+                    if (type === 'img' || type === 'image' || /\\.(png|jpe?g|gif|webp|svg|avif)(\\?|$)/.test(name)) return 'images';
+                    if (/\\.(woff2?|ttf|otf|eot)(\\?|$)/.test(name)) return 'fonts';
+                    return 'other';
+                };
+                const sizeOf = (entry) => Math.max(
+                    0,
+                    entry.transferSize || entry.encodedBodySize || entry.decodedBodySize || 0
+                );
+                const resources = [
+                    ...performance.getEntriesByType('navigation'),
+                    ...performance.getEntriesByType('resource'),
+                ];
+                let transferBytes = 0;
+                for (const entry of resources) {
+                    const size = sizeOf(entry);
+                    const category = classify(entry);
+                    transferBytes += size;
+                    breakdown[category].size_bytes += size;
+                    breakdown[category].count += 1;
+                }
+                const invisibleLinks = Array.from(document.querySelectorAll('a')).filter((el) => {
+                    const style = window.getComputedStyle(el);
+                    const rect = el.getBoundingClientRect();
+                    return style.display === 'none'
+                        || style.visibility === 'hidden'
+                        || style.opacity === '0'
+                        || rect.width === 0
+                        || rect.height === 0;
+                }).length;
+                const overflow = () => document.documentElement.scrollWidth >
+                    (Math.max(document.documentElement.clientWidth, window.innerWidth || 0) + 5);
+                return {
+                    fcp_ms: round(fcp, 1),
+                    lcp_ms: round(lcp, 1),
+                    cls: round(cls, 3),
+                    dom_nodes: document.querySelectorAll('*').length,
+                    http_requests: resources.length,
+                    transfer_size_kb: round(transferBytes / 1024, 2),
+                    asset_breakdown: breakdown,
+                    desktop_overflow: overflow(),
+                    invisible_links: invisibleLinks,
+                };
+            }"""
+        )
+        await page.set_viewport_size({"width": 768, "height": 1024})
+        await page.wait_for_timeout(200)
+        metrics["tablet_overflow"] = await page.evaluate(
+            "() => document.documentElement.scrollWidth > (Math.max(document.documentElement.clientWidth, window.innerWidth || 0) + 5)"
+        )
+        await page.set_viewport_size({"width": 375, "height": 812})
+        await page.wait_for_timeout(200)
+        metrics["mobile_overflow"] = await page.evaluate(
+            "() => document.documentElement.scrollWidth > (Math.max(document.documentElement.clientWidth, window.innerWidth || 0) + 5)"
+        )
+        return metrics
 
     async def _acquire(self) -> bool:
         """Try to acquire a semaphore slot within the acquire timeout."""
@@ -169,15 +337,25 @@ class BrowserPool:
                 await self._maybe_recycle()
                 browser = self._browser
 
-            context = await browser.new_context()
-            page    = await context.new_page()
+            context = None
+            page = None
+            console_errors: list[str] = []
             try:
+                context = await browser.new_context(viewport={"width": 1366, "height": 768})
+                page    = await context.new_page()
+                page.on(
+                    "console",
+                    lambda msg: console_errors.append(f"[{msg.type}] {msg.text}")
+                    if msg.type in ("error", "warning")
+                    else None,
+                )
                 await page.goto(url, wait_until=wait_until, timeout=timeout_ms)
                 html        = await page.content()
                 title       = await page.title()
                 page_height = await page.evaluate("document.documentElement.scrollHeight")
                 page_width  = await page.evaluate("document.documentElement.scrollWidth")
                 final_url   = page.url
+                metrics     = await self._measure_render_metrics(page)
                 self._pages_served += 1
                 self._success_count += 1
                 return RenderResult(
@@ -188,6 +366,19 @@ class BrowserPool:
                     page_height=page_height,
                     page_width=page_width,
                     final_url=final_url,
+                    fcp_ms=metrics.get("fcp_ms", 0.0),
+                    lcp_ms=metrics.get("lcp_ms", 0.0),
+                    cls=metrics.get("cls", 0.0),
+                    dom_nodes=metrics.get("dom_nodes", 0),
+                    http_requests=metrics.get("http_requests", 0),
+                    transfer_size_kb=metrics.get("transfer_size_kb", 0.0),
+                    asset_breakdown=metrics.get("asset_breakdown"),
+                    desktop_overflow=metrics.get("desktop_overflow", False),
+                    tablet_overflow=metrics.get("tablet_overflow", False),
+                    mobile_overflow=metrics.get("mobile_overflow", False),
+                    invisible_links=metrics.get("invisible_links", 0),
+                    console_errors=console_errors,
+                    console_error_count=len(console_errors),
                 )
             except asyncio.TimeoutError:
                 self._timeout_count += 1
@@ -199,8 +390,8 @@ class BrowserPool:
                     self._timeout_count += 1
                 return RenderResult(status=st, url=url, error=str(exc))
             finally:
-                await page.close()
-                await context.close()
+                await self._safe_close_page(page)
+                await self._safe_close_context(context)
         finally:
             self._active_sessions -= 1
             self._semaphore.release()
@@ -226,9 +417,11 @@ class BrowserPool:
                 await self._maybe_recycle()
                 browser = self._browser
 
-            context = await browser.new_context(viewport={"width": width, "height": height})
-            page    = await context.new_page()
+            context = None
+            page = None
             try:
+                context = await browser.new_context(viewport={"width": width, "height": height})
+                page    = await context.new_page()
                 await page.goto(url, wait_until="networkidle", timeout=timeout_ms)
 
                 coverage_mode = "viewport_only"
@@ -287,8 +480,8 @@ class BrowserPool:
                     self._timeout_count += 1
                 return ScreenshotResult(status=st, url=url, error=str(exc))
             finally:
-                await page.close()
-                await context.close()
+                await self._safe_close_page(page)
+                await self._safe_close_context(context)
         finally:
             self._active_sessions -= 1
             self._semaphore.release()

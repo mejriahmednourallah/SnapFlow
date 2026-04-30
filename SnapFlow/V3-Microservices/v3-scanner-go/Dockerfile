@@ -17,10 +17,10 @@ RUN set -eux; \
 COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build -o /v3-scanner-go .
 
-# Stage 2: Minimal runtime with Chromium for go-rod
+# Stage 2: Minimal runtime — browser rendering is delegated to v3-browser-pool.
+# Chromium is no longer installed here; set BROWSER_POOL_URL to enable the pool.
 FROM alpine:3.19
-RUN apk add --no-cache chromium ca-certificates tzdata
-ENV CHROME_PATH=/usr/bin/chromium-browser
+RUN apk add --no-cache ca-certificates tzdata
 WORKDIR /app
 COPY --from=builder /v3-scanner-go .
 ENTRYPOINT ["./v3-scanner-go"]

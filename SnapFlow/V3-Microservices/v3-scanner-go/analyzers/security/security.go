@@ -517,11 +517,26 @@ func CheckSSL(targetURL string) SSLInfo {
 		}
 	}
 	cert := resp.TLS.PeerCertificates[0]
+
+	// Map the wire-protocol version (e.g. 0x0303 = TLS 1.2, 0x0304 = TLS 1.3)
+	// to its human-readable name. The raw bytes (3.3, 3.4 …) are NOT the version
+	// number displayed to users — TLS 1.x uses major=3, minor=1..4.
+	tlsVersionNames := map[uint16]string{
+		0x0301: "TLS 1.0",
+		0x0302: "TLS 1.1",
+		0x0303: "TLS 1.2",
+		0x0304: "TLS 1.3",
+	}
+	protocol, ok := tlsVersionNames[resp.TLS.Version]
+	if !ok {
+		protocol = fmt.Sprintf("TLS 0x%04X", resp.TLS.Version)
+	}
+
 	return SSLInfo{
 		Valid:    time.Now().Before(cert.NotAfter),
 		Issuer:   cert.Issuer.CommonName,
 		Expiry:   cert.NotAfter.Format("2006-01-02"),
-		Protocol: fmt.Sprintf("TLS %d.%d", resp.TLS.Version>>8, resp.TLS.Version&0xff),
+		Protocol: protocol,
 	}
 }
 

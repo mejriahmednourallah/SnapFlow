@@ -12,6 +12,7 @@ import threading
 import asyncio
 import logging
 import requests
+from concurrent.futures import ThreadPoolExecutor
 from collections import Counter, defaultdict
 from enum import Enum
 from typing import Optional
@@ -910,7 +911,7 @@ def evaluate_footer_rgpd_alignment(scan_id: str, scan_url: str, page_rows: list[
     outbound_counts: list[tuple[int, str]] = []
 
     for row in page_rows:
-        u = row.get("url", "")
+        u = row.get("url", "").strip()
         lower = u.lower()
         if any(k in lower for k in _RGPD_KEYWORDS):
             rgpd_urls.append(u)
@@ -954,13 +955,13 @@ def evaluate_footer_rgpd_alignment(scan_id: str, scan_url: str, page_rows: list[
         requests.post(
             f"{VISUAL_REGRESSION_API_URL}/screenshot",
             json={"scan_id": scan_id, "urls": urls, "max_pages": len(urls)},
-            timeout=90,
+            timeout=60,
         ).raise_for_status()
 
         compare_resp = requests.post(
             f"{VISUAL_REGRESSION_API_URL}/compare",
             json={"scan_id_baseline": baseline_scan_id, "scan_id_new": scan_id, "urls": urls},
-            timeout=90,
+            timeout=60,
         )
         compare_resp.raise_for_status()
         compare_data = compare_resp.json()
@@ -1016,8 +1017,7 @@ def evaluate_multi_browser_compatibility(scan_url: str) -> dict:
             },
         ]
 
-        snapshots = []
-        for profile in profiles:
+        def _fetch_profile(profile: dict) -> dict:
             snapshot = {
                 "engine": profile["engine"],
                 "status_code": None,
@@ -1040,7 +1040,10 @@ def evaluate_multi_browser_compatibility(scan_url: str) -> dict:
                 snapshot["title"] = _extract_title(resp.text)
             except Exception as exc:
                 snapshot["error"] = str(exc)
-            snapshots.append(snapshot)
+            return snapshot
+
+        with ThreadPoolExecutor(max_workers=len(profiles)) as _pool:
+            snapshots = list(_pool.map(_fetch_profile, profiles))
 
         successful = [
             item for item in snapshots
@@ -1079,7 +1082,7 @@ def evaluate_multi_browser_compatibility(scan_url: str) -> dict:
         resp = requests.post(
             f"{VISUAL_REGRESSION_API_URL}/browser-compat",
             json={"url": scan_url, "threshold_pct": 5.0},
-            timeout=90,
+            timeout=60,
         )
         resp.raise_for_status()
         data = resp.json()
@@ -2932,8 +2935,11 @@ def build_report(scan_id: str) -> dict:
         })
 
     menu_passed = menu_bad_pages == 0
-    footer_rgpd_alignment = evaluate_footer_rgpd_alignment(scan_id, scan_start_url, page_rows)
-    multi_browser_compat = evaluate_multi_browser_compatibility(scan_start_url)
+    with ThreadPoolExecutor(max_workers=2) as _pool:
+        _footer_fut = _pool.submit(evaluate_footer_rgpd_alignment, scan_id, scan_start_url, page_rows)
+        _compat_fut = _pool.submit(evaluate_multi_browser_compatibility, scan_start_url)
+        footer_rgpd_alignment = _footer_fut.result()
+        multi_browser_compat = _compat_fut.result()
     inferred_privacy_urls = sorted(rgpd_privacy_policy_inferred_urls)
     inferred_purpose_urls = sorted(rgpd_declared_purpose_inferred_urls)
     if not bool(privacy_kpi.get("has_privacy_policy")) and inferred_privacy_urls:

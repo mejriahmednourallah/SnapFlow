@@ -385,6 +385,79 @@ class TestKPICentricReport(unittest.TestCase):
         self.assertEqual(len(evidence["title_missing_urls_all"]), 2)
         self.assertEqual(evidence["meta_missing_urls_all"][-1], "https://example.com/c")
 
+    def test_service_exposure_kpi_disabled_maps_to_not_evaluated(self):
+        report = json.loads(json.dumps(self.report))
+        sec = report.setdefault("domain_analysis", {}).setdefault("security", {})
+        sec["service_exposure"] = {
+            "enabled": False,
+            "status": "non_evalue",
+            "severity": "info",
+            "impact": "Port scan disabled by policy.",
+            "warning": "Set ENABLE_PORT_SCAN=true to enable TCP reachability checks on monitored ports.",
+            "open_services": [],
+        }
+
+        rebuilt = build_kpi_centric_report(report)
+        kpi = rebuilt["axes"]["Check Sécurité"]["Exposition Services Reseau"]
+        evidence = kpi["evidence"]
+
+        self.assertEqual(kpi["kpi_id"], "sec_service_exposure")
+        self.assertEqual(kpi["status"], "not_evaluated")
+        self.assertIsNone(kpi["severity"])
+        self.assertFalse(evidence["enabled"])
+        self.assertIn("tcp_probe", evidence["detection_source"])
+
+    def test_service_exposure_kpi_critical_open_ports_fails(self):
+        report = json.loads(json.dumps(self.report))
+        sec = report.setdefault("domain_analysis", {}).setdefault("security", {})
+        sec["service_exposure"] = {
+            "enabled": True,
+            "host": "example.com",
+            "timeout_ms": 900,
+            "ports_scanned": [22, 3306],
+            "status": "fail",
+            "severity": "critical",
+            "impact": "Critical service exposure detected.",
+            "open_services": [
+                {"port": 22, "service": "SSH", "state": "open", "risk": "high"},
+                {"port": 3306, "service": "MySQL", "state": "open", "risk": "critical"},
+            ],
+        }
+
+        rebuilt = build_kpi_centric_report(report)
+        kpi = rebuilt["axes"]["Check Sécurité"]["Exposition Services Reseau"]
+        evidence = kpi["evidence"]
+
+        self.assertEqual(kpi["status"], "failing")
+        self.assertEqual(kpi["severity"], "critical")
+        self.assertEqual(evidence["open_service_count"], 2)
+        self.assertEqual(evidence["critical_open_service_count"], 1)
+        self.assertEqual(evidence["high_open_service_count"], 1)
+        self.assertIsNotNone(kpi["fix"])
+
+    def test_service_exposure_kpi_pass_with_no_open_services(self):
+        report = json.loads(json.dumps(self.report))
+        sec = report.setdefault("domain_analysis", {}).setdefault("security", {})
+        sec["service_exposure"] = {
+            "enabled": True,
+            "host": "example.com",
+            "timeout_ms": 900,
+            "ports_scanned": [22, 443, 3306],
+            "status": "pass",
+            "severity": "low",
+            "impact": "No monitored risky ports were reachable.",
+            "open_services": [],
+        }
+
+        rebuilt = build_kpi_centric_report(report)
+        kpi = rebuilt["axes"]["Check Sécurité"]["Exposition Services Reseau"]
+        evidence = kpi["evidence"]
+
+        self.assertEqual(kpi["status"], "passing")
+        self.assertIsNone(kpi["severity"])
+        self.assertEqual(evidence["open_service_count"], 0)
+        self.assertEqual(evidence["host"], "example.com")
+
     def test_version_kpi_exposes_latest_version_fields(self):
         report = json.loads(json.dumps(self.report))
         da = report.setdefault("domain_analysis", {})

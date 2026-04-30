@@ -8,8 +8,10 @@ import (
 	"strings"
 	"time"
 
+	"snapflow/v3-scanner-go/analyzers/browserutil"
 	"snapflow/v3-scanner-go/analyzers/formfuzzer"
 
+	"github.com/PuerkitoBio/goquery"
 	"github.com/go-rod/rod"
 	"github.com/go-rod/rod/lib/launcher"
 	"github.com/go-rod/rod/lib/proto"
@@ -42,12 +44,11 @@ func AnalyzeWithBrowser(ctx context.Context, targetURL string, cfg Config) ([]fo
 		}
 	}
 
-	l := launcher.New().Headless(cfg.Headless)
-	if chromePath := os.Getenv("CHROME_PATH"); chromePath != "" {
-		l.Bin(chromePath)
-	} else if path, found := launcher.LookPath(); found {
-		l.Bin(path)
+	browserPath, found := browserutil.ResolveBrowserBinary()
+	if !found {
+		return nil, fmt.Errorf("no local Chromium-based browser found — set CHROME_PATH, configure BROWSER_POOL_URL, or install Chrome/Edge/Chromium")
 	}
+	l := launcher.New().Headless(cfg.Headless).Bin(browserPath)
 	if shouldDisableSandbox() {
 		l.Set("no-sandbox").
 			Set("disable-dev-shm-usage").
@@ -214,6 +215,133 @@ func AnalyzeWithBrowser(ctx context.Context, targetURL string, cfg Config) ([]fo
 			Fields:    fields,
 		})
 	}
+
+	return forms, nil
+}
+
+// AnalyzeFromHTML extracts forms from pre-rendered HTML without launching a browser.
+// Used when the browser-pool service has already navigated and rendered the page;
+// the caller passes the RenderedHTML string and the final URL (for action resolution).
+func AnalyzeFromHTML(ctx context.Context, pageURL string, html string, cfg Config) ([]formfuzzer.DiscoveredForm, error) {
+	if strings.TrimSpace(html) == "" {
+		return nil, fmt.Errorf("empty HTML")
+	}
+	if cfg.MaxForms <= 0 {
+		cfg.MaxForms = 25
+	}
+
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse rendered HTML: %w", err)
+	}
+
+	forms := make([]formfuzzer.DiscoveredForm, 0)
+
+	doc.Find("form").EachWithBreak(func(idx int, formSel *goquery.Selection) bool {
+		if ctx.Err() != nil || len(forms) >= cfg.MaxForms {
+			return false
+		}
+
+		formID, _ := formSel.Attr("id")
+		if formID == "" {
+			formID = fmt.Sprintf("pool_form_%d", idx+1)
+		}
+
+		actionRaw, _ := formSel.Attr("action")
+		actionURL := resolveActionURL(pageURL, actionRaw)
+		if actionURL == "" {
+			actionURL = pageURL
+		}
+
+		methodRaw, _ := formSel.Attr("method")
+		method := strings.ToUpper(strings.TrimSpace(methodRaw))
+		if method == "" {
+			method = "POST"
+		}
+		if method != "GET" && method != "POST" {
+			method = "POST"
+		}
+
+		fields := make([]formfuzzer.FormField, 0)
+		formSel.Find("input, textarea, select").Each(func(_ int, fieldSel *goquery.Selection) {
+			name, _ := fieldSel.Attr("name")
+			id, _ := fieldSel.Attr("id")
+			placeholder, _ := fieldSel.Attr("placeholder")
+			ariaLabel, _ := fieldSel.Attr("aria-label")
+
+			label := placeholder
+			if label == "" {
+				label = ariaLabel
+			}
+			if name == "" {
+				name = id
+			}
+			if name == "" {
+				return
+			}
+
+			tagName := strings.ToLower(goquery.NodeName(fieldSel))
+			fieldType := "text"
+			switch tagName {
+			case "textarea":
+				fieldType = "textarea"
+			case "select":
+				fieldType = "select"
+			default:
+				if t, exists := fieldSel.Attr("type"); exists && strings.TrimSpace(t) != "" {
+					fieldType = strings.ToLower(strings.TrimSpace(t))
+				}
+			}
+
+			_, required := fieldSel.Attr("required")
+			field := formfuzzer.FormField{
+				Name:     name,
+				ID:       id,
+				Label:    label,
+				Type:     fieldType,
+				Required: required,
+			}
+
+			if tagName == "select" {
+				fieldSel.Find("option").Each(func(_ int, optSel *goquery.Selection) {
+					val, _ := optSel.Attr("value")
+					if strings.TrimSpace(val) == "" {
+						val = strings.TrimSpace(optSel.Text())
+					}
+					if strings.TrimSpace(val) != "" {
+						field.Options = append(field.Options, val)
+					}
+				})
+			}
+
+			fields = append(fields, field)
+		})
+
+		if len(fields) == 0 {
+			return true
+		}
+
+		// Mirror the same search/filter form filters as the rod-based path.
+		actionLower := strings.ToLower(actionURL)
+		isSearchAction := strings.Contains(actionLower, "search") ||
+			strings.Contains(actionLower, "filter") ||
+			strings.Contains(actionLower, "sort")
+		if method == "GET" && isSearchAction {
+			return true
+		}
+		if len(fields) == 1 && strings.ToLower(fields[0].Type) == "search" {
+			return true
+		}
+
+		forms = append(forms, formfuzzer.DiscoveredForm{
+			FormID:    formID,
+			PageURL:   pageURL,
+			ActionURL: actionURL,
+			Method:    method,
+			Fields:    fields,
+		})
+		return true
+	})
 
 	return forms, nil
 }

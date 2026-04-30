@@ -7,6 +7,37 @@ from datetime import datetime
 import re
 from typing import Optional
 
+def _privacy_framework(scan_url: str = "") -> dict:
+    """Return jurisdiction-specific legal framework strings based on the site's TLD."""
+    try:
+        from urllib.parse import urlparse as _up
+        tld = _up(scan_url).hostname or ""
+        tld = tld.rstrip(".").rsplit(".", 1)[-1].lower()
+    except Exception:
+        tld = ""
+
+    if tld == "tn":
+        return {
+            "data_law":          "Loi n°63-2004",
+            "data_law_full":     "Loi tunisienne n°63-2004 relative à la protection des données personnelles",
+            "supervisory_body":  "INPDP",
+            "legal_notice_law":  "droit tunisien",
+            "privacy_arts":      "Art.29/30 (Loi 63-2004)",
+            "cookie_law":        "loi tunisienne n°63-2004",
+            "consent_law":       "loi tunisienne n°63-2004",
+        }
+    # Default: EU RGPD + French LCEN (covers .fr, .eu and unknown TLDs)
+    return {
+        "data_law":          "RGPD",
+        "data_law_full":     "RGPD (Règlement UE 2016/679)",
+        "supervisory_body":  "CNIL",
+        "legal_notice_law":  "loi LCEN",
+        "privacy_arts":      "Art.13/14 RGPD",
+        "cookie_law":        "ePrivacy/CNIL",
+        "consent_law":       "ePrivacy/CNIL",
+    }
+
+
 def _safe_dict(val):
     """Safely convert to dict."""
     return val if isinstance(val, dict) else {}
@@ -287,29 +318,30 @@ def _generate_constat_failing_bug(kpi_name, data, info, pages_affected, axis_nam
     return f"{detail}. Vérification manuelle recommandée."
 
 
-def _generate_constat_failing_compliance(kpi_name, data, info, pages_affected):
+def _generate_constat_failing_compliance(kpi_name, data, info, pages_affected, scan_url: str = ""):
     """Generate French constat for failing compliance KPI. Legal/regulatory risk framing."""
     if not data:
         return f"{kpi_name}: non-conformité détectée. Risque réglementaire."
-    
+
+    fw = _privacy_framework(scan_url)
     parts = []
-    
-    # RGPD-specific defects
+
+    # Privacy-specific defects — use jurisdiction-aware citations
     if "has_privacy_policy" in data and not data.get("has_privacy_policy"):
-        parts.append("Politique de confidentialité absente (Art.13/14 RGPD)")
+        parts.append(f"Politique de confidentialité absente ({fw['privacy_arts']})")
     if "has_legal_notice" in data and not data.get("has_legal_notice"):
-        parts.append("Mentions légales absentes (Loi LCEN)")
+        parts.append(f"Mentions légales absentes ({fw['legal_notice_law']})")
     if "has_information_rights" in data and not data.get("has_information_rights"):
-        parts.append("Droits des personnes non mentionnés (non-conformité Art.13/14)")
+        parts.append(f"Droits des personnes non mentionnés (non-conformité {fw['privacy_arts']})")
     if "has_declared_purpose" in data and not data.get("has_declared_purpose"):
         parts.append("Finalité du traitement non déclarée")
-    
+
     # Pre-consent violations
     if "pre_consent_violation_pages" in data:
         count = _safe_int(data.get("pre_consent_violation_pages", 0))
         if count > 0:
-            parts.append(f"{count} page(s) avec trackers avant consentement (violation ePrivacy/CNIL)")
-    
+            parts.append(f"{count} page(s) avec trackers avant consentement (violation {fw['cookie_law']})")
+
     detail = ". ".join(parts) if parts else f"{kpi_name}: non-conformité détectée"
     risk = f"Affecte {pages_affected} page(s). " if pages_affected > 0 else ""
     return f"{detail}. {risk}Exposition à sanctions réglementaires. Correction prioritaire requise."
@@ -479,6 +511,7 @@ _KPI_META = {
     "Protection Brute Force":             ("sec_brute_force",         "medium", "heuristic"),
     "Contrôle d'Extension Upload Fichier":("sec_file_upload",         "medium", "aggregate"),
     "Dépendances JS Vulnérables (CVE)":   ("sec_js_deps",             "high",   "aggregate"),
+    "Exposition Services Reseau":         ("sec_service_exposure",    "high",   "concrete"),
     "Mise en Cache":                      ("perf_cache",              "medium", "heuristic"),
     "Gestion de Cache":                   ("perf_cache",              "medium", "heuristic"),
     "Utilisation de Compression":         ("perf_compression",        "medium", "heuristic"),
@@ -555,6 +588,7 @@ _KPI_BUSINESS_IMPACT = {
     "sec_brute_force":          "L'absence de protection brute force facilite la compromission des comptes par attaque par dictionnaire.",
     "sec_file_upload":          "Sans restriction d'upload, des fichiers malveillants peuvent être déposés et exécutés côté serveur.",
     "sec_js_deps":              "Des dépendances JS vulnérables exposent les utilisateurs à des attaques XSS ou au vol de données côté client.",
+    "sec_service_exposure":     "Des ports ou services exposés publiquement facilitent les intrusions, l'énumération et l'exploitation de services non destinés à Internet.",
     "perf_cache":               "Un cache désactivé augmente la charge serveur, ralentit les temps de réponse et dégrade l'expérience utilisateur.",
     "perf_compression":         "Sans compression, les transferts sont plus lourds, la page se charge plus lentement et la consommation réseau augmente.",
     "func_forms":               "Des formulaires avec anomalies peuvent bloquer les conversions et frustrer les utilisateurs lors des soumissions.",
@@ -592,15 +626,15 @@ _KPI_BUSINESS_IMPACT = {
     "content_broken_structure": "Une structure de contenu dégradée nuit à la lisibilité, au SEO sémantique et à la conversion.",
     "content_lexical_diversity":"Un vocabulaire répétitif peut signaler un contenu de faible valeur éditoriale aux algorithmes.",
     "eco_index_score":          "Un score écologique faible reflète des pages lourdes en ressources, augmentant l'empreinte carbone et les coûts serveur.",
-    "rgpd_cookie_consent":      "L'absence de banneau de consentement peut violer le RGPD et l'ePrivacy, exposant à des amendes CNIL.",
+    "rgpd_cookie_consent":      "L'absence de banneau de consentement peut violer la législation sur la protection des données et exposer à des sanctions.",
     "rgpd_privacy_policy":      "Sans politique de confidentialité, le site manque à ses obligations légales de transparence envers les utilisateurs.",
-    "rgpd_data_retention":      "La durée de conservation non déclarée viole l'article 5 du RGPD et affaiblit la transparence des traitements.",
+    "rgpd_data_retention":      "La durée de conservation non déclarée affaiblit la transparence des traitements et peut contrevenir à la réglementation applicable.",
     "rgpd_minimization":        "Sans mention de minimisation, le principe de collecte proportionnée n'est pas démontré aux visiteurs.",
-    "rgpd_legal_notice":        "L'absence de mentions légales contrevient à la loi française LCEN et fragilise la crédibilité juridique.",
-    "rgpd_user_rights":         "Si les droits des personnes ne sont pas mentionnés, les utilisateurs ne peuvent pas connaître leurs droits RGPD.",
+    "rgpd_legal_notice":        "L'absence de mentions légales fragilise la crédibilité juridique du site et peut contrevenir à la législation locale.",
+    "rgpd_user_rights":         "Si les droits des personnes ne sont pas mentionnés, les utilisateurs ne peuvent pas comprendre ni exercer leurs droits.",
     "rgpd_declared_purpose":    "La finalité du traitement non déclarée empêche les utilisateurs d'évaluer la légitimité de la collecte.",
-    "rgpd_rights_coverage":     "Une couverture insuffisante des droits RGPD expose à des demandes de mise en conformité ou des plaintes.",
-    "rgpd_pre_consent_trackers":"Le chargement de trackers avant consentement constitue une violation de l'ePrivacy et des directives CNIL.",
+    "rgpd_rights_coverage":     "Une couverture insuffisante des droits des personnes expose à des demandes de mise en conformité ou des plaintes.",
+    "rgpd_pre_consent_trackers":"Le chargement de trackers avant consentement constitue une violation des règles de protection de la vie privée applicables.",
     "rgpd_privacy_score":       "Un score de politique de confidentialité faible indique une politique incomplète ou rédigée superficiellement.",
 }
 
@@ -608,7 +642,7 @@ _KPI_TICKET_TEAM = {
     "sec_ssl": "infrastructure", "sec_http_headers": "infrastructure", "sec_session_cookies": "backend",
     "sec_sqli_ddos": "backend", "sec_admin_exposed": "infrastructure", "sec_sensitive_files": "infrastructure",
     "sec_robots_disclosure": "backend", "sec_error_pages": "backend", "sec_brute_force": "backend",
-    "sec_file_upload": "backend", "sec_js_deps": "frontend",
+    "sec_file_upload": "backend", "sec_js_deps": "frontend", "sec_service_exposure": "infrastructure",
     "tech_cms_version": "infrastructure", "tech_modules_versions": "infrastructure",
     "tech_server_version": "infrastructure", "tech_programming_language": "infrastructure", "tech_cve_check": "infrastructure",
     "func_forms": "frontend", "func_links": "frontend", "func_buttons": "frontend",
@@ -696,6 +730,17 @@ def _build_evidence_examples(kpi_id: str, data: dict, domain_url: str) -> list:
                 "source": "http_response_headers",
             })
 
+    elif kpi_id == "sec_service_exposure":
+        for svc in _safe_list(d.get("open_services", []))[:8]:
+            if not isinstance(svc, dict):
+                continue
+            examples.append({
+                "url": domain_url,
+                "observed": f"Port {svc.get('port', '?')} ouvert ({svc.get('service', 'service inconnu')}, risque {svc.get('risk', 'non précisé')})",
+                "expected": "Aucun service sensible ne doit être exposé publiquement sans justification et filtrage réseau strict",
+                "source": "tcp_probe",
+            })
+
     elif kpi_id == "sec_admin_exposed":
         exposed = _safe_list(d.get("exposed", []))
         for path in exposed[:8]:
@@ -744,7 +789,7 @@ def _build_evidence_examples(kpi_id: str, data: dict, domain_url: str) -> list:
         examples.append({
             "url": domain_url,
             "observed": "Aucun lien vers des mentions légales détecté",
-            "expected": "Lien 'Mentions légales' ou 'CGU' visible, obligatoire en France (LCEN)",
+            "expected": "Lien 'Mentions légales' ou 'CGU' visible dans le pied de page",
             "source": "static_html",
         })
 
@@ -773,6 +818,8 @@ def _build_evidence(kpi_id: str, evidence_quality: str, data: dict, domain_url: 
         sources = ["http_probe"]
     elif kpi_id in ("tech_cve_check", "sec_js_deps"):
         sources = ["cve_scanner", "js_dependency_audit"]
+    elif kpi_id in ("sec_service_exposure",):
+        sources = ["tcp_probe"]
 
     examples = _build_evidence_examples(kpi_id, data, domain_url) if evidence_quality in ("concrete",) else []
 
@@ -798,6 +845,7 @@ def _build_ticket_payload(kpi_id: str, kpi_name: str, severity: str, evidence_qu
         "sec_sqli_ddos":     "Traiter les signaux d'injection SQL ou DDoS détectés",
         "sec_brute_force":   "Implémenter une protection anti-brute force sur les formulaires de connexion",
         "sec_js_deps":       "Mettre à jour les dépendances JS avec des CVEs actifs",
+        "sec_service_exposure": "Restreindre l'exposition des services réseau sensibles",
         "seo_meta_tags":     "Renseigner les balises META manquantes sur les pages identifiées",
         "seo_alt_tags":      "Ajouter les attributs ALT manquants sur les images",
         "seo_sitemap":       "Créer et soumettre un sitemap XML",
@@ -813,10 +861,10 @@ def _build_ticket_payload(kpi_id: str, kpi_name: str, severity: str, evidence_qu
         "perf_mobile_speed": "Optimiser les performances de chargement mobile",
         "perf_image_optim":  "Optimiser les images (format, compression, lazy loading)",
         "perf_console_errors":"Corriger les erreurs JavaScript sur la page d'accueil",
-        "rgpd_cookie_consent":"Implémenter un bandeau de consentement cookies conforme CNIL",
-        "rgpd_privacy_policy":"Publier et lier une politique de confidentialité conforme RGPD",
-        "rgpd_legal_notice": "Publier les mentions légales conformes à la loi LCEN",
-        "rgpd_user_rights":  "Mentionner explicitement les droits RGPD (Art.13/14) dans la politique",
+        "rgpd_cookie_consent":"Implémenter un bandeau de consentement cookies conforme à la réglementation applicable",
+        "rgpd_privacy_policy":"Publier et lier une politique de confidentialité conforme à la réglementation sur la protection des données",
+        "rgpd_legal_notice": "Publier les mentions légales conformes à la législation locale",
+        "rgpd_user_rights":  "Mentionner explicitement les droits des personnes sur leurs données dans la politique de confidentialité",
         "rgpd_declared_purpose": "Déclarer la finalité du traitement des données dans la politique",
         "rgpd_pre_consent_trackers": "Bloquer les trackers jusqu'à obtention du consentement utilisateur",
     }
@@ -826,6 +874,7 @@ def _build_ticket_payload(kpi_id: str, kpi_name: str, severity: str, evidence_qu
         "func_links":    "Chaque lien listé doit retourner HTTP 200 ou une redirection valide (301/302). Les liens 404/410 doivent être supprimés ou redirigés.",
         "sec_ssl":       "Le certificat doit être valide, non expiré, et émis par une autorité reconnue (Let's Encrypt, DigiCert, etc.).",
         "sec_http_headers": "Tous les en-têtes listés doivent être présents dans les réponses HTTP avec des valeurs sécurisées adaptées au site.",
+        "sec_service_exposure": "Aucun port critique (DB/RDP/SMB/Redis...) ne doit rester exposé depuis Internet. Les services nécessaires doivent être filtrés, authentifiés et journalisés.",
         "rgpd_cookie_consent": "Un bandeau CMP doit s'afficher avant tout chargement de tracker tiers. La décision de l'utilisateur doit être mémorisée.",
     }
 
@@ -854,6 +903,7 @@ def _build_client_summary_v2(kpi_id: str, status: str, evidence_quality: str, pa
             "sec_ssl":           "Le certificat SSL est valide et la connexion est sécurisée pour les visiteurs.",
             "sec_http_headers":  "Les en-têtes de sécurité HTTP requis sont correctement configurés.",
             "sec_session_cookies":"Les cookies de session sont correctement protégés avec les flags de sécurité.",
+            "sec_service_exposure": "Aucun service réseau à risque n'est exposé sur les ports surveillés.",
             "seo_sitemap":       "Un sitemap XML est présent, facilitant l'indexation par les moteurs de recherche.",
             "seo_robots_txt":    "Le fichier robots.txt est en place et contrôle correctement le crawl.",
             "rgpd_privacy_policy":"Une politique de confidentialité a été détectée sur le site.",
@@ -874,6 +924,7 @@ def _build_client_summary_v2(kpi_id: str, status: str, evidence_quality: str, pa
         "sec_admin_exposed": f"{ps} interface(s) d'administration semble(nt) accessible(s) sans authentification.",
         "sec_brute_force":   "Les formulaires de connexion ne semblent pas protégés contre les tentatives de connexion répétées.",
         "sec_js_deps":       "Des librairies JavaScript avec des failles documentées ont été détectées.",
+        "sec_service_exposure": "Des ports réseau sensibles semblent accessibles publiquement, ce qui augmente le risque de compromission.",
         "seo_meta_tags":    f"{d.get('pages_missing_meta_desc', ps)} page(s) manquent de balises META, réduisant leur visibilité dans les résultats de recherche.",
         "seo_alt_tags":     f"{d.get('images_missing_alt', ps)} image(s) manquent d'attribut ALT, nuisant à l'accessibilité et au SEO.",
         "seo_sitemap":       "Aucun sitemap XML n'a été trouvé, ce qui peut limiter l'indexation des pages par les moteurs de recherche.",
@@ -1074,6 +1125,7 @@ _KPI_TYPE_DEFAULTS = {
     "sec_brute_force": "bug",
     "sec_file_upload": "bug",
     "sec_js_deps": "bug",
+    "sec_service_exposure": "bug",
     "func_forms": "bug",
     "func_links": "bug",
     "func_buttons": "bug",
@@ -1243,6 +1295,8 @@ def _contract_detection_sources(kpi_id: str) -> list:
         return ["ssl_probe"]
     if kpi_id in {"sec_http_headers", "sec_session_cookies"}:
         return ["http_response_headers"]
+    if kpi_id == "sec_service_exposure":
+        return ["tcp_probe", "scanner_aggregation"]
     if kpi_id in {"seo_meta_tags", "seo_alt_tags", "seo_heading_structure", "seo_internal_linking"}:
         return ["scanner_aggregation", "nlp"]
     if kpi_id in {"seo_sitemap", "seo_robots_txt"}:
@@ -1257,7 +1311,7 @@ def _derive_pages_checked(kpi_id: str, pages_scanned: int, data: dict, affected_
         "tech_cms_version", "tech_modules_versions", "tech_server_version", "tech_programming_language",
         "tech_cve_check", "sec_ssl", "sec_http_headers", "sec_session_cookies", "sec_sqli_ddos",
         "sec_admin_exposed", "sec_sensitive_files", "sec_robots_disclosure", "sec_error_pages",
-        "sec_brute_force", "sec_file_upload", "sec_js_deps", "seo_sitemap", "seo_robots_txt",
+        "sec_brute_force", "sec_file_upload", "sec_js_deps", "sec_service_exposure", "seo_sitemap", "seo_robots_txt",
     }:
         return 1
     if kpi_id == "func_forms":
@@ -1395,6 +1449,87 @@ def _build_contract_evidence(kpi_id: str, kpi_obj: dict, pages_scanned: int, dom
             "broken_links_all": broken_links if broken_links or affected_pages == 0 else _missing_field("Le détail des liens cassés n'a pas été conservé"),
             "affected_page_urls_all": affected_page_urls_all if affected_page_urls_all or affected_pages == 0 else _missing_field("Les pages sources des liens cassés n'ont pas été conservées"),
             "by_status": _safe_dict(data.get("by_status")),
+        })
+        return evidence, data_quality, status_override, confidence_penalty
+
+    if kpi_id == "sec_service_exposure":
+        enabled = bool(data.get("enabled"))
+        host = _clean_text(data.get("host"))
+        timeout_ms = _safe_int(data.get("timeout_ms"))
+        ports_scanned = []
+        for port in _safe_list(data.get("ports_scanned", [])):
+            try:
+                value = int(port)
+            except (TypeError, ValueError):
+                continue
+            if value > 0:
+                ports_scanned.append(value)
+
+        open_services_all = []
+        critical_open_count = 0
+        high_open_count = 0
+        for row in _safe_list(data.get("open_services", [])):
+            svc = _safe_dict(row)
+            risk = _clean_text(svc.get("risk")).lower()
+            if risk == "critical":
+                critical_open_count += 1
+            elif risk == "high":
+                high_open_count += 1
+            open_services_all.append({
+                "port": svc.get("port") if svc.get("port") is not None else _missing_field("Port absent dans le résultat"),
+                "service": _value_or_missing(_clean_text(svc.get("service")), "Nom de service absent"),
+                "state": _value_or_missing(_clean_text(svc.get("state")), "État du port absent"),
+                "risk": _value_or_missing(_clean_text(svc.get("risk")), "Niveau de risque absent"),
+                "banner": _clean_text(svc.get("banner")) if svc.get("banner") is not None else "",
+                "note": _clean_text(svc.get("note")) if svc.get("note") is not None else "",
+            })
+
+        open_service_count = len(open_services_all)
+        status_raw = _clean_text(data.get("status")).lower()
+        warning = _clean_text(data.get("warning"))
+        error = _clean_text(data.get("error"))
+
+        if not enabled:
+            status_override = "not_evaluated"
+        elif status_raw in {"non_evalue", "not_evaluated", "not-evaluated", "not_available"}:
+            status_override = "not_evaluated"
+        elif status_raw in {"failing", "fail", "failed"}:
+            status_override = "failing"
+        elif status_raw == "warning":
+            status_override = "warning"
+        elif status_raw in {"passing", "pass", "covered"}:
+            status_override = "passing"
+        elif critical_open_count > 0:
+            status_override = "failing"
+        elif high_open_count > 0 or open_service_count > 0:
+            status_override = "warning"
+        else:
+            status_override = "passing"
+
+        if enabled and not host:
+            data_quality = "PARTIAL"
+            confidence_penalty = max(confidence_penalty, 1)
+        if enabled and not ports_scanned:
+            data_quality = "PARTIAL"
+            confidence_penalty = max(confidence_penalty, 1)
+        if error and status_override == "not_evaluated":
+            data_quality = "PARTIAL"
+            confidence_penalty = max(confidence_penalty, 1)
+
+        evidence.update({
+            "data_quality": data_quality,
+            "enabled": enabled,
+            "host": _value_or_missing(host, "Hôte de scan non déterminé") if enabled else _missing_field("Scan de ports désactivé"),
+            "timeout_ms": timeout_ms if timeout_ms > 0 else _missing_field("Timeout du scan non renseigné"),
+            "ports_scanned": ports_scanned if ports_scanned else _missing_field("Liste des ports scannés absente"),
+            "open_service_count": open_service_count,
+            "critical_open_service_count": critical_open_count,
+            "high_open_service_count": high_open_count,
+            "open_services_all": open_services_all if open_services_all else [],
+            "status_raw": status_raw or _missing_field("Statut brut du scanner absent"),
+            "warning": warning,
+            "error": error,
+            "impact": _clean_text(data.get("impact")),
         })
         return evidence, data_quality, status_override, confidence_penalty
 
@@ -1747,6 +1882,32 @@ def _build_contract_constat(kpi_id: str, kpi_name: str, status: str, kpi_type: s
             return f"Le serveur {product if product != 'non détecté' else 'du site'} a été partiellement détecté, mais la version exploitable manque pour conclure sur son niveau de risque."
         return f"Le site expose {product} {version} avec {critical} CVE critique(s) et {high} CVE haute(s) dans l'agrégat technique. Cette exposition facilite le ciblage d'attaques connues."
 
+    if kpi_id == "sec_service_exposure":
+        enabled = bool(evidence.get("enabled"))
+        host = _display_value(evidence.get("host"), "hôte non déterminé")
+        open_count = _safe_int(evidence.get("open_service_count"))
+        critical_count = _safe_int(evidence.get("critical_open_service_count"))
+        high_count = _safe_int(evidence.get("high_open_service_count"))
+        preview = []
+        for svc in _safe_list(evidence.get("open_services_all"))[:3]:
+            item = _safe_dict(svc)
+            port = item.get("port")
+            service = _display_value(item.get("service"), "service inconnu")
+            risk = _display_value(item.get("risk"), "risque inconnu")
+            preview.append(f"{service} ({port}/{risk})")
+        preview_suffix = f" Services observés: {', '.join(preview)}." if preview else ""
+        if status == "passing":
+            return f"Aucun service à risque n'a été trouvé sur les ports surveillés de {host}."
+        if status == "not_evaluated":
+            if not enabled:
+                return "Le contrôle d'exposition des services réseau est désactivé. Activez ENABLE_PORT_SCAN pour évaluer ce risque."
+            return f"Le contrôle d'exposition des services réseau n'a pas pu conclure de façon fiable pour {host}."
+        if critical_count > 0:
+            return f"{critical_count} service(s) critique(s) exposé(s) publiquement ont été détectés sur {host}.{preview_suffix}"
+        if high_count > 0:
+            return f"{high_count} service(s) à risque élevé sont exposés publiquement sur {host}.{preview_suffix}"
+        return f"{open_count} service(s) réseau exposé(s) ont été identifiés sur {host}. Une revue de nécessité et de filtrage est recommandée.{preview_suffix}"
+
     if kpi_id == "func_forms":
         forms_detected = _safe_int(evidence.get("forms_detected"))
         forms_tested = _safe_int(evidence.get("forms_tested"))
@@ -2069,6 +2230,9 @@ def build_kpi_centric_report(report: dict) -> dict:
     brute_force_login = _safe_dict(sec.get("bruteforced_protection_login"))
     upload_control = _safe_dict(sec.get("file_upload_extension_control"))
     vulnerable_js = _safe_dict(sec.get("vulnerable_js_dependencies"))
+    service_exposure = _safe_dict(sec.get("service_exposure"))
+    if not service_exposure:
+        service_exposure = _safe_dict(da.get("service_exposure_kpi"))
 
     admin_exposed = _safe_list(admin_exposure.get("exposed"))
     admin_forbidden = _safe_list(admin_exposure.get("forbidden"))
@@ -2106,6 +2270,45 @@ def build_kpi_centric_report(report: dict) -> dict:
 
     vulnerable_libraries = _safe_list(vulnerable_js.get("vulnerable_libraries"))
     vulnerable_js_has_issue = bool(vulnerable_libraries) or str(vulnerable_js.get("status", "")).lower() == "fail"
+    service_exposure_status_raw = _clean_text(service_exposure.get("status")).lower()
+    service_exposure_enabled = bool(service_exposure.get("enabled"))
+    service_exposure_open_services = _safe_list(service_exposure.get("open_services"))
+    service_exposure_critical_open = sum(
+        1 for svc in service_exposure_open_services
+        if _clean_text(_safe_dict(svc).get("risk")).lower() == "critical"
+    )
+    service_exposure_high_open = sum(
+        1 for svc in service_exposure_open_services
+        if _clean_text(_safe_dict(svc).get("risk")).lower() == "high"
+    )
+    if not service_exposure_enabled:
+        service_exposure_status = "non_evalue"
+    elif service_exposure_status_raw in {"pass", "passing"}:
+        service_exposure_status = "passing"
+    elif service_exposure_status_raw in {"fail", "failing", "failed"}:
+        service_exposure_status = "failing"
+    elif service_exposure_status_raw in {"warning"}:
+        service_exposure_status = "warning"
+    elif service_exposure_status_raw in {"non_evalue", "not_evaluated", "not-evaluated", "not_available"}:
+        service_exposure_status = "non_evalue"
+    elif service_exposure_critical_open > 0:
+        service_exposure_status = "failing"
+    elif service_exposure_high_open > 0 or len(service_exposure_open_services) > 0:
+        service_exposure_status = "warning"
+    else:
+        service_exposure_status = "passing"
+    service_exposure_severity = _clean_text(service_exposure.get("severity")).lower()
+    if service_exposure_status in {"passing", "non_evalue"}:
+        service_exposure_severity = None
+    elif service_exposure_severity not in {"critical", "high", "medium", "low"}:
+        if service_exposure_critical_open > 0:
+            service_exposure_severity = "critical"
+        elif service_exposure_high_open > 0:
+            service_exposure_severity = "high"
+        elif len(service_exposure_open_services) > 0:
+            service_exposure_severity = "medium"
+        else:
+            service_exposure_severity = "low"
 
     tech_issues = _safe_list(cms_kpi.get("issues"))
     server_tech = str(cms_kpi.get("server_tech") or "").strip()
@@ -2290,6 +2493,29 @@ def build_kpi_centric_report(report: dict) -> dict:
             }
         },
         "SQL Injection et DDoS": _build_vuln_kpi(da, domain_url),
+        "Exposition Services Reseau": {
+            "info": f"Services exposés: {len(service_exposure_open_services)} (hôte: {service_exposure.get('host', '') or 'N/A'})",
+            "impact": "Ports sensibles exposés = surface d'attaque réseau accrue (intrusion, brute force, exfiltration)",
+            "pages_affected": 1 if service_exposure_status in {"failing", "warning"} else 0,
+            "pages_affected_urls": [report.get("domain", "")] if service_exposure_status in {"failing", "warning"} else [],
+            "status": service_exposure_status,
+            "type": "bug" if service_exposure_status in {"failing", "warning"} else None,
+            "severity": service_exposure_severity,
+            "data": {
+                "enabled": service_exposure_enabled,
+                "host": service_exposure.get("host", ""),
+                "timeout_ms": service_exposure.get("timeout_ms"),
+                "ports_scanned": _safe_list(service_exposure.get("ports_scanned", [])),
+                "open_services": service_exposure_open_services,
+                "status": service_exposure_status_raw or service_exposure.get("status", ""),
+                "severity": service_exposure.get("severity", ""),
+                "impact": service_exposure.get("impact", ""),
+                "warning": service_exposure.get("warning", ""),
+                "error": service_exposure.get("error", ""),
+                "critical_open_count": service_exposure_critical_open,
+                "high_open_count": service_exposure_high_open,
+            },
+        },
 
         "Pages Admin Exposées": {
             "info": f"Endpoints admin/sensibles: exposés={len(admin_exposed)}, protégés={len(admin_forbidden)}, instables={len(admin_server_errors)}",

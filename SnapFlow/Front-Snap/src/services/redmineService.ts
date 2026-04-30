@@ -53,6 +53,22 @@ export interface FetchIssuesResult {
   totalCount: number;
 }
 
+type CreateRedmineIssueResponse = {
+  issue?: { id: number };
+  success?: boolean;
+  error?: string;
+  details?: { errors?: string[] } | unknown;
+  response_preview?: string;
+  redmine_status?: number;
+};
+
+function previewText(value: unknown, maxLength = 300): string {
+  if (value === null || value === undefined) return '';
+  const text = typeof value === 'string' ? value : JSON.stringify(value);
+  if (!text) return '';
+  return text.length > maxLength ? `${text.slice(0, maxLength)}…` : text;
+}
+
 /** Fetch a paginated list of Redmine issues for a project. */
 export async function fetchIssues(params: FetchIssuesParams): Promise<FetchIssuesResult> {
   const { data, error } = await supabase.functions.invoke('fetch-redmine', {
@@ -117,7 +133,14 @@ export async function createRedmineIssue(params: {
   subject: string;
   description: string;
   assignedToId?: number;
-}): Promise<{ issue?: { id: number }; success?: boolean; error?: string; details?: { errors?: string[] } }> {
+}): Promise<CreateRedmineIssueResponse> {
+  console.info('[redmineService][createRedmineIssue] request', {
+    projectIdentifier: params.projectIdentifier,
+    subject: params.subject,
+    descriptionLength: params.description?.length ?? 0,
+    assignedToId: params.assignedToId ?? null,
+  });
+
   const { data, error } = await supabase.functions.invoke('fetch-redmine', {
     body: {
       type: 'create_issue',
@@ -127,8 +150,29 @@ export async function createRedmineIssue(params: {
       assigned_to_id: params.assignedToId || undefined,
     },
   });
-  if (error) throw error;
-  return data;
+
+  console.info('[redmineService][createRedmineIssue] response', {
+    hasTransportError: Boolean(error),
+    transportErrorMessage: error?.message ?? null,
+    redmineStatus: data?.redmine_status ?? null,
+    success: data?.success ?? null,
+    edgeError: data?.error ?? null,
+    issueId: data?.issue?.id ?? null,
+    responsePreview: previewText(data?.response_preview ?? data?.details ?? null),
+  });
+
+  if (error) {
+    throw error;
+  }
+
+  if (data?.error) {
+    const rawDetails = data.response_preview ?? data.details ?? null;
+    const detailText = previewText(rawDetails);
+    const detailsPreview = detailText ? ` | ${detailText}` : '';
+    throw new Error(`${data.error}${detailsPreview}`);
+  }
+
+  return data as CreateRedmineIssueResponse;
 }
 
 /** Sync Redmine homepages to project URLs. */
