@@ -35,10 +35,10 @@ spec:
           value: "true"
         resources:
           requests:
-            cpu: "1"
-            memory: 1Gi
+            cpu: 200m
+            memory: 512Mi
           limits:
-            cpu: "3"
+            cpu: "2"
             memory: 4Gi
         securityContext:
           capabilities:

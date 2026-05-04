@@ -17,34 +17,34 @@ spec:
     spec:
       containers:
       - name: pgbouncer
-        image: bitnami/pgbouncer:1.22.0
+        image: edoburu/pgbouncer:latest
         ports:
         - containerPort: 5432
           name: pgbouncer
         env:
-        - name: POSTGRESQL_HOST
+        - name: DB_HOST
           value: postgres.snapflow-infra.svc.cluster.local
-        - name: POSTGRESQL_PORT
+        - name: DB_PORT
           value: "5432"
-        - name: POSTGRESQL_DATABASE
+        - name: DB_NAME
           value: snapflow
-        - name: POSTGRESQL_USERNAME
+        - name: DB_USER
           valueFrom:
             secretKeyRef:
               name: postgres-secret
               key: username
-        - name: POSTGRESQL_PASSWORD
+        - name: DB_PASSWORD
           valueFrom:
             secretKeyRef:
               name: postgres-secret
               key: password
-        - name: PGBOUNCER_AUTH_TYPE
+        - name: AUTH_TYPE
           value: plain
-        - name: PGBOUNCER_POOL_MODE
+        - name: POOL_MODE
           value: transaction
-        - name: PGBOUNCER_MAX_CLIENT_CONN
+        - name: MAX_CLIENT_CONN
           value: "200"
-        - name: PGBOUNCER_DEFAULT_POOL_SIZE
+        - name: DEFAULT_POOL_SIZE
           value: "20"
         resources:
           requests:

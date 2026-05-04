@@ -30,6 +30,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /opt/base
 COPY requirements.heavy.txt .
 RUN pip install --no-cache-dir --default-timeout=300 --retries=10 -r requirements.heavy.txt \
-    && python -m playwright install chromium webkit firefox
+    && python -m playwright install chromium 2>/dev/null || true
 
 WORKDIR /app

@@ -9,7 +9,10 @@ docker build -t "snapflow/v3-scanner-go:${TAG}" ./V3-Microservices/v3-scanner-go
 docker build -t "snapflow/v3-aggregator:${TAG}" ./V3-Microservices/v3-aggregator
 docker build -t "snapflow/v3-nlp-worker:${TAG}" ./V3-Microservices/v3-nlp-worker
 docker build -t "snapflow/v3-visual-regression:${TAG}" ./V3-Microservices/v3-visual-regression
-docker build -t "snapflow/v3-frontend:${TAG}" -f ./Dockerfile.frontend .
+docker build -t "snapflow/v3-frontend:${TAG}" \
+  --build-arg VITE_SUPABASE_URL="${VITE_SUPABASE_URL:-}" \
+  --build-arg VITE_SUPABASE_PUBLISHABLE_KEY="${VITE_SUPABASE_PUBLISHABLE_KEY:-}" \
+  ./Front-Snap
 
 echo "=== Importing into k3s containerd ==="
 docker save "snapflow/v3-scanner-go:${TAG}" | sudo k3s ctr images import -
