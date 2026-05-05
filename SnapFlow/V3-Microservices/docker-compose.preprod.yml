@@ -1,0 +1,138 @@
+# SnapFlow V3 — Pre-Production Stack
+#   docker compose -f docker-compose.preprod.yml up -d --build
+#
+# Only ports 3000 (frontend) and 8080 (aggregator) are exposed to the host.
+# All other services (DB, scanner, NLP, browser-pool, visual-regression)
+# communicate over the internal Docker network.
+#
+# Passwords come from .env.preprod (see file).
+
+services:
+  # ─── PostgreSQL ─────────────────────────────────────────────────────
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: snapflow_v3
+      POSTGRES_USER: snapflow
+      POSTGRES_PASSWORD: ${DB_PASS:-snapflow}
+    # No host port — internal only
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U snapflow -d snapflow_v3"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  # ─── Go Scanner ─────────────────────────────────────────────────────
+  scanner:
+    build:
+      context: ./v3-scanner-go
+      dockerfile: Dockerfile
+    depends_on:
+      db:
+        condition: service_healthy
+      v3-browser-pool:
+        condition: service_healthy
+    # No host port — internal only
+    environment:
+      DB_HOST: db
+      DB_PORT: "5432"
+      DB_NAME: snapflow_v3
+      DB_USER: snapflow
+      DB_PASS: ${DB_PASS:-snapflow}
+      CHROME_NO_SANDBOX: "true"
+      BROWSER_POOL_URL: http://v3-browser-pool:8084
+      BROWSER_POOL_TIMEOUT_MS: "90000"
+      ENABLE_PORT_SCAN: "true"
+      PORT_SCAN_TIMEOUT_MS: "900"
+      PORT_SCAN_PORTS: "21,22,25,53,80,443,3306,5432,6379,8080,8443,3389"
+    restart: unless-stopped
+
+  # ─── NLP Worker ─────────────────────────────────────────────────────
+  nlp-worker:
+    build:
+      context: ./v3-nlp-worker
+      dockerfile: Dockerfile
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DB_HOST: db
+      DB_PORT: "5432"
+      DB_NAME: snapflow_v3
+      DB_USER: snapflow
+      DB_PASS: ${DB_PASS:-snapflow}
+      POLL_INTERVAL: "3"
+    restart: unless-stopped
+
+  # ─── Aggregator API ─────────────────────────────────────────────────
+  aggregator:
+    build:
+      context: ./v3-aggregator
+      dockerfile: Dockerfile
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      DB_HOST: db
+      DB_PORT: "5432"
+      DB_NAME: snapflow_v3
+      DB_USER: snapflow
+      DB_PASS: ${DB_PASS:-snapflow}
+      SCANNER_API_URL: http://scanner:8081
+      VISUAL_REGRESSION_API_URL: http://v3-visual-regression:8083
+    restart: unless-stopped
+
+  # ─── Browser Pool (Playwright) ──────────────────────────────────────
+  v3-browser-pool:
+    build: ./v3-browser-pool
+    container_name: v3-browser-pool
+    # No host port — internal only
+    environment:
+      CHROME_NO_SANDBOX: "true"
+      BROWSER_POOL_CONCURRENCY: "15"
+      BROWSER_POOL_RECYCLE_AFTER: "50"
+      BROWSER_POOL_DEFAULT_TIMEOUT_MS: "30000"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8084/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ─── Visual Regression ─────────────────────────────────────────────
+  v3-visual-regression:
+    build: ./v3-visual-regression
+    container_name: v3-visual-regression
+    # No host port — internal only
+    environment:
+      DATABASE_URL: postgresql://snapflow:${DB_PASS:-snapflow}@db:5432/snapflow_v3
+      VISUAL_REGRESSION_ENABLED: "true"
+      CHROME_NO_SANDBOX: "true"
+      BROWSER_POOL_URL: http://v3-browser-pool:8084
+    depends_on:
+      db:
+        condition: service_healthy
+      v3-browser-pool:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ─── Frontend (React SPA via Nginx) ─────────────────────────────────
+  frontend:
+    build:
+      context: ../Front-Snap
+      dockerfile: Dockerfile
+      args:
+        VITE_SUPABASE_URL: ${VITE_SUPABASE_URL}
+        VITE_SUPABASE_PUBLISHABLE_KEY: ${VITE_SUPABASE_PUBLISHABLE_KEY}
+    ports:
+      - "127.0.0.1:3000:3000"
+    restart: unless-stopped
+
+volumes:
+  pgdata:

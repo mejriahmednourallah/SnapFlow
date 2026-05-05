@@ -47,7 +47,6 @@ coverage/
 .parcel-cache/
 
 # Generated docker-compose files (tenant stacks)
-docker-compose.*.yml
 # But keep traefik config
 !docker-compose.traefik.yml
 # And keep sales demo config
