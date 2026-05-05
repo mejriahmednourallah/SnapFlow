@@ -13,12 +13,12 @@ docker build -t snapflow/v3-python-heavy-base:latest \
   -f docker/python-base/Dockerfile.heavy docker/python-base/
 
 echo "=== 2/3 Building & starting all services ==="
-docker compose -f docker-compose.preprod.yml up -d --build
+docker compose --env-file .env.preprod -f docker-compose.preprod.yml up -d --build
 
 echo "=== 3/3 Status ==="
 docker compose -f docker-compose.preprod.yml ps
 echo ""
-echo "Frontend : http://$(hostname -I | awk '{print $1}'):3000"
-echo "API      : http://$(hostname -I | awk '{print $1}'):8080/health"
+echo "Frontend : https://snapflowv2.medianet.tn"
+echo "API      : https://snapflowv2.medianet.tn/api/health"
 echo ""
 echo "Logs: docker compose -f docker-compose.preprod.yml logs -f"
