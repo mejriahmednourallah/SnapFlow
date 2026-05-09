@@ -177,6 +177,7 @@ type ScanResult struct {
 	MissingHeaders []string      `json:"missing_headers"`
 	CacheControl   string        `json:"cache_control,omitempty"`
 	HasCache       bool          `json:"has_cache"`
+	CachePolicy    string        `json:"cache_policy,omitempty"`
 	Compression    string        `json:"compression,omitempty"`
 	HasCompression bool          `json:"has_compression"`
 
@@ -648,6 +649,39 @@ func CheckExposedPaths(baseURL string) []string {
 //   - robotsTxtContent: raw content of robots.txt file (empty if not found)
 //   - htmlBody: HTML body content from the target URL (for form parsing)
 //   - detectedTechs: list of detected technologies with versions (for CVE matching)
+func hasPerformanceCache(cacheControl, etag, expires string) (bool, string) {
+	cc := strings.ToLower(strings.TrimSpace(cacheControl))
+	if cc != "" {
+		if strings.Contains(cc, "no-store") || strings.Contains(cc, "no-cache") || strings.Contains(cc, "private") {
+			return false, "cache_control_disables_reuse"
+		}
+		for _, directive := range strings.Split(cc, ",") {
+			directive = strings.TrimSpace(directive)
+			if strings.HasPrefix(directive, "max-age=") || strings.HasPrefix(directive, "s-maxage=") {
+				parts := strings.SplitN(directive, "=", 2)
+				if len(parts) == 2 {
+					ttl, err := strconv.Atoi(strings.Trim(parts[1], `"`))
+					if err == nil && ttl > 0 {
+						return true, "cache_control_ttl"
+					}
+				}
+			}
+			if directive == "immutable" {
+				return true, "cache_control_immutable"
+			}
+		}
+	}
+	if strings.TrimSpace(expires) != "" {
+		if exp, err := http.ParseTime(expires); err == nil && exp.After(time.Now().Add(60*time.Second)) {
+			return true, "expires_future"
+		}
+	}
+	if strings.TrimSpace(etag) != "" {
+		return true, "etag_revalidation_only"
+	}
+	return false, "no_cache_reuse_signal"
+}
+
 func Analyze(targetURL, cmsName, robotsTxtContent, htmlBody string, responseHeaders *http.Header, ssl SSLInfo, detectedTechs []TechInfo) ScanResult {
 	headers, missing := CheckHeadersFromColly(targetURL, responseHeaders)
 
@@ -655,7 +689,7 @@ func Analyze(targetURL, cmsName, robotsTxtContent, htmlBody string, responseHead
 	cacheControl := responseHeaders.Get("Cache-Control")
 	etag := responseHeaders.Get("ETag")
 	expires := responseHeaders.Get("Expires")
-	hasCache := cacheControl != "" || etag != "" || expires != ""
+	hasCache, cachePolicy := hasPerformanceCache(cacheControl, etag, expires)
 
 	// Compression detection
 	compression := responseHeaders.Get("Content-Encoding")
@@ -698,6 +732,7 @@ func Analyze(targetURL, cmsName, robotsTxtContent, htmlBody string, responseHead
 		MissingHeaders: missing,
 		CacheControl:   cacheControl,
 		HasCache:       hasCache,
+		CachePolicy:    cachePolicy,
 		Compression:    compression,
 		HasCompression: hasCompression,
 
@@ -983,6 +1018,50 @@ func probeWordlistPaths(baseURL string, paths []string) probeResult {
 	return out
 }
 
+func fetchProbeBody(baseURL, path string, maxBytes int64) (int, string) {
+	client := &http.Client{
+		Timeout: 5 * time.Second,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	resp, err := client.Get(strings.TrimRight(baseURL, "/") + path)
+	if err != nil {
+		return 0, ""
+	}
+	defer resp.Body.Close()
+	bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, maxBytes))
+	return resp.StatusCode, strings.ToLower(string(bodyBytes))
+}
+
+func isProtectedOrBenignAdminPage(baseURL, cmsName, path string) bool {
+	status, body := fetchProbeBody(baseURL, path, 96*1024)
+	if status != http.StatusOK {
+		return true
+	}
+	lowerPath := strings.ToLower(path)
+	lowerCMS := strings.ToLower(cmsName)
+	if lowerCMS == "drupal" && lowerPath == "/core/install.php" {
+		if strings.Contains(body, "already installed") || strings.Contains(body, "drupal is already installed") {
+			return true
+		}
+	}
+	if strings.Contains(lowerPath, "login") || strings.Contains(lowerPath, "/user/login") {
+		return true
+	}
+	loginSignals := []string{
+		`type="password"`, `type='password'`, "name=\"pass\"", "name='pass'",
+		"log in", "login", "se connecter", "connexion", "authentification",
+		"access denied", "accès refusé", "permission denied",
+	}
+	for _, sig := range loginSignals {
+		if strings.Contains(body, sig) {
+			return true
+		}
+	}
+	return false
+}
+
 // checkAdminSensitivePages probes for exposed admin and sensitive pages.
 // Check #1: Admin & Sensitive Page Exposure
 func checkAdminSensitivePages(targetURL, cmsName string) AdminExposureResult {
@@ -993,6 +1072,20 @@ func checkAdminSensitivePages(targetURL, cmsName string) AdminExposureResult {
 	pathsToProbe = uniquePaths(pathsToProbe)
 
 	probe := probeWordlistPaths(targetURL, pathsToProbe)
+	filteredExposed := make([]string, 0, len(probe.Exposed))
+	protectedFromBody := map[string]bool{}
+	for _, path := range probe.Exposed {
+		if isProtectedOrBenignAdminPage(targetURL, cmsName, path) {
+			protectedFromBody[path] = true
+			continue
+		}
+		filteredExposed = append(filteredExposed, path)
+	}
+	for path := range protectedFromBody {
+		probe.Forbidden = append(probe.Forbidden, path)
+	}
+	probe.Forbidden = uniquePaths(probe.Forbidden)
+	probe.Exposed = filteredExposed
 	status := "pass"
 	severity := "high"
 
@@ -1023,6 +1116,14 @@ func checkCMSVersionDisclosure(targetURL, cmsName string) VersionDisclosureResul
 	pathsToProbe = uniquePaths(pathsToProbe)
 
 	probe := probeWordlistPaths(targetURL, pathsToProbe)
+	confirmedDisclosure := make([]string, 0, len(probe.Exposed))
+	for _, path := range probe.Exposed {
+		status, body := fetchProbeBody(targetURL, path, 128*1024)
+		if status == http.StatusOK && cmsVersionDisclosureRe.MatchString(body) {
+			confirmedDisclosure = append(confirmedDisclosure, path)
+		}
+	}
+	probe.Exposed = confirmedDisclosure
 	status := "pass"
 	severity := "medium"
 
@@ -1060,6 +1161,11 @@ var benignPublicFiles = map[string]bool{
 
 // sensitiveContentRe matches content that escalates severity regardless of filename.
 var sensitiveContentRe = regexp.MustCompile(`(?i)(password\s*=|db_password|secret[_\s]*key|private_key|api[_\s]*key\s*=|DB_PASSWORD|AWS_SECRET)`)
+
+// cmsVersionDisclosureRe requires an actual version string in the response body.
+// Existence of public CMS files alone is not enough: modern Drupal, for example,
+// ships CHANGELOG/INSTALL text that does not disclose the installed minor version.
+var cmsVersionDisclosureRe = regexp.MustCompile(`(?i)(drupal|wordpress|joomla|typo3|magento|prestashop|opencart|moodle|shopware|umbraco|ghost|strapi|cms|version)[^\n\r]{0,80}([0-9]+\.[0-9]+(?:\.[0-9]+){0,2})`)
 
 // SensitiveFileInfo carries per-file probe detail used internally.
 type sensitiveFileDetail struct {
@@ -1196,6 +1302,30 @@ var errorIndicators = []string{
 	"config path", "file path", "/home/", "/var/", "/opt/",
 }
 
+func isStandardCMSRobotsDisallow(path string) bool {
+	p := strings.ToLower(strings.TrimSpace(path))
+	p = strings.TrimSuffix(p, "*")
+	standard := map[string]bool{
+		"/admin":                 true,
+		"/admin/":                true,
+		"/user":                  true,
+		"/user/":                 true,
+		"/user/login":            true,
+		"/user/password":         true,
+		"/index.php/admin":       true,
+		"/index.php/admin/":      true,
+		"/core/":                 true,
+		"/profiles/":             true,
+		"/sites/":                true,
+		"/wp-admin/":             true,
+		"/wp-login.php":          true,
+		"/administrator/":        true,
+		"/administrator":         true,
+		"/installation/":         true,
+	}
+	return standard[p]
+}
+
 // checkRobotsTxtInfoDisclosure analyzes robots.txt for information disclosure.
 // Check #3: robots.txt Info Disclosure
 func checkRobotsTxtInfoDisclosure(robotsTxtContent string) RobotsTxtResult {
@@ -1223,6 +1353,9 @@ func checkRobotsTxtInfoDisclosure(robotsTxtContent string) RobotsTxtResult {
 
 			if path == "" || path == "/" {
 				continue // Non-interesting paths
+			}
+			if isStandardCMSRobotsDisallow(path) {
+				continue
 			}
 
 			// [NEW-3] Check if any path segment exactly matches a sensitive keyword.

@@ -61,6 +61,25 @@ def _safe_float(val):
         return 0.0
 
 
+def _optional_float(val):
+    """Return a float only for real numeric values; preserve missing as None."""
+    if val is None or val == "":
+        return None
+    try:
+        return float(val)
+    except (TypeError, ValueError):
+        return None
+
+
+def _is_cache_friendly(cache_control: str, has_cache: bool) -> bool:
+    cc = str(cache_control or "").lower()
+    if not has_cache:
+        return False
+    if any(token in cc for token in ("no-store", "no-cache", "private")):
+        return False
+    return "max-age=" in cc or "s-maxage=" in cc or "public" in cc or "immutable" in cc or not cc
+
+
 def _build_vuln_kpi(da: dict, domain_url: str) -> dict:
     """Build the SQL Injection/XSS/DDoS KPI entry with correct pages_affected.
 
@@ -95,15 +114,25 @@ def _resolve_mobile_kpi_status(mobile_kpi):
     mobile = _safe_dict(mobile_kpi)
     if not _safe_bool(mobile.get("available")):
         return "not_available"
+    if str(mobile.get("measurement_status") or "").lower() in {
+        "core_web_vitals_unavailable",
+        "navigation_error",
+        "browser_error",
+        "measurement_failed",
+    }:
+        return "not_available"
 
     passed = mobile.get("passed")
+
+    lcp_ms = _optional_float(mobile.get("lcp_ms"))
+    cls = _optional_float(mobile.get("cls"))
+    fcp_ms = _optional_float(mobile.get("fcp_ms"))
+    if lcp_ms is None or lcp_ms <= 0 or fcp_ms is None or fcp_ms <= 0:
+        return "not_available"
     if isinstance(passed, bool):
         return "passing" if passed else "failing"
-
-    lcp_ms = _safe_float(mobile.get("lcp_ms"))
-    cls = _safe_float(mobile.get("cls"))
-    fcp_ms = _safe_float(mobile.get("fcp_ms"))
-    if lcp_ms > 2500 or cls > 0.1 or (fcp_ms > 0 and fcp_ms > 1800):
+    cls_value = cls if cls is not None else 0.0
+    if lcp_ms > 2500 or cls_value > 0.1 or (fcp_ms > 0 and fcp_ms > 1800):
         return "failing"
     return "passing"
 
@@ -2809,26 +2838,39 @@ def build_kpi_centric_report(report: dict) -> dict:
     mobile_friendly_kpi = _safe_dict(ux.get("mobile_friendly_kpi", {}))
     mobile_friendly_status = _resolve_mobile_friendly_status(mobile_friendly_kpi)
     mobile_friendly_available = mobile_friendly_status != "not_available"
-    avg_fcp_ms = _safe_float(perf.get("avg_fcp_ms"))
-    avg_lcp_ms = _safe_float(perf.get("avg_lcp_ms"))
-    avg_cls = _safe_float(perf.get("avg_cls"))
-    avg_eco_index = _safe_float(perf.get("avg_eco_index"))
-    compression_rate_pct = _safe_float(content.get("image_compression_stats", {}).get("compression_rate_pct"))
+    avg_fcp_ms = _optional_float(perf.get("avg_fcp_ms"))
+    avg_lcp_ms = _optional_float(perf.get("avg_lcp_ms"))
+    avg_cls = _optional_float(perf.get("avg_cls"))
+    avg_eco_index = _optional_float(perf.get("avg_eco_index"))
+    image_stats = _safe_dict(content.get("image_compression_stats", {}))
+    compression_rate_pct = _optional_float(image_stats.get("compression_rate_pct")) or 0.0
+    sampled_images = _safe_int(image_stats.get("sampled_images"))
+    unoptimised_count = _safe_int(image_stats.get("unoptimised_count"))
+    desktop_perf_status = "non_evalue" if avg_lcp_ms is None or avg_lcp_ms <= 0 or avg_fcp_ms is None or avg_fcp_ms <= 0 else ("failing" if avg_lcp_ms > 2500 else "passing")
+    image_perf_status = "non_evalue" if sampled_images <= 0 else ("failing" if unoptimised_count > 0 else "passing")
+    cache_is_friendly = _is_cache_friendly(sec.get("cache_control"), bool(sec.get("has_cache")))
+    eco_status = "non_evalue" if avg_eco_index is None else ("failing" if avg_eco_index < 30 else "warning" if avg_eco_index < 50 else "passing")
     
     axes["Audit de Performance et Temps de Réponse"] = {
         "Temps de Chargement Desktop": {
-            "info": f"FCP={avg_fcp_ms:.0f}ms, LCP={avg_lcp_ms:.0f}ms, CLS={avg_cls:.2f}",
+            "info": (
+                f"FCP={avg_fcp_ms:.0f}ms, LCP={avg_lcp_ms:.0f}ms, CLS={(avg_cls or 0):.2f}"
+                if desktop_perf_status != "non_evalue"
+                else "Mesure FCP/LCP desktop indisponible"
+            ),
             "impact": "Temps de chargement élevé = abandon utilisateur, baisse des conversions, mauvais SEO",
-            "pages_affected": report.get("pages_scanned", 0),
-            "pages_affected_urls": _safe_list(heading_hierarchy_evidence.get("affected_pages")),
-            "status": "failing" if avg_lcp_ms > 2500 else "passing",
-            "type": "recommendation" if avg_lcp_ms > 2500 else None,
+            "pages_affected": report.get("pages_scanned", 0) if desktop_perf_status == "failing" else 0,
+            "pages_affected_urls": _safe_list(heading_hierarchy_evidence.get("affected_pages")) if desktop_perf_status == "failing" else [],
+            "status": desktop_perf_status,
+            "type": "recommendation" if desktop_perf_status == "failing" else None,
             "severity": None,
             "data": {
                 "fcp_ms": perf.get("avg_fcp_ms"),
                 "lcp_ms": perf.get("avg_lcp_ms"),
                 "cls": perf.get("avg_cls"),
                 "speed_index_ms": perf.get("avg_speed_index_ms"),
+                "speed_index_synthetic": True,
+                "data_quality": "MISSING" if desktop_perf_status == "non_evalue" else "VALID",
             }
         },
         "Temps de Chargement Mobile": {
@@ -2844,22 +2886,22 @@ def build_kpi_centric_report(report: dict) -> dict:
         "Optimisation des Images": {
             "info": f"Compression: {compression_rate_pct:.1f}%, Images non optimisées: {content.get('image_compression_stats', {}).get('unoptimised_count', 0)}/{content.get('image_compression_stats', {}).get('sampled_images', 0)}",
             "impact": "Images mal optimisées = temps de chargement lent, énergie wasted, mauvaise UX",
-            "pages_affected": content.get("image_compression_stats", {}).get("unoptimised_count", 0),
-            "pages_affected_urls": [img.get("url", "") for img in content.get("image_compression_stats", {}).get("unoptimised_images", [])][:5],
-            "status": "failing" if content.get("image_compression_stats", {}).get("unoptimised_count", 0) > 0 else "passing",
-            "type": "recommendation" if content.get("image_compression_stats", {}).get("unoptimised_count", 0) > 0 else None,
+            "pages_affected": unoptimised_count if image_perf_status == "failing" else 0,
+            "pages_affected_urls": [img.get("url", "") for img in _safe_list(image_stats.get("unoptimised_images", []))][:5] if image_perf_status == "failing" else [],
+            "status": image_perf_status,
+            "type": "recommendation" if image_perf_status == "failing" else None,
             "severity": None,
-            "data": content.get("image_compression_stats", {}),
+            "data": {**image_stats, "data_quality": "MISSING" if sampled_images <= 0 else "VALID"},
         },
         "Gestion de Cache": {
             "info": f"Cache: {'Activé' if sec.get('has_cache') else 'Désactivé'}, Control: {sec.get('cache_control', 'N/A')}",
             "impact": "Cache désactivé = plus de requêtes serveur, temps de réponse lent, surcharge serveur",
-            "pages_affected": 1,
-            "pages_affected_urls": [report.get("domain", "")],
-            "status": "passing" if sec.get("has_cache") else "failing",
-            "type": "recommendation" if not sec.get("has_cache") else None,
+            "pages_affected": 0 if cache_is_friendly else 1,
+            "pages_affected_urls": [] if cache_is_friendly else [report.get("domain", "")],
+            "status": "passing" if cache_is_friendly else "failing",
+            "type": "recommendation" if not cache_is_friendly else None,
             "severity": None,
-            "data": {"has_cache": sec.get("has_cache"), "cache_control": sec.get("cache_control")},
+            "data": {"has_cache": sec.get("has_cache"), "cache_control": sec.get("cache_control"), "cache_policy": sec.get("cache_policy"), "cache_friendly": cache_is_friendly},
         },
         "Utilisation de Compression": {
             "info": f"Compression HTTP: {'Activée' if perf.get('html_compression_applied') else 'Désactivée'}",

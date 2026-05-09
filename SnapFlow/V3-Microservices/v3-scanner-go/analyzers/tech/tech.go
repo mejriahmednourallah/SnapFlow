@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"path"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -586,6 +587,34 @@ func isPlausibleModuleVersion(moduleName, version string) bool {
 }
 
 // ─── Analyze ─────────────────────────────────────────────────────────────────
+func inferLanguageFromCMS(cmsName, cmsVersion string) (string, string) {
+	switch strings.ToLower(strings.TrimSpace(cmsName)) {
+	case "drupal":
+		major := 0
+		if parts := strings.Split(normalizeCMSVersion(cmsVersion), "."); len(parts) > 0 {
+			major, _ = strconv.Atoi(parts[0])
+		}
+		if major >= 11 {
+			return "PHP", "8.3+"
+		}
+		if major >= 10 {
+			return "PHP", "8.1+"
+		}
+		if major >= 9 {
+			return "PHP", "7.4+"
+		}
+		return "PHP", ""
+	case "wordpress", "joomla", "prestashop", "magento", "opencart", "shopware", "woocommerce", "moodle", "typo3":
+		return "PHP", ""
+	case "ghost", "strapi":
+		return "Node.js", ""
+	case "umbraco":
+		return ".NET", ""
+	default:
+		return "", ""
+	}
+}
+
 func Analyze(targetURL string, html string, headers *http.Header) TechResult {
 	stack := DetectStack(html, headers)
 
@@ -626,6 +655,12 @@ func Analyze(targetURL string, html string, headers *http.Header) TechResult {
 		if aspVer := strings.TrimSpace(headers.Get("X-AspNet-Version")); aspVer != "" {
 			lang = "ASP.NET"
 			langVersion = aspVer
+		}
+	}
+	if lang == "" && cms != "" {
+		if inferredLang, inferredVersion := inferLanguageFromCMS(cms, cmsVersion); inferredLang != "" {
+			lang = inferredLang
+			langVersion = inferredVersion
 		}
 	}
 

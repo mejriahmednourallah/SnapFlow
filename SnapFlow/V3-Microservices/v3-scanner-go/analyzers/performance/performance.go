@@ -78,13 +78,16 @@ type HeadlessResult struct {
 
 // MobilePerformanceResult holds metrics captured from a 3G mobile emulation of the homepage.
 type MobilePerformanceResult struct {
-	FCPMS        float64  `json:"fcp_ms"`
-	LCPMS        float64  `json:"lcp_ms"`
-	CLS          float64  `json:"cls"`
-	SpeedIndexMS float64  `json:"speed_index_ms"`
-	Passed       bool     `json:"passed"`
-	Issues       []string `json:"issues"`
-	Error        string   `json:"error,omitempty"`
+	FCPMS             float64  `json:"fcp_ms"`
+	LCPMS             float64  `json:"lcp_ms"`
+	CLS               float64  `json:"cls"`
+	SpeedIndexMS      float64  `json:"speed_index_ms"`
+	Available         bool     `json:"available"`
+	MeasurementStatus string   `json:"measurement_status,omitempty"`
+	DataQuality        string   `json:"data_quality,omitempty"`
+	Passed            bool     `json:"passed"`
+	Issues            []string `json:"issues"`
+	Error             string   `json:"error,omitempty"`
 }
 
 // findChromePath returns the Chromium/Chrome binary path and true when one is
@@ -886,11 +889,16 @@ func analyzePageHeadless(browser *rod.Browser, targetURL string) HeadlessResult 
 // AnalyzeHomepageMobile measures FCP, LCP, CLS, and Speed Index under 3G mobile
 // emulation using the supplied browser. The caller owns the browser lifecycle.
 func AnalyzeHomepageMobile(br *rod.Browser, targetURL string) MobilePerformanceResult {
-	res := MobilePerformanceResult{}
+	res := MobilePerformanceResult{
+		Available:         false,
+		MeasurementStatus: "not_started",
+		DataQuality:        "MISSING",
+	}
 
 	page, err := br.Page(proto.TargetCreateTarget{URL: "about:blank"})
 	if err != nil {
 		res.Error = fmt.Sprintf("page create: %v", err)
+		res.MeasurementStatus = "browser_error"
 		return res
 	}
 	defer page.Close()
@@ -918,6 +926,7 @@ func AnalyzeHomepageMobile(br *rod.Browser, targetURL string) MobilePerformanceR
 
 	if err = page.Timeout(90 * time.Second).Navigate(targetURL); err != nil {
 		res.Error = fmt.Sprintf("navigate: %v", err)
+		res.MeasurementStatus = "navigation_error"
 		return res
 	}
 	_ = page.Timeout(90 * time.Second).WaitIdle(3 * time.Second)
@@ -980,6 +989,19 @@ func AnalyzeHomepageMobile(br *rod.Browser, targetURL string) MobilePerformanceR
 	res.LCPMS = <-mobLcpCh
 	res.CLS = math.Round((<-mobClsCh)*1000) / 1000
 
+	if res.FCPMS <= 0 || res.LCPMS <= 0 {
+		res.MeasurementStatus = "core_web_vitals_unavailable"
+		res.DataQuality = "MISSING"
+		res.Error = "mobile_fcp_lcp_unavailable"
+		res.Issues = []string{"Mobile FCP/LCP could not be measured reliably; KPI should be treated as non_evalue"}
+		res.Passed = false
+		return res
+	}
+
+	res.Available = true
+	res.MeasurementStatus = "measured"
+	res.DataQuality = "VALID"
+
 	// Speed Index (synthetic: 30% FCP + 70% LCP)
 	if res.FCPMS > 0 && res.LCPMS > 0 {
 		si := res.FCPMS*0.3 + res.LCPMS*0.7
@@ -992,7 +1014,7 @@ func AnalyzeHomepageMobile(br *rod.Browser, targetURL string) MobilePerformanceR
 	if res.FCPMS > 0 && res.FCPMS >= 1800 {
 		issues = append(issues, fmt.Sprintf("FCP %.0f ms exceeds 1800 ms threshold on mobile", res.FCPMS))
 	}
-	if res.LCPMS == 0 || res.LCPMS >= 2500 {
+	if res.LCPMS >= 2500 {
 		issues = append(issues, fmt.Sprintf("LCP %.0f ms exceeds 2500 ms threshold on mobile", res.LCPMS))
 	}
 	if res.CLS >= 0.25 {

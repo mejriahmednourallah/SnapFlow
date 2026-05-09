@@ -1382,6 +1382,9 @@ func startScan(ctx context.Context, config ScannerConfig) {
 		"broken_link_count":   report.BrokenLinkCount,
 		"broken_links_passed": report.BrokenLinksPassed,
 		"broken_links":        report.BrokenLinks,
+		"pages_checked":       int(atomic.LoadInt32(&pageCount)),
+		"urls_discovered":     int(atomic.LoadInt32(&discoveredURLCount)),
+		"urls_enqueued":       int(atomic.LoadInt32(&enqueueSuccessCount)),
 	}
 	if err := db.UpdateBrokenLinks(scanID, brokenSummary); err != nil {
 		log.Printf("⚠ UpdateBrokenLinks failed: %v", err)
@@ -1820,22 +1823,30 @@ func startScan(ctx context.Context, config ScannerConfig) {
 	}
 
 	// Attach individual mobile results to matching headless results; also
-	// build the average score across all tested pages.
+	// build the average score across successfully measured pages only.
 	var mobileFCPSum, mobileLCPSum, mobileCLSSum float64
+	mobileMeasuredCount := 0
 	mobileIndividualScores := make(map[string]interface{}, len(mobileEntries))
 	for _, me := range mobileEntries {
 		me := me // capture
 		mobileIndividualScores[me.url] = map[string]interface{}{
-			"fcp_ms": me.result.FCPMS,
-			"lcp_ms": me.result.LCPMS,
-			"cls":    me.result.CLS,
-			"passed": me.result.Passed,
-			"issues": me.result.Issues,
-			"error":  me.result.Error,
+			"fcp_ms":             me.result.FCPMS,
+			"lcp_ms":             me.result.LCPMS,
+			"cls":                me.result.CLS,
+			"speed_index_ms":     me.result.SpeedIndexMS,
+			"available":          me.result.Available,
+			"measurement_status": me.result.MeasurementStatus,
+			"data_quality":       me.result.DataQuality,
+			"passed":             me.result.Passed,
+			"issues":             me.result.Issues,
+			"error":              me.result.Error,
 		}
-		mobileFCPSum += me.result.FCPMS
-		mobileLCPSum += me.result.LCPMS
-		mobileCLSSum += me.result.CLS
+		if me.result.Available && me.result.FCPMS > 0 && me.result.LCPMS > 0 {
+			mobileMeasuredCount++
+			mobileFCPSum += me.result.FCPMS
+			mobileLCPSum += me.result.LCPMS
+			mobileCLSSum += me.result.CLS
+		}
 
 		// Attach to headless result entry if present
 		attached := false
@@ -1856,20 +1867,28 @@ func startScan(ctx context.Context, config ScannerConfig) {
 		}
 	}
 
-	// Compute averages (guard against empty)
-	mobilePagesCount := float64(len(mobileEntries))
-	var mobileAvgFCP, mobileAvgLCP, mobileAvgCLS float64
-	if mobilePagesCount > 0 {
+	// Compute averages (guard against failed captures). Failed captures are
+	// represented as null, not 0ms, so downstream KPIs can stay non_evalue.
+	var mobileAvgFCP, mobileAvgLCP, mobileAvgCLS interface{}
+	if mobileMeasuredCount > 0 {
+		mobilePagesCount := float64(mobileMeasuredCount)
 		mobileAvgFCP = mobileFCPSum / mobilePagesCount
 		mobileAvgLCP = mobileLCPSum / mobilePagesCount
 		mobileAvgCLS = mobileCLSSum / mobilePagesCount
 	}
 	mobileSummaryMeta := map[string]interface{}{
-		"avg_fcp_ms":       math.Round(mobileAvgFCP*10) / 10,
-		"avg_lcp_ms":       math.Round(mobileAvgLCP*10) / 10,
-		"avg_cls":          math.Round(mobileAvgCLS*1000) / 1000,
-		"pages_tested":     len(mobileEntries),
+		"avg_fcp_ms":       nil,
+		"avg_lcp_ms":       nil,
+		"avg_cls":          nil,
+		"pages_attempted":  len(mobileEntries),
+		"pages_tested":     mobileMeasuredCount,
+		"pages_measured":   mobileMeasuredCount,
 		"individual_pages": mobileIndividualScores,
+	}
+	if mobileMeasuredCount > 0 {
+		mobileSummaryMeta["avg_fcp_ms"] = math.Round(mobileAvgFCP.(float64)*10) / 10
+		mobileSummaryMeta["avg_lcp_ms"] = math.Round(mobileAvgLCP.(float64)*10) / 10
+		mobileSummaryMeta["avg_cls"] = math.Round(mobileAvgCLS.(float64)*1000) / 1000
 	}
 	if err := db.UpdateSEOKPIExtended(scanID, map[string]interface{}{"mobile_summary": mobileSummaryMeta}); err != nil {
 		log.Printf("⚠ mobile_summary update failed: %v", err)

@@ -19,8 +19,10 @@ import (
 )
 
 type CookieConsent struct {
-	Detected bool   `json:"detected"`
-	Provider string `json:"provider,omitempty"`
+	Detected        bool    `json:"detected"`
+	Provider        string  `json:"provider,omitempty"`
+	Confidence      float64 `json:"confidence,omitempty"`
+	DetectionMethod string  `json:"detection_method,omitempty"`
 }
 
 type PrivacyLink struct {
@@ -643,12 +645,22 @@ func AnalyzeWithBaseURL(baseURL string, html string) PrivacyResult {
 	for provider, sigs := range cmpSignatures {
 		for _, sig := range sigs {
 			if strings.Contains(htmlLower, strings.ToLower(sig)) {
-				result.CookieConsent = CookieConsent{Detected: true, Provider: provider}
+				result.CookieConsent = CookieConsent{Detected: true, Provider: provider, Confidence: 0.6, DetectionMethod: "html_signature"}
 				break
 			}
 		}
 		if result.CookieConsent.Detected {
 			break
+		}
+	}
+	cmpDetected, cmpProvider, cmpConfidence := detectCMP(htmlLower, html)
+	result.CMPConfidence = cmpConfidence
+	if cmpDetected && (!result.CookieConsent.Detected || cmpConfidence > result.CookieConsent.Confidence) {
+		result.CookieConsent = CookieConsent{
+			Detected:        true,
+			Provider:        cmpProvider,
+			Confidence:      cmpConfidence,
+			DetectionMethod: "multi_signal",
 		}
 	}
 
@@ -805,15 +817,6 @@ func AnalyzeWithBaseURL(baseURL string, html string) PrivacyResult {
 	// RGPDGaps lists every failed criterion so the result is defensible in
 	// compliance audits.
 	//
-	// Run multi-signal CMP detection to get the confidence score.
-	cmpDetected, cmpProvider, cmpConfidence := detectCMP(htmlLower, html)
-	result.CMPConfidence = cmpConfidence
-	// Back-fill CookieConsent from multi-signal detection if stronger than the
-	// legacy signature-only path that already ran above.
-	if cmpDetected && !result.CookieConsent.Detected {
-		result.CookieConsent = CookieConsent{Detected: true, Provider: cmpProvider}
-	}
-
 	// Third-party tracker detection: look for known analytics/ad script domains
 	// loaded without an active CMP consent signal.
 	hasThirdPartyTrackers := detectThirdPartyTrackers(html, cmpDetected)
