@@ -1,0 +1,11 @@
+# Graphify
+.graphify_*.json
+.graphify_*.txt
+.graphify_python
+graphify-out/
+
+# Pytest cache
+pytest-cache-files-*/
+
+# CLAUDE.md (generated)
+CLAUDE.md

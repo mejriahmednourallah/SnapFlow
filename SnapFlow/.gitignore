@@ -27,6 +27,9 @@ Thumbs.db
 .vscode/
 *.sublime-workspace
 
+# Graphify
+graphify-out/
+
 # Python
 __pycache__/
 *.py[cod]
