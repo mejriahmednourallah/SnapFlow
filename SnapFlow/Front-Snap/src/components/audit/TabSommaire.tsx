@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { getAxisScoreBreakdown, getScoreColor, type AuditAxis, type AuditReport } from '@/data/mockAuditData';
 import { AxisIcon } from '@/components/audit/AxisIcon';
 import { AxisDetailSheet } from '@/components/audit/AxisDetailSheet';
@@ -10,6 +10,7 @@ import { cn } from '@/lib/utils';
 
 interface TabSommaireProps {
   audit: AuditReport;
+  selectedAxisId?: string | null;
   onSelectAxis?: (axisId: string) => void;
 }
 
@@ -17,14 +18,27 @@ type ViewMode = 'list' | 'cards';
 
 // ─── Component ───────────────────────────────────────────────────────────────
 
-export function TabSommaire({ audit }: TabSommaireProps) {
+export function TabSommaire({ audit, selectedAxisId, onSelectAxis }: TabSommaireProps) {
   const [viewMode, setViewMode] = useState<ViewMode>('list');
   const [selectedAxis, setSelectedAxis] = useState<AuditAxis | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
 
+  // Auto-open sheet when trigger axis changes (from Resume tab)
+  useEffect(() => {
+    if (!selectedAxisId) return;
+    const axis = audit.axes.find(ax => ax.id === selectedAxisId);
+    if (axis) {
+      setSelectedAxis(axis);
+      setSheetOpen(true);
+      // Clear parent state so re-entering the tab doesn't re-open
+      onSelectAxis?.('');
+    }
+  }, [selectedAxisId, audit.axes]);
+
   const handleAxisClick = (axis: AuditAxis) => {
     setSelectedAxis(axis);
     setSheetOpen(true);
+    onSelectAxis?.(axis.id);
   };
 
   return (

@@ -843,8 +843,14 @@ function buildScannerAxesReport(
     axes,
     strategicSummary: `Audit basé sur ${allFindings.length} KPI (${passFindings.length} validés, ${failFindings.length} en échec, ${coverageFindings.length} non mesurés ou non disponibles).`,
     positivePoints: passFindings.slice(0, 6).map((f) => f.title),
-    negativePoints: failFindings.slice(0, 6).map((f) => f.title),
-    opportunities: recommendationFindings.slice(0, 6).map((f) => f.title),
+    negativePoints: failFindings
+      .filter((f) => f.criticality !== 'critical' && f.criticality !== 'high')
+      .slice(0, 6)
+      .map((f) => f.title),
+    opportunities: recommendationFindings
+      .filter((f) => f.criticality !== 'critical' && f.criticality !== 'high')
+      .slice(0, 6)
+      .map((f) => f.title),
     criticalPoints: criticalFindings.slice(0, 6).map((f) => f.title),
     pagesMeta: [],
     imagesToOptimize: [],
@@ -1364,8 +1370,14 @@ function buildStructuredReport(
     axes,
     strategicSummary: `L'audit a identifié ${summary?.total ?? failCount} élément(s) d'action, dont ${summary?.critical ?? 0} critique(s), ${summary?.high ?? 0} élevé(s) et ${passCount} KPI validé(s).`,
     positivePoints: passingKpis.slice(0, 6).map(item => item.label),
-    negativePoints: bugs.slice(0, 6).map(item => item.title),
-    opportunities: [...recommendations].slice(0, 6).map(item => item.title),
+    negativePoints: bugs
+      .filter(item => !/critical|high/i.test(item.severity))
+      .slice(0, 6)
+      .map(item => item.title),
+    opportunities: [...recommendations]
+      .filter(item => !/critical|high/i.test(item.severity))
+      .slice(0, 6)
+      .map(item => item.title),
     criticalPoints: criticalTitles,
     pagesMeta: [],
     imagesToOptimize: [],

@@ -371,7 +371,7 @@ const AuditReport = () => {
 
   const handleSelectAxis = (axisId: string) => {
     setSelectedAxisId(axisId);
-    setActiveTab('details');
+    setActiveTab('sommaire');
   };
 
   const handleExportPDF = async (theme?: import('@/components/pdf/pdfStyles').PdfTheme) => {
@@ -557,10 +557,11 @@ const AuditReport = () => {
             <TabResume
               audit={audit}
               isEditMode={isEditMode}
+              onSelectAxis={handleSelectAxis}
               onUpdateSummary={handleUpdateSummary}
             />
           </TabsContent>
-          <TabsContent value="sommaire"><TabSommaire audit={audit} onSelectAxis={handleSelectAxis} /></TabsContent>
+          <TabsContent value="sommaire"><TabSommaire audit={audit} selectedAxisId={selectedAxisId} onSelectAxis={handleSelectAxis} /></TabsContent>
           <TabsContent value="details">
             <TabDetails
               audit={audit}

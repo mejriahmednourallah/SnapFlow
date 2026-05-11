@@ -18,6 +18,7 @@ import {
 interface TabResumeProps {
   audit: AuditReport;
   isEditMode?: boolean;
+  onSelectAxis?: (axisId: string) => void;
   onUpdateSummary?: (payload: {
     strategicSummary: string;
     positivePoints: string[];
@@ -38,7 +39,7 @@ function multilineToList(value: string): string[] {
     .filter(Boolean);
 }
 
-export function TabResume({ audit, isEditMode = false, onUpdateSummary }: TabResumeProps) {
+export function TabResume({ audit, isEditMode = false, onSelectAxis, onUpdateSummary }: TabResumeProps) {
   const [summaryDialogOpen, setSummaryDialogOpen] = useState(false);
   const [strategicSummaryDraft, setStrategicSummaryDraft] = useState(audit.strategicSummary || '');
   const [positivePointsDraft, setPositivePointsDraft] = useState(listToMultiline(audit.positivePoints));
@@ -88,10 +89,10 @@ export function TabResume({ audit, isEditMode = false, onUpdateSummary }: TabRes
     : (audit.passingKpis?.slice(0, 6).map(item => item.label) ?? []);
   const topNegativePoints = audit.negativePoints.length > 0
     ? audit.negativePoints
-    : (audit.bugs?.slice(0, 6).map(item => item.title) ?? []);
+    : (audit.bugs?.filter(item => !/critical|high/i.test(item.severity)).slice(0, 6).map(item => item.title) ?? []);
   const topOpportunities = audit.opportunities.length > 0
     ? audit.opportunities
-    : ((audit.recommendations ?? []).slice(0, 6).map(item => item.title));
+    : ((audit.recommendations ?? []).filter(item => !/critical|high/i.test(item.severity)).slice(0, 6).map(item => item.title));
   const topCriticalPoints = audit.criticalPoints.length > 0
     ? audit.criticalPoints
     : ([...(audit.bugs ?? []), ...(audit.compliance ?? [])]
@@ -102,19 +103,18 @@ export function TabResume({ audit, isEditMode = false, onUpdateSummary }: TabRes
   return (
     <div className="space-y-6 fade-in">
       {/* Top KPIs */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <div className="glass-card p-6 flex flex-col items-center">
           <ScoreGauge score={globalScore} size={100} strokeWidth={7} />
           <p className="text-sm font-semibold mt-2">Score Global</p>
         </div>
         <div className="glass-card p-6">
-          <p className="text-sm text-muted-foreground mb-1">Maturité Digitale</p>
-          <p className="text-xl font-bold">{audit.maturityLevel}</p>
-          <CriticalityBadge level={audit.riskLevel} />
-        </div>
-        <div className="glass-card p-6">
           <p className="text-sm text-muted-foreground mb-1">Points analysés</p>
           <p className="text-3xl font-mono font-bold">{summary?.total ?? getTotalFindings(audit)}</p>
+        </div>
+        <div className="glass-card p-6">
+          <p className="text-sm text-muted-foreground mb-1">Bugs</p>
+          <p className="text-3xl font-mono font-bold text-red-400">{summary?.bugs ?? audit.bugs?.length ?? 0}</p>
         </div>
         <div className="glass-card p-6">
           <p className="text-sm text-muted-foreground mb-1">Points critiques</p>
@@ -122,26 +122,70 @@ export function TabResume({ audit, isEditMode = false, onUpdateSummary }: TabRes
         </div>
       </div>
 
-      {(summary || passingCount > 0 || recommendationCount > 0 || complianceCount > 0) && (
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          <div className="glass-card p-5">
-            <p className="text-sm text-muted-foreground mb-1">Bugs</p>
-            <p className="text-2xl font-mono font-bold text-red-400">{summary?.bugs ?? audit.bugs?.length ?? 0}</p>
-          </div>
-          <div className="glass-card p-5">
-            <p className="text-sm text-muted-foreground mb-1">Recommandations</p>
-            <p className="text-2xl font-mono font-bold text-primary">{recommendationCount}</p>
-          </div>
-          <div className="glass-card p-5">
-            <p className="text-sm text-muted-foreground mb-1">KPI validés</p>
-            <p className="text-2xl font-mono font-bold text-emerald-400">{passingCount}</p>
-          </div>
-          <div className="glass-card p-5">
-            <p className="text-sm text-muted-foreground mb-1">Conformité</p>
-            <p className="text-2xl font-mono font-bold text-yellow-400">{complianceCount}</p>
+      {/* Score par Axe (left) + Maturité Digitale card (right) */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        {/* Score par Axe — takes 2/3 */}
+        <div className="glass-card p-6 lg:col-span-2">
+          <h3 className="font-semibold mb-4">Score par Axe</h3>
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+            {audit.axes.map(ax => {
+              const breakdown = getAxisScoreBreakdown(ax);
+              return (
+                <button
+                  key={ax.id}
+                  onClick={() => onSelectAxis?.(ax.id)}
+                  className="flex items-center gap-3 p-3 rounded-lg bg-muted/30 hover:bg-muted/60 transition-colors text-left cursor-pointer"
+                >
+                  <AxisIcon id={ax.id} className="w-5 h-5 text-muted-foreground flex-shrink-0" />
+                  <div className="min-w-0">
+                    <p className={`font-mono font-bold text-sm ${getScoreColor(breakdown.scorePct)}`}>
+                      {breakdown.x}/{breakdown.y}
+                    </p>
+                    <p className="text-xs text-muted-foreground truncate">{ax.name}</p>
+                  </div>
+                </button>
+              );
+            })}
           </div>
         </div>
-      )}
+
+        {/* Maturité Digitale card — takes 1/3 */}
+        <div className="glass-card p-6 flex flex-col">
+          <h3 className="font-semibold mb-3">Maturité Digitale</h3>
+          <div className="flex-1 space-y-3">
+            <div className="text-center py-3">
+              <p className="text-2xl font-bold">{audit.maturityLevel}</p>
+              <div className="mt-1"><CriticalityBadge level={audit.riskLevel} /></div>
+            </div>
+            <div className="border-t border-border/50 pt-3 space-y-2">
+              <div className="flex justify-between items-center text-sm">
+                <span className="text-muted-foreground">Points analysés</span>
+                <span className="font-mono font-bold">{summary?.total ?? getTotalFindings(audit)}</span>
+              </div>
+              <div className="flex justify-between items-center text-sm">
+                <span className="text-muted-foreground">Points critiques</span>
+                <span className="font-mono font-bold text-red-400">{summary?.critical ?? getCriticalCount(audit)}</span>
+              </div>
+              <div className="flex justify-between items-center text-sm">
+                <span className="text-muted-foreground">Bugs</span>
+                <span className="font-mono font-bold text-red-400">{summary?.bugs ?? audit.bugs?.length ?? 0}</span>
+              </div>
+              <div className="flex justify-between items-center text-sm">
+                <span className="text-muted-foreground">Recommandations</span>
+                <span className="font-mono font-bold text-primary">{recommendationCount}</span>
+              </div>
+              <div className="flex justify-between items-center text-sm">
+                <span className="text-muted-foreground">KPI validés</span>
+                <span className="font-mono font-bold text-emerald-400">{passingCount}</span>
+              </div>
+              <div className="flex justify-between items-center text-sm">
+                <span className="text-muted-foreground">Conformité</span>
+                <span className="font-mono font-bold text-yellow-400">{complianceCount}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
 
       {/* Strategic summary */}
       <div className="glass-card p-6">
@@ -213,22 +257,6 @@ export function TabResume({ audit, isEditMode = false, onUpdateSummary }: TabRes
               </li>
             ))}
           </ul>
-        </div>
-      </div>
-
-      {/* Score per axis */}
-      <div className="glass-card p-6">
-        <h3 className="font-semibold mb-4">Score par Axe</h3>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          {audit.axes.map(ax => (
-            <div key={ax.id} className="flex items-center gap-3 p-3 rounded-lg bg-muted/30">
-              <AxisIcon id={ax.id} className="w-6 h-6 text-muted-foreground" />
-              <div>
-                <p className={`font-mono font-bold ${getScoreColor(getAxisScoreBreakdown(ax).scorePct)}`}>{getAxisScoreBreakdown(ax).x}/{getAxisScoreBreakdown(ax).y}</p>
-                <p className="text-xs text-muted-foreground">{ax.name}</p>
-              </div>
-            </div>
-          ))}
         </div>
       </div>
 

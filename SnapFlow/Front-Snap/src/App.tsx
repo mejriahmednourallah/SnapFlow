@@ -21,7 +21,9 @@ import WorkflowsPage from "./pages/WorkflowsPage";
 import FormTesterPage from "./pages/FormTesterPage";
 import FormTesterBuilderPage from "./pages/FormTesterBuilderPage";
 import FormTesterResultsPage from "./pages/FormTesterResultsPage";
-import ProjectDetail from "./pages/ProjectDetail";
+import ProjectShell from "./pages/project/ProjectShell";
+import ProjectFiche from "./pages/project/ProjectFiche";
+import ProjectAudits from "./pages/project/ProjectAudits";
 import ActivityReport from "./pages/ActivityReport";
 import AuditReport from "./pages/AuditReport";
 
@@ -43,8 +45,11 @@ const App = () => (
               <Route path="/app" element={<AppLayout />}>
                 <Route index element={<Overview />} />
                 <Route path="projects" element={<AdminProjects />} />
-                <Route path="projects/:id" element={<ProjectDetail />} />
-                <Route path="projects/:id/activity" element={<ActivityReport />} />
+                <Route path="projects/:id" element={<ProjectShell />}>
+                  <Route index element={<ProjectFiche />} />
+                  <Route path="audits" element={<ProjectAudits />} />
+                  <Route path="activity" element={<ActivityReport />} />
+                </Route>
                 <Route path="reports" element={<ReportsPage />} />
                 <Route path="schedules" element={<ReportSchedules />} />
                 <Route path="notifications" element={<NotificationsPage />} />

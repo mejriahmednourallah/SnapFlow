@@ -141,6 +141,12 @@ export async function archiveAudit(auditId: string): Promise<void> {
   if (error) throw error;
 }
 
+/** Permanently delete an audit row. */
+export async function deleteAudit(auditId: string): Promise<void> {
+  const { error } = await supabase.from('audits').delete().eq('id', auditId);
+  if (error) throw error;
+}
+
 /** Persist manual report edits for an existing audit row. */
 export async function updateAuditReportData(auditId: string, reportData: AuditReport): Promise<void> {
   const { error } = await supabase
