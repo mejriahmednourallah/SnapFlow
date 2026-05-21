@@ -55,6 +55,16 @@ export const TabTickets = ({ audit, projectUrl, projectId }: Props) => {
       axis.findings.forEach(f => {
         // Passing KPIs and coverage-only items are informational — never generate tickets
         if (f.status === 'pass' || f.origin === 'passing_kpi' || f.origin === 'coverage') return;
+        // Per contract: action plan only includes Non concluant + Bug/Recommandation
+        if (f.status !== 'fail') return;
+        if (f.kpiLabels) {
+          const isActionable =
+            f.kpiLabels.statut === 'Non concluant' &&
+            (f.kpiLabels.typeLabel === 'Bug' || f.kpiLabels.typeLabel === 'Recommandation');
+          if (!isActionable) return;
+        } else if (f.type !== 'bug' && f.type !== 'recommendation') {
+          return;
+        }
         items.push({
           findingId: `${axis.id}_${f.id}`,
           axisName: axis.name,

@@ -9,6 +9,13 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function jsonResponse(payload: Record<string, unknown>, status = 200): Response {
+  return new Response(JSON.stringify(payload), {
+    status,
+    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+  });
+}
+
 async function fetchWithRetry(
   url: string,
   init: RequestInit,
@@ -82,8 +89,8 @@ Deno.serve(async (req) => {
     }
 
     const requestTimeoutMs = Number(Deno.env.get('SCANNER_POLL_TIMEOUT_MS') ?? '15000');
-    const statusAttempts = Number(Deno.env.get('SCANNER_POLL_STATUS_ATTEMPTS') ?? '10');
-    const resultAttempts = Number(Deno.env.get('SCANNER_POLL_RESULT_ATTEMPTS') ?? '10');
+    const statusAttempts = Number(Deno.env.get('SCANNER_POLL_STATUS_ATTEMPTS') ?? '2');
+    const resultAttempts = Number(Deno.env.get('SCANNER_POLL_RESULT_ATTEMPTS') ?? '1');
 
     const fetchOptions: RequestInit = {
       headers: {
@@ -100,22 +107,43 @@ Deno.serve(async (req) => {
     const statusRes = await fetchWithRetry(statusUrl, fetchOptions, 'status check', statusAttempts, requestTimeoutMs);
     if (!statusRes.ok) throw new Error(`Status check failed: ${statusRes.status}`);
     const statusData = await statusRes.json();
-    
-    const isDone = statusData.status === 'done' || statusData.status === 'complete';
-    
-    console.log(`[poll-audit-job] status: ${statusData.status} | isDone: ${isDone}`);
+    const upstreamStatus = String(statusData?.status ?? '').toLowerCase();
+
+    const isDone = upstreamStatus === 'done' || upstreamStatus === 'complete';
+    const isFailed = upstreamStatus === 'failed' || upstreamStatus === 'error';
+
+    console.log(`[poll-audit-job] status: ${upstreamStatus} | isDone: ${isDone}`);
+
+    if (isFailed) {
+      return jsonResponse({
+        status: 'error',
+        error: statusData?.error || 'Le scan a echoue cote backend',
+      });
+    }
 
     if (!isDone) {
-      return new Response(JSON.stringify({ status: statusData.status }), {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
+      return jsonResponse({ status: upstreamStatus || 'running' });
     }
 
     // 2. Status is done -> Fetch KPI payload (canonical scanner format)
     const kpisUrl = `${apiBaseUrl}/scan/${job_id}/kpis`;
     console.log(`[poll-audit-job] status done, fetching kpis payload...`);
 
-    const kpisRes = await fetchWithRetry(kpisUrl, fetchOptions, 'kpis fetch', resultAttempts, requestTimeoutMs);
+    let kpisRes: Response;
+    try {
+      kpisRes = await fetchWithRetry(kpisUrl, fetchOptions, 'kpis fetch', resultAttempts, requestTimeoutMs);
+    } catch (err) {
+      console.warn('[poll-audit-job] KPI payload not ready yet:', err);
+      return jsonResponse({
+        status: 'finalizing',
+        detail: err instanceof Error ? err.message : String(err),
+      });
+    }
+
+    if (kpisRes.status === 202) {
+      const detail = await kpisRes.text().catch(() => '');
+      return jsonResponse({ status: 'finalizing', detail });
+    }
     if (!kpisRes.ok) throw new Error(`KPI fetch failed: ${kpisRes.status}`);
     const kpisData = await kpisRes.json();
 
@@ -124,9 +152,7 @@ Deno.serve(async (req) => {
       scan_id: kpisData?.scan_id ?? job_id,
     };
 
-    return new Response(JSON.stringify({ status: 'done', result: normalizedResponse }), {
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    });
+    return jsonResponse({ status: 'done', result: normalizedResponse });
 
   } catch (err) {
     console.error('[poll-audit-job] Error:', err);

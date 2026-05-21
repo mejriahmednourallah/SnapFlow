@@ -16,14 +16,13 @@ interface AnnexePageProps {
 
 function findingStatus(status: string) {
   if (status === 'pass') return 'success' as const;
-  if (status === 'not_measured' || status === 'not_evaluated') return 'warning' as const;
+  if (status === 'not_measured' || status === 'not_evaluated' || status === 'not_available') return 'warning' as const;
   return 'danger' as const;
 }
 
 function findingBadgeLabel(finding: AuditFindingItem) {
   if (finding.status === 'pass') return 'OK';
-  if (finding.status === 'not_available') return 'NON DISPONIBLE';
-  if (finding.status === 'not_measured' || finding.status === 'not_evaluated') return 'NON MESURÉ';
+  if (finding.status === 'not_available' || finding.status === 'not_measured' || finding.status === 'not_evaluated') return 'NON TESTÉ';
   return finding.type === 'bug' ? 'ANOMALIE' : 'RECO';
 }
 

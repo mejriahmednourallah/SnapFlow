@@ -390,13 +390,34 @@ async def browser_compat(req: BrowserCompatRequest):
 
     diff_result = compute_diff(img_chromium, img_webkit, coverage_mode="viewport_only")
     diff_pct = diff_result["diff_pct"]
+    passed = diff_pct <= threshold
+    browser_matrix = [
+        {
+            "browser": "chromium",
+            "device": "desktop",
+            "url": req.url,
+            "status": "captured",
+            "issue": "",
+            "diff_pct": diff_pct,
+        },
+        {
+            "browser": "webkit",
+            "device": "desktop",
+            "url": req.url,
+            "status": "captured",
+            "issue": "" if passed else "diff_above_threshold",
+            "diff_pct": diff_pct,
+        },
+    ]
     return {
         "url": req.url,
         "status": "evaluated",
         "diff_pct": diff_pct,
         "threshold_pct": threshold,
-        "passed": diff_pct <= threshold,
+        "passed": passed,
         "engines": ["chromium", "webkit"],
+        "browser_matrix": browser_matrix,
+        "rows": browser_matrix,
         # Structural / coverage metadata from the enhanced comparator.
         "layout_size_change": diff_result["layout_size_change"],
         "size_delta": diff_result["size_delta"],

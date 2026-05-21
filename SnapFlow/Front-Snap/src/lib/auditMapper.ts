@@ -1,4 +1,4 @@
-import { getAxisScoreBreakdown, getRiskLevelFromScore } from '@/data/mockAuditData';
+import { getAxisScoreBreakdown, getRiskLevelFromScore, isNonTestedStatus } from '@/data/mockAuditData';
 import type {
   AuditActionItem,
   AuditCoverageItem,
@@ -13,6 +13,10 @@ import type {
   FindingOrigin,
   Priority,
   KpiItem,
+  KpiLabels,
+  KpiStatut,
+  KpiTypeLabel,
+  KpiPriorite,
 } from '@/data/mockAuditData';
 
 export interface ApiResponse {
@@ -20,10 +24,15 @@ export interface ApiResponse {
   scan_id: string;
   domain: string;
   axes?: Record<string, Record<string, any>>;
+  top_level_kpis?: Record<string, unknown>;
   domain_analysis?: any;
   site_metrics?: any;
   issues?: any;
-  summary?: AuditSummary;
+  summary?: AuditSummary & {
+    delivery_overview?: Record<string, unknown>;
+    client_overview?: Record<string, unknown>;
+    risk_breakdown?: Record<string, unknown>;
+  };
   quick_wins?: AuditActionItem[];
   bugs?: AuditActionItem[];
   recommendations?: AuditActionItem[];
@@ -33,6 +42,456 @@ export interface ApiResponse {
   passing_kpis?: AuditPassingKpi[];
   kpis?: KpiItem[];
   generated_at?: string;
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// KPI Display Label Contracts
+// ────────────────────────────────────────────────────────────────────────────
+
+/* Canonical triplet helpers */
+const OK_DEFAULT:  KpiLabels = { statut: 'Concluant',    typeLabel: 'Conforme',        priorite: 'Normale'  };
+const NT_DEFAULT:  KpiLabels = { statut: 'Non testé',    typeLabel: 'Indéterminé',     priorite: 'Normale'   };
+
+const KO_BUG_MAJ:  KpiLabels = { statut: 'Non concluant', typeLabel: 'Bug',             priorite: 'Majeure'   };
+const KO_BUG_MIN:  KpiLabels = { statut: 'Non concluant', typeLabel: 'Bug',             priorite: 'Mineure'   };
+const KO_RECO_MAJ: KpiLabels = { statut: 'Non concluant', typeLabel: 'Recommandation',  priorite: 'Majeure'   };
+const KO_RECO_MIN: KpiLabels = { statut: 'Non concluant', typeLabel: 'Recommandation',  priorite: 'Mineure'   };
+const KO_NA:       KpiLabels = { statut: 'Non concluant', typeLabel: 'Non applicable',  priorite: 'Normale'   };
+
+/**
+ * Helper: return Bug/Majeure for critical/high severity, Recommandation/Mineure otherwise.
+ */
+function koBugOrReco(severity: string | null | undefined): KpiLabels {
+  const sev = String(severity ?? '').toLowerCase();
+  if (sev === 'critical' || sev === 'high') return KO_BUG_MAJ;
+  return KO_RECO_MIN;
+}
+
+/**
+ * Helper: return Bug/Majeure for critical/high, Bug/Mineure for medium, Recommandation/Mineure for low.
+ */
+function koBugSeverity(severity: string | null | undefined): KpiLabels {
+  const sev = String(severity ?? '').toLowerCase();
+  if (sev === 'critical' || sev === 'high') return KO_BUG_MAJ;
+  if (sev === 'medium') return KO_BUG_MIN;
+  return KO_RECO_MIN;
+}
+
+/**
+ * KPI-specific override rules.
+ * Each entry maps the canonical KPI ID to a resolver that returns KpiLabels
+ * based on the raw backend status and severity.
+ * Unlisted KPIs fall through to the default logic in resolveKpiLabels().
+ */
+const KPI_LABEL_RULES: Record<string, (status: string, severity: string | null | undefined, data: any) => KpiLabels | null> = {
+  // ── Technique ─────────────────────────────────────────────────────────
+  tech_cms_version(rawStatus, severity) {
+    if (rawStatus === 'passing') return OK_DEFAULT;
+    if (isNonTestedStatus(rawStatus)) return NT_DEFAULT;
+    const sev = String(severity ?? '').toLowerCase();
+    if (sev === 'critical' || sev === 'high') return KO_BUG_MAJ;
+    return KO_RECO_MIN; // outdated only
+  },
+  tech_modules_versions(rawStatus, severity) {
+    if (rawStatus === 'passing') return OK_DEFAULT;
+    if (isNonTestedStatus(rawStatus)) return NT_DEFAULT;
+    const sev = String(severity ?? '').toLowerCase();
+    if (sev === 'critical' || sev === 'high') return KO_BUG_MAJ;  // CVE confirmed
+    return KO_RECO_MIN; // outdated only
+  },
+  tech_server_version(rawStatus, severity) {
+    if (rawStatus === 'passing') return OK_DEFAULT;
+    if (isNonTestedStatus(rawStatus)) return NT_DEFAULT;
+    const sev = String(severity ?? '').toLowerCase();
+    if (sev === 'critical' || sev === 'high') return KO_BUG_MAJ;  // EOL
+    return KO_RECO_MIN; // exposed but current
+  },
+  tech_programming_language(rawStatus, severity) {
+    if (rawStatus === 'passing') return OK_DEFAULT;
+    if (isNonTestedStatus(rawStatus)) return NT_DEFAULT;
+    const sev = String(severity ?? '').toLowerCase();
+    if (sev === 'critical' || sev === 'high') return KO_BUG_MAJ;  // obsolete runtime
+    return KO_RECO_MIN;
+  },
+  tech_cve_check(rawStatus) {
+    if (rawStatus === 'passing') return OK_DEFAULT;
+    if (isNonTestedStatus(rawStatus)) return NT_DEFAULT;
+    return KO_BUG_MAJ; // confirmed high/critical CVE → always Bug/Majeure
+  },
+
+  // ── Sécurité ──────────────────────────────────────────────────────────
+  sec_ssl(rawStatus) {
+    if (rawStatus === 'passing') return OK_DEFAULT;
+    if (rawStatus === 'not_available') return NT_DEFAULT;
+    return KO_BUG_MAJ; // expired/invalid → always Bug/Majeure
+  },
+  sec_http_headers(rawStatus, severity) {
+    if (rawStatus === 'passing') return OK_DEFAULT;
+    if (rawStatus === 'not_available') return NT_DEFAULT;
+    const sev = String(severity ?? '').toLowerCase();
+    if (sev === 'critical' || sev === 'high') return KO_BUG_MAJ; // HSTS/CSP/XFO missing
+    return KO_RECO_MIN;
+  },
+  sec_session_cookies(rawStatus) {
+    if (rawStatus === 'passing') return OK_DEFAULT;
+    if (rawStatus === 'not_available') return NT_DEFAULT;
+    return KO_BUG_MAJ; // Secure/HttpOnly missing
+  },
+  sec_sqli_ddos(rawStatus) {
+    if (rawStatus === 'passing') return OK_DEFAULT;
+    if (rawStatus === 'not_available') return NT_DEFAULT;
+    return KO_BUG_MAJ; // confirmed vulnerable
+  },
+  sec_admin_exposed(rawStatus) {
+    if (rawStatus === 'passing') return OK_DEFAULT;
+    if (rawStatus === 'not_available') return NT_DEFAULT;
+    return KO_BUG_MAJ; // public admin confirmed
+  },
+  sec_sensitive_files(rawStatus) {
+    if (rawStatus === 'passing') return OK_DEFAULT;
+    if (rawStatus === 'not_available') return NT_DEFAULT;
+    return KO_BUG_MAJ; // secret/config/version found
+  },
+  sec_robots_disclosure(rawStatus, _severity, data) {
+    if (rawStatus === 'passing') return OK_DEFAULT;
+    if (rawStatus === 'not_available') return NT_DEFAULT;
+    // Check if sensitive custom paths were found
+    const hasSensitive = String(data?.has_sensitive_custom_paths ?? '').toLowerCase() === 'true'
+      || (Array.isArray(data?.exposed_paths) && data.exposed_paths.length > 0);
+    return hasSensitive ? KO_BUG_MAJ : KO_RECO_MIN;
+  },
+  sec_error_pages(rawStatus) {
+    if (rawStatus === 'passing') return OK_DEFAULT;
+    if (rawStatus === 'not_available') return NT_DEFAULT;
+    return KO_BUG_MAJ; // stack/path/token leak
+  },
+  sec_brute_force(rawStatus) {
+    if (rawStatus === 'passing') return OK_DEFAULT;
+    if (rawStatus === 'not_available') return NT_DEFAULT;
+    return KO_BUG_MAJ; // login tested with no limit/captcha/lockout
+  },
+  sec_file_upload(rawStatus) {
+    if (rawStatus === 'passing') return OK_DEFAULT;
+    if (rawStatus === 'not_available') return NT_DEFAULT;
+    return KO_BUG_MAJ; // dangerous extension accepted
+  },
+  sec_js_deps(rawStatus, severity) {
+    if (rawStatus === 'passing') return OK_DEFAULT;
+    if (rawStatus === 'not_available') return NT_DEFAULT;
+    const sev = String(severity ?? '').toLowerCase();
+    if (sev === 'critical' || sev === 'high') return KO_BUG_MAJ; // high CVE
+    return KO_RECO_MIN; // outdated only
+  },
+  sec_service_exposure(rawStatus) {
+    if (rawStatus === 'passing') return OK_DEFAULT;
+    if (rawStatus === 'not_available') return NT_DEFAULT;
+    return KO_BUG_MAJ; // sensitive public port open
+  },
+
+  // ── Fonctionnel ───────────────────────────────────────────────────────
+  func_forms(rawStatus) {
+    if (rawStatus === 'passing') return OK_DEFAULT;
+    if (rawStatus === 'not_available') return NT_DEFAULT;
+    return KO_BUG_MAJ; // tested form fails
+  },
+  func_links(rawStatus, severity) {
+    if (rawStatus === 'passing') return OK_DEFAULT;
+    if (rawStatus === 'not_available') return NT_DEFAULT;
+    const sev = String(severity ?? '').toLowerCase();
+    if (sev === 'critical' || sev === 'high') return KO_BUG_MAJ; // conversion link broken
+    return KO_BUG_MIN; // other broken links
+  },
+  func_buttons(rawStatus, severity) {
+    if (rawStatus === 'passing') return OK_DEFAULT;
+    if (rawStatus === 'not_available') return NT_DEFAULT;
+    const sev = String(severity ?? '').toLowerCase();
+    if (sev === 'critical' || sev === 'high') return KO_BUG_MAJ; // CTA broken
+    return KO_BUG_MIN; // other buttons
+  },
+  func_features(rawStatus) {
+    if (rawStatus === 'passing') return OK_DEFAULT;
+    if (rawStatus === 'not_available') return NT_DEFAULT;
+    return KO_RECO_MIN; // expected feature missing
+  },
+  func_search(rawStatus) {
+    if (rawStatus === 'passing') return OK_DEFAULT;
+    if (rawStatus === 'not_available') return NT_DEFAULT;
+    return KO_RECO_MIN; // search empty/broken
+  },
+
+  // ── Performance ───────────────────────────────────────────────────────
+  perf_cache(rawStatus) {
+    if (rawStatus === 'passing') return OK_DEFAULT;
+    if (rawStatus === 'not_available') return NT_DEFAULT;
+    return KO_RECO_MIN; // no-cache/private/no-store
+  },
+  perf_compression(rawStatus) {
+    if (rawStatus === 'passing') return OK_DEFAULT;
+    if (rawStatus === 'not_available') return NT_DEFAULT;
+    return KO_RECO_MIN; // no gzip/br/brotli
+  },
+  perf_desktop_speed(rawStatus, severity) {
+    if (rawStatus === 'passing') return OK_DEFAULT;
+    if (rawStatus === 'not_available') return NT_DEFAULT;
+    const sev = String(severity ?? '').toLowerCase();
+    if (sev === 'critical') return KO_RECO_MAJ; // extreme slow confirmed
+    return KO_RECO_MIN;
+  },
+  perf_mobile_speed(rawStatus) {
+    if (rawStatus === 'passing') return OK_DEFAULT;
+    if (rawStatus === 'not_available') return NT_DEFAULT;
+    return KO_RECO_MIN; // measured slow
+  },
+  perf_image_optim(rawStatus) {
+    if (rawStatus === 'passing') return OK_DEFAULT;
+    if (rawStatus === 'not_available') return NT_DEFAULT;
+    return KO_RECO_MIN; // heavy images
+  },
+  perf_console_errors(rawStatus, severity) {
+    if (rawStatus === 'passing') return OK_DEFAULT;
+    if (rawStatus === 'not_available') return NT_DEFAULT;
+    const sev = String(severity ?? '').toLowerCase();
+    if (sev === 'critical' || sev === 'high') return KO_BUG_MAJ; // feature-breaking
+    return KO_BUG_MIN; // isolated console error
+  },
+
+  // ── SEO ───────────────────────────────────────────────────────────────
+  seo_alt_tags(rawStatus) {
+    if (rawStatus === 'passing') return OK_DEFAULT;
+    if (rawStatus === 'not_available') return NT_DEFAULT;
+    return KO_RECO_MIN;
+  },
+  seo_meta_tags(rawStatus) {
+    if (rawStatus === 'passing') return OK_DEFAULT;
+    if (rawStatus === 'not_available') return NT_DEFAULT;
+    return KO_RECO_MIN;
+  },
+  seo_sitemap(rawStatus) {
+    if (rawStatus === 'passing') return OK_DEFAULT;
+    if (rawStatus === 'not_available') return NT_DEFAULT;
+    return KO_RECO_MIN;
+  },
+  seo_robots_txt(rawStatus) {
+    if (rawStatus === 'passing') return OK_DEFAULT;
+    if (rawStatus === 'not_available') return NT_DEFAULT;
+    return KO_RECO_MIN;
+  },
+  seo_duplication(rawStatus) {
+    if (rawStatus === 'passing') return OK_DEFAULT;
+    if (rawStatus === 'not_available') return NT_DEFAULT;
+    return KO_RECO_MIN;
+  },
+  seo_multi_browser(rawStatus) {
+    if (rawStatus === 'passing') return OK_DEFAULT;
+    if (rawStatus === 'not_available') return NT_DEFAULT;
+    return KO_RECO_MIN;
+  },
+  seo_url_structure(rawStatus) {
+    if (rawStatus === 'passing') return OK_DEFAULT;
+    if (rawStatus === 'not_available') return NT_DEFAULT;
+    return KO_RECO_MIN;
+  },
+  seo_heading_structure(rawStatus) {
+    if (rawStatus === 'passing') return OK_DEFAULT;
+    if (rawStatus === 'not_available') return NT_DEFAULT;
+    return KO_RECO_MIN;
+  },
+  seo_internal_linking(rawStatus) {
+    if (rawStatus === 'passing') return OK_DEFAULT;
+    if (rawStatus === 'not_available') return NT_DEFAULT;
+    return KO_RECO_MIN;
+  },
+  seo_external_linking(rawStatus) {
+    if (rawStatus === 'passing') return OK_DEFAULT;
+    if (rawStatus === 'not_available') return NT_DEFAULT;
+    return KO_RECO_MIN;
+  },
+  seo_h1_quality(rawStatus) {
+    if (rawStatus === 'passing') return OK_DEFAULT;
+    if (rawStatus === 'not_available') return NT_DEFAULT;
+    return KO_RECO_MIN;
+  },
+  seo_meta_nlp(rawStatus) {
+    if (rawStatus === 'passing') return OK_DEFAULT;
+    if (rawStatus === 'not_available') return NT_DEFAULT;
+    return KO_RECO_MIN;
+  },
+  seo_ai_readiness(rawStatus) {
+    if (rawStatus === 'passing') return OK_DEFAULT;
+    if (rawStatus === 'not_available') return NT_DEFAULT;
+    return KO_RECO_MIN;
+  },
+
+  // ── UX/UI ─────────────────────────────────────────────────────────────
+  ux_audience_targeting(rawStatus) {
+    if (rawStatus === 'passing') return OK_DEFAULT;
+    if (rawStatus === 'not_available') return NT_DEFAULT;
+    return KO_RECO_MIN;
+  },
+  ux_social_sharing(rawStatus) {
+    if (rawStatus === 'passing') return OK_DEFAULT;
+    if (rawStatus === 'not_available') return NT_DEFAULT;
+    return KO_RECO_MIN;
+  },
+  ux_design_ergonomics(rawStatus, severity) {
+    if (rawStatus === 'passing') return OK_DEFAULT;
+    if (rawStatus === 'not_available') return NT_DEFAULT;
+    const sev = String(severity ?? '').toLowerCase();
+    if (sev === 'critical' || sev === 'high') return KO_BUG_MAJ; // layout blocks usage
+    return KO_RECO_MIN;
+  },
+  ux_navigation(rawStatus, severity) {
+    if (rawStatus === 'passing') return OK_DEFAULT;
+    if (rawStatus === 'not_available') return NT_DEFAULT;
+    const sev = String(severity ?? '').toLowerCase();
+    if (sev === 'critical' || sev === 'high') return KO_BUG_MAJ; // path blocked
+    return KO_RECO_MIN; // confusing
+  },
+  ux_mobile_friendly(rawStatus) {
+    if (rawStatus === 'passing') return OK_DEFAULT;
+    if (rawStatus === 'not_available') return NT_DEFAULT;
+    return KO_RECO_MAJ; // severe mobile usability issue
+  },
+
+  // ── Contenu ───────────────────────────────────────────────────────────
+  content_freshness(rawStatus) {
+    if (rawStatus === 'passing') return OK_DEFAULT;
+    if (rawStatus === 'not_available') return NT_DEFAULT;
+    return KO_RECO_MIN;
+  },
+  content_thin(rawStatus) {
+    if (rawStatus === 'passing') return OK_DEFAULT;
+    if (rawStatus === 'not_available') return NT_DEFAULT;
+    return KO_RECO_MIN;
+  },
+  content_key_pages(rawStatus) {
+    if (rawStatus === 'passing') return OK_DEFAULT;
+    if (rawStatus === 'not_available') return NT_DEFAULT;
+    return KO_RECO_MIN;
+  },
+  content_cannibalization(rawStatus) {
+    if (rawStatus === 'passing') return OK_DEFAULT;
+    if (rawStatus === 'not_available') return NT_DEFAULT;
+    return KO_RECO_MIN;
+  },
+  content_missing_cta(rawStatus, severity) {
+    if (rawStatus === 'passing') return OK_DEFAULT;
+    if (rawStatus === 'not_available') return NT_DEFAULT;
+    const sev = String(severity ?? '').toLowerCase();
+    if (sev === 'critical' || sev === 'high') return KO_BUG_MAJ; // conversion path blocked
+    return KO_RECO_MIN;
+  },
+  content_broken_structure(rawStatus) {
+    if (rawStatus === 'passing') return OK_DEFAULT;
+    if (rawStatus === 'not_available') return NT_DEFAULT;
+    return KO_RECO_MIN;
+  },
+  content_lexical_diversity(rawStatus) {
+    if (rawStatus === 'passing') return OK_DEFAULT;
+    if (rawStatus === 'not_available') return NT_DEFAULT;
+    return KO_RECO_MIN;
+  },
+
+  // ── Eco Index ─────────────────────────────────────────────────────────
+  eco_index_score(rawStatus) {
+    if (rawStatus === 'passing') return OK_DEFAULT;
+    if (rawStatus === 'not_available') return NT_DEFAULT;
+    return KO_RECO_MIN; // measured low score
+  },
+
+  // ── RGPD ──────────────────────────────────────────────────────────────
+  rgpd_cookie_consent(rawStatus) {
+    if (rawStatus === 'passing') return OK_DEFAULT;
+    if (rawStatus === 'not_available') return NT_DEFAULT;
+    return KO_BUG_MAJ; // trackers before consent
+  },
+  rgpd_privacy_policy(rawStatus) {
+    if (rawStatus === 'passing') return OK_DEFAULT;
+    if (rawStatus === 'not_available') return NT_DEFAULT;
+    return KO_BUG_MAJ; // policy absent
+  },
+  rgpd_data_retention(rawStatus) {
+    if (rawStatus === 'passing') return OK_DEFAULT;
+    if (rawStatus === 'not_available') return NT_DEFAULT;
+    return KO_BUG_MAJ;
+  },
+  rgpd_minimization(rawStatus) {
+    if (rawStatus === 'passing') return OK_DEFAULT;
+    if (rawStatus === 'not_available') return NT_DEFAULT;
+    return KO_BUG_MAJ;
+  },
+  rgpd_legal_notice(rawStatus) {
+    if (rawStatus === 'passing') return OK_DEFAULT;
+    if (rawStatus === 'not_available') return NT_DEFAULT;
+    return KO_BUG_MAJ;
+  },
+  rgpd_user_rights(rawStatus) {
+    if (rawStatus === 'passing') return OK_DEFAULT;
+    if (rawStatus === 'not_available') return NT_DEFAULT;
+    return KO_BUG_MAJ;
+  },
+  rgpd_declared_purpose(rawStatus) {
+    if (rawStatus === 'passing') return OK_DEFAULT;
+    if (rawStatus === 'not_available') return NT_DEFAULT;
+    return KO_BUG_MAJ;
+  },
+  rgpd_rights_coverage(rawStatus) {
+    if (rawStatus === 'passing') return OK_DEFAULT;
+    if (rawStatus === 'not_available') return NT_DEFAULT;
+    return KO_BUG_MAJ;
+  },
+  rgpd_pre_consent_trackers(rawStatus) {
+    if (rawStatus === 'passing') return OK_DEFAULT;
+    if (rawStatus === 'not_available') return NT_DEFAULT;
+    return KO_BUG_MAJ; // tracker loaded before consent
+  },
+  rgpd_privacy_score(rawStatus) {
+    if (rawStatus === 'passing') return OK_DEFAULT;
+    if (rawStatus === 'not_available') return NT_DEFAULT;
+    return KO_RECO_MIN; // measured low policy score
+  },
+  rgpd_policy_score(rawStatus) {
+    return KPI_LABEL_RULES.rgpd_privacy_score(rawStatus, null, null);
+  },
+};
+
+/**
+ * Resolve the French display labels (statut, typeLabel, priorite) for a KPI.
+ *
+ * Uses the per-KPI rule table when the KPI ID is known, then falls back to
+ * a generic default that matches the plan's contract rules.
+ */
+function resolveKpiLabels(
+  kpiId: string,
+  rawStatus: string | undefined | null,
+  severity: string | null | undefined,
+  data: any,
+): KpiLabels {
+  const status = String(rawStatus ?? '').toLowerCase();
+
+  // Status wins over type: non-tested KPIs are informational, not bugs/recommendations.
+  if (isNonTestedStatus(status)) {
+    return NT_DEFAULT;
+  }
+
+  // Check for passing
+  if (status === 'passing' || status === 'pass' || status === 'covered') {
+    return OK_DEFAULT;
+  }
+
+  // For failing/warning, look up per-KPI rule
+  const normalizedKpiId = kpiId.replace(/[^a-z0-9_]/g, '').toLowerCase();
+  const rule = KPI_LABEL_RULES[normalizedKpiId];
+  if (rule) {
+    const result = rule(normalizedKpiId, severity, data);
+    if (result) return result;
+  }
+
+  // Default fallback for unknown KPIs
+  if (status === 'warning') {
+    return KO_RECO_MIN; // warnings → Recommandation/Mineure
+  }
+  return koBugOrReco(severity); // failing → severity-dependent
 }
 
 type AxisBucketKey = keyof typeof AXIS_META;
@@ -217,7 +676,7 @@ function normalizeFindingStatus(statusRaw: unknown): FindingStatus {
   if (status === 'failing' || status === 'fail' || status === 'failed') return 'fail';
   if (status === 'warning') return 'fail';
   if (status === 'not_available' || status === 'not-available') return 'not_available';
-  if (status === 'not_evaluated') return 'not_evaluated';
+  if (status === 'not_evaluated' || status === 'not-evaluated' || status === 'non_evalue' || status === 'non-evalue') return 'not_evaluated';
   if (status === 'not_measured' || status === 'not-measured') return 'not_measured';
   return 'not_measured';
 }
@@ -267,6 +726,8 @@ function formatEvidenceScalar(value: unknown): string {
 function sanitizeEvidenceLine(line: string): string {
   const normalized = String(line ?? '').replace(/\s+/g, ' ').trim();
   if (!normalized) return '';
+  if (/^(VALID|PARTIAL|MISSING)$/i.test(normalized)) return '';
+  if (/^(data quality|quality|status|passed|sampled|source|detection source)\s*:/i.test(normalized)) return '';
 
   const looksLikeJson =
     normalized.startsWith('{') ||
@@ -275,10 +736,47 @@ function sanitizeEvidenceLine(line: string): string {
     normalized.includes('"') && normalized.includes('{');
 
   if (looksLikeJson) {
-    return 'Donnee structuree disponible dans le detail.';
+    return 'Donnee technique structuree disponible dans les details bruts.';
   }
 
-  return normalized;
+  return normalized
+    .replace(/\bevidence\./gi, '')
+    .replace(/\bmetrics\./gi, '')
+    .replace(/\banomalie\b/gi, 'signal')
+    .replace(/\banomalies\b/gi, 'signaux');
+}
+
+function humanizeEvidenceLabel(label: string): string {
+  const normalized = String(label ?? '')
+    .replace(/^(evidence|metrics)\.?/i, '')
+    .replace(/\./g, ' ')
+    .replace(/_/g, ' ')
+    .trim();
+
+  const known: Record<string, string> = {
+    url: 'URL',
+    urls: 'URLs',
+    page_url: 'Page',
+    source_page: 'Page source',
+    target_url: 'URL cible',
+    status_code: 'Code HTTP',
+    content_encoding: 'Content-Encoding',
+    cache_control: 'Cache-Control',
+    detected_version: 'Version detectee',
+    detected_product: 'Produit detecte',
+    support_status: 'Statut de support',
+    measurement_status: 'Statut de mesure',
+    affected_pages: 'Pages concernees',
+    affected_page_urls_all: 'URLs concernees',
+    observed_metrics: 'Mesures observees',
+    anomalies_count: 'Signaux detectes',
+    anomalies_by_type: 'Signaux par type',
+    suppressed_low_confidence_anomalies: 'Signaux faibles ignores',
+    anomaly_reason: 'Raison du signal',
+    anomaly: 'Signal',
+  };
+
+  return known[normalized] ?? normalized.replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
 function toStringList(value: unknown): string[] {
@@ -308,11 +806,27 @@ function toStringList(value: unknown): string[] {
 }
 
 function toEvidenceLines(prefix: string, value: unknown): string[] {
+  const labelPrefix = humanizeEvidenceLabel(prefix);
+  const rawKey = String(prefix ?? '').split('.').pop()?.toLowerCase() ?? '';
+
+  if ([
+    'data_quality',
+    'quality',
+    'status',
+    'passed',
+    'sampled',
+    'detection_source',
+    'source',
+    'observed_metrics',
+  ].includes(rawKey)) {
+    return [];
+  }
+
   if (value === null || value === undefined) return [];
 
   if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
     const rendered = String(value).trim();
-    return rendered ? [`${prefix}: ${rendered}`] : [];
+    return rendered ? [`${labelPrefix}: ${rendered}`] : [];
   }
 
   if (Array.isArray(value)) {
@@ -323,7 +837,7 @@ function toEvidenceLines(prefix: string, value: unknown): string[] {
       .slice(0, 8);
 
     if (primitiveItems.length > 0) {
-      return [`${prefix}: ${primitiveItems.join(', ')}`];
+      return [`${labelPrefix}: ${primitiveItems.join(', ')}`];
     }
 
     const objectItems = value
@@ -363,8 +877,8 @@ function toEvidenceLines(prefix: string, value: unknown): string[] {
           .filter(Boolean)
           .join(' | ');
 
-        if (compact) return `${prefix}: ${compact}`;
-        return `${prefix}: donnee structuree disponible dans le detail`;
+        if (compact) return `${labelPrefix}: ${compact}`;
+        return `${labelPrefix}: donnee technique structuree disponible dans les details bruts`;
       })
       .filter(Boolean);
 
@@ -373,7 +887,7 @@ function toEvidenceLines(prefix: string, value: unknown): string[] {
 
   if (typeof value === 'object') {
     if (isRecord(value) && value.status === 'MISSING' && typeof value.reason === 'string') {
-      return [`${prefix}: MISSING - ${value.reason}`];
+      return [`${labelPrefix}: non teste - ${value.reason}`];
     }
 
     const entries = Object.entries(value as Record<string, unknown>)
@@ -450,8 +964,17 @@ function extractDigestSummary(kpiNode: any): string[] {
   const digest = isRecord(kpiNode?.evidence_digest) ? kpiNode.evidence_digest : {};
   const lines: string[] = [];
 
+  if (Array.isArray(digest.proof_lines) && digest.proof_lines.length > 0) {
+    digest.proof_lines
+      .map((item) => sanitizeEvidenceLine(String(item ?? '')))
+      .filter(Boolean)
+      .slice(0, 8)
+      .forEach((item) => lines.push(item));
+  }
+
   if (typeof digest.summary === 'string' && digest.summary.trim().length > 0) {
-    lines.push(sanitizeEvidenceLine(digest.summary));
+    const summary = sanitizeEvidenceLine(digest.summary);
+    if (summary && !lines.includes(summary)) lines.push(summary);
   }
 
   if (Array.isArray(digest.top_items) && digest.top_items.length > 0) {
@@ -489,6 +1012,52 @@ function extractDigestSummary(kpiNode: any): string[] {
   }
 
   return lines.filter(Boolean).slice(0, 6);
+}
+
+function hasCuratedDigest(kpiNode: any): boolean {
+  return isRecord(kpiNode?.evidence_digest);
+}
+
+function extractDigestRows(kpiNode: any): Record<string, string | number | boolean | null | undefined>[] {
+  const digest = isRecord(kpiNode?.evidence_digest) ? kpiNode.evidence_digest : {};
+  const rows = Array.isArray(digest.rows) ? digest.rows : [];
+  return rows
+    .filter((row): row is Record<string, string | number | boolean | null | undefined> => isRecord(row))
+    .slice(0, 200);
+}
+
+function extractDigestCsvRows(kpiNode: any): Record<string, string | number | boolean | null | undefined>[] {
+  const digest = isRecord(kpiNode?.evidence_digest) ? kpiNode.evidence_digest : {};
+  const rows = Array.isArray(digest.csv_rows) ? digest.csv_rows : Array.isArray(digest.rows) ? digest.rows : [];
+  return rows
+    .filter((row): row is Record<string, string | number | boolean | null | undefined> => isRecord(row))
+    .slice(0, 1000);
+}
+
+function extractDigestCsvColumns(kpiNode: any, rows: Record<string, unknown>[]): string[] {
+  const digest = isRecord(kpiNode?.evidence_digest) ? kpiNode.evidence_digest : {};
+  const columns = Array.isArray(digest.csv_columns)
+    ? digest.csv_columns.map((item) => String(item ?? '').trim()).filter(Boolean)
+    : [];
+  if (columns.length > 0) return columns;
+  const first = rows.find((row) => isRecord(row));
+  return first ? Object.keys(first) : [];
+}
+
+function extractDigestUrls(kpiNode: any): string[] {
+  const digest = isRecord(kpiNode?.evidence_digest) ? kpiNode.evidence_digest : {};
+  const urls = [
+    ...(Array.isArray(digest.urls) ? digest.urls : []),
+    ...(Array.isArray(digest.top_urls) ? digest.top_urls : []),
+  ];
+  return Array.from(new Set(urls.map((item) => String(item ?? '').trim()).filter(Boolean))).slice(0, 500);
+}
+
+function digestMissingReason(kpiNode: any): string | undefined {
+  const digest = isRecord(kpiNode?.evidence_digest) ? kpiNode.evidence_digest : {};
+  return typeof digest.missing_reason === 'string' && digest.missing_reason.trim()
+    ? digest.missing_reason.trim()
+    : undefined;
 }
 
 function toScannerSourceKpi(axisKey: AxisBucketKey, kpiName: string): string {
@@ -556,6 +1125,7 @@ function collectUrlsDeep(value: unknown, seen: Set<string>) {
 }
 
 function extractScannerKpiUrls(kpiNode: any): string[] {
+  const digestUrls = extractDigestUrls(kpiNode);
   const scopeUrls = Array.isArray(kpiNode?.scope?.pages_affected_urls)
     ? kpiNode.scope.pages_affected_urls
     : [];
@@ -573,6 +1143,7 @@ function extractScannerKpiUrls(kpiNode: any): string[] {
     : [];
 
   const all = [
+    ...toStringList(digestUrls),
     ...toStringList(scopeUrls),
     ...toStringList(legacyUrls),
     ...toStringList(samplePages),
@@ -654,6 +1225,7 @@ function extractScannerKpiEvidence(kpiNode: any, urls: string[]): string[] {
 }
 
 function normalizeScannerOrigin(axisKey: AxisBucketKey, status: FindingStatus, kpiNode: any): FindingOrigin {
+  if (isNonTestedStatus(status)) return 'coverage';
   const legacyOrigin = normalizeOrigin(kpiNode?.type);
   if (kpiNode?.type) return legacyOrigin;
   if (axisKey === 'RGPD') return 'RGPD';
@@ -664,12 +1236,27 @@ function normalizeScannerOrigin(axisKey: AxisBucketKey, status: FindingStatus, k
 }
 
 function buildFindingFromScannerKpi(axisKey: AxisBucketKey, kpiName: string, kpiNode: any): AuditFinding {
-  const status = normalizeFindingStatus(kpiNode?.status);
+  let status = normalizeFindingStatus(kpiNode?.status);
+  const curatedDigest = hasCuratedDigest(kpiNode);
+  const digestRows = extractDigestRows(kpiNode);
+  const digestCsvRows = extractDigestCsvRows(kpiNode);
+  const digestCsvColumns = extractDigestCsvColumns(kpiNode, digestCsvRows.length > 0 ? digestCsvRows : digestRows);
+  const digestReason = digestMissingReason(kpiNode);
+  if (
+    curatedDigest &&
+    String(kpiNode?.evidence_digest?.quality ?? '').toUpperCase() === 'MISSING' &&
+    digestRows.length === 0 &&
+    extractDigestSummary(kpiNode).length === 0 &&
+    extractDigestUrls(kpiNode).length === 0
+  ) {
+    status = 'not_evaluated';
+  }
+  const isNonTested = isNonTestedStatus(status);
   const origin = normalizeScannerOrigin(axisKey, status, kpiNode);
   const criticality = normalizeCriticality({ status, severity: kpiNode?.severity });
   const priority = normalizePriority({ status, severity: kpiNode?.severity, type: kpiNode?.type });
   const urls = extractScannerKpiUrls(kpiNode);
-  const evidence = extractScannerKpiEvidence(kpiNode, urls);
+  const evidence = curatedDigest ? [] : extractScannerKpiEvidence(kpiNode, urls);
   const digestSummary = extractDigestSummary(kpiNode);
   const recommendationDetails = extractScannerRecommendation(kpiNode, status);
   const impact = extractScannerKpiImpact(kpiNode);
@@ -678,11 +1265,15 @@ function buildFindingFromScannerKpi(axisKey: AxisBucketKey, kpiName: string, kpi
     : kpiName;
   const affectedCount = extractScannerKpiAffectedCount(kpiNode, urls);
 
-  const summaryEvidence = digestSummary.length > 0 ? digestSummary : evidence.slice(0, 8);
+  const summaryEvidence = curatedDigest
+    ? (digestSummary.length > 0 ? digestSummary : (digestReason ? [digestReason] : []))
+    : (digestSummary.length > 0 ? digestSummary : evidence.slice(0, 8));
 
   const type = status === 'pass'
     ? 'pass'
-    : origin === 'bug'
+    : isNonTested
+      ? 'recommendation'
+      : origin === 'bug'
       ? 'bug'
       : 'recommendation';
 
@@ -690,6 +1281,10 @@ function buildFindingFromScannerKpi(axisKey: AxisBucketKey, kpiName: string, kpi
     ? kpiNode.kpi_id
     : `${axisKey.toLowerCase()}-${kpiName.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`
   ).replace(/-+/g, '-');
+
+  // ── Resolve French display labels per the new KPI contract ────────────
+  const rawBackendStatus = String(kpiNode?.status ?? '').toLowerCase();
+  const kpiLabels = resolveKpiLabels(kpiId, rawBackendStatus, kpiNode?.severity, kpiNode?.data ?? kpiNode?.metrics ?? {});
 
   return {
     id: kpiId,
@@ -712,15 +1307,20 @@ function buildFindingFromScannerKpi(axisKey: AxisBucketKey, kpiName: string, kpi
         : toScannerSourceKpi(axisKey, kpiName)),
     affectedCount,
     exampleUrls: toStringList(urls).slice(0, 10),
-    evidence: summaryEvidence.slice(0, 20),
+    evidence: summaryEvidence.slice(0, 3),
     evidenceSummary: summaryEvidence,
-    evidenceRaw: {
-      digest: isRecord(kpiNode?.evidence_digest) ? kpiNode.evidence_digest : undefined,
-      evidence: isRecord(kpiNode?.evidence) ? kpiNode.evidence : undefined,
-      metrics: isRecord(kpiNode?.metrics) ? kpiNode.metrics : undefined,
-    },
+    evidenceRows: digestRows,
+    evidenceCsvColumns: digestCsvColumns,
+    evidenceCsvRows: digestCsvRows,
+    evidenceMissingReason: digestReason,
+    evidenceRaw: curatedDigest
+      ? {
+        digest: isRecord(kpiNode?.evidence_digest) ? kpiNode.evidence_digest : undefined,
+      }
+      : undefined,
     pageUrl: typeof urls?.[0] === 'string' ? urls[0] : undefined,
     page: typeof urls?.[0] === 'string' ? urls[0] : undefined,
+    kpiLabels, // ← new French display labels
   };
 }
 
@@ -796,24 +1396,50 @@ function buildScannerAxesReport(
   const allFindings = axes.flatMap((axis) => axis.findings);
   const passFindings = allFindings.filter((f) => f.status === 'pass');
   const failFindings = allFindings.filter((f) => f.status === 'fail');
-  const coverageFindings = allFindings.filter((f) => f.status === 'not_measured' || f.status === 'not_available' || f.status === 'not_evaluated');
+  const coverageFindings = allFindings.filter((f) => isNonTestedStatus(f.status) || f.origin === 'coverage');
   const complianceFindings = failFindings.filter((f) => f.origin === 'RGPD');
   const recommendationFindings = failFindings.filter((f) => f.origin !== 'RGPD' && f.type !== 'bug');
   const bugFindings = failFindings.filter((f) => f.type === 'bug');
   const criticalFindings = failFindings.filter((f) => f.criticality === 'critical' || f.criticality === 'high');
 
+  const backendTopLevel = isRecord(api.top_level_kpis) ? api.top_level_kpis : {};
+  const backendDelivery = isRecord(api.summary?.delivery_overview) ? api.summary.delivery_overview : {};
+  const backendClient = isRecord(api.summary?.client_overview) ? api.summary.client_overview : {};
+  const readBackendInt = (key: string): number | undefined => {
+    const value = backendTopLevel[key] ?? backendDelivery[key];
+    if (typeof value === 'number' && Number.isFinite(value)) return Math.trunc(value);
+    if (typeof value === 'string' && value.trim()) {
+      const parsed = Number(value);
+      if (Number.isFinite(parsed)) return Math.trunc(parsed);
+    }
+    return undefined;
+  };
+
   const total = passFindings.length + failFindings.length + coverageFindings.length;
-  const globalScore = total > 0 ? Math.round((passFindings.length / total) * 100) : 0;
+  const backendTotal = readBackendInt('total_kpis');
+  const backendPassed = readBackendInt('passed_kpis');
+  const backendCritical = readBackendInt('critical_kpis');
+  const backendHigh = readBackendInt('high_kpis');
+  const backendMedium = readBackendInt('medium_kpis');
+  const backendLow = readBackendInt('low_kpis');
+  const scoreTotal = backendTotal ?? total;
+  const scorePassed = backendPassed ?? passFindings.length;
+  const globalScore = scoreTotal > 0 ? Math.round((scorePassed / scoreTotal) * 100) : 0;
+  const backendHeadline = typeof backendTopLevel.headline === 'string' && backendTopLevel.headline.trim()
+    ? backendTopLevel.headline.trim()
+    : typeof backendClient.headline === 'string' && backendClient.headline.trim()
+      ? backendClient.headline.trim()
+      : '';
 
   const summary: AuditSummary = {
-    total,
+    total: backendTotal ?? total,
     bugs: bugFindings.length,
     recommendations: recommendationFindings.length,
     compliance: complianceFindings.length,
-    critical: failFindings.filter((f) => f.criticality === 'critical').length,
-    high: failFindings.filter((f) => f.criticality === 'high').length,
-    medium: failFindings.filter((f) => f.criticality === 'medium').length,
-    low: failFindings.filter((f) => f.criticality === 'low').length,
+    critical: backendCritical ?? failFindings.filter((f) => f.criticality === 'critical').length,
+    high: backendHigh ?? failFindings.filter((f) => f.criticality === 'high').length,
+    medium: backendMedium ?? failFindings.filter((f) => f.criticality === 'medium').length,
+    low: backendLow ?? failFindings.filter((f) => f.criticality === 'low').length,
   };
 
   const passingKpis: AuditPassingKpi[] = passFindings.map((f) => ({
@@ -841,7 +1467,7 @@ function buildScannerAxesReport(
     maturityLevel: globalScore >= 75 ? 'Avancé' : globalScore >= 50 ? 'Intermédiaire' : 'En développement',
     riskLevel: getRiskLevelFromScore(globalScore),
     axes,
-    strategicSummary: `Audit basé sur ${allFindings.length} KPI (${passFindings.length} validés, ${failFindings.length} en échec, ${coverageFindings.length} non mesurés ou non disponibles).`,
+    strategicSummary: backendHeadline || `Audit basé sur ${allFindings.length} KPI (${passFindings.length} validés, ${failFindings.length} en échec, ${coverageFindings.length} non mesurés ou non disponibles).`,
     positivePoints: passFindings.slice(0, 6).map((f) => f.title),
     negativePoints: failFindings
       .filter((f) => f.criticality !== 'critical' && f.criticality !== 'high')
@@ -883,21 +1509,21 @@ function createFinding(
 
   const isPass = status === 'pass';
   const isFail = status === 'fail';
-  const isNotMeasured = status === 'not_measured' || status === 'not_evaluated';
+  const isNotTested = isNonTestedStatus(status);
   const isNotAvailable = status === 'not_available';
 
   const description = isPass
     ? `Objectif réussi : ${descriptionStr}`
     : isFail
-      ? `Anomalie détectée : ${descriptionStr}`
+      ? `Bug ou recommandation détecté : ${descriptionStr}`
       : isNotAvailable
-        ? `KPI non disponible : ${descriptionStr}`
-        : `KPI non mesuré : ${descriptionStr}`;
+        ? `KPI non testé : ${descriptionStr}`
+        : `KPI non testé : ${descriptionStr}`;
 
   const inferPriority = (): Priority => {
     const normalized = `${title} ${descriptionStr}`.toLowerCase();
     if (isPass) return 'long-terme';
-    if (isNotAvailable || isNotMeasured) return 'moyen-terme';
+    if (isNotTested) return 'moyen-terme';
     if (/refonte|architecture|migration|multiplatform|mobile friendly/i.test(normalized)) return 'long-terme';
     if (/ux|ui|ergonomie|navigation|parcours|contenu|seo|maillage|conversion|design/i.test(normalized)) return 'moyen-terme';
     // VETO: No 'quick-win' assignments — fail items get 'moyen-terme'
@@ -906,7 +1532,7 @@ function createFinding(
 
   const inferCriticality = (): Criticality => {
     if (isPass) return 'low';
-    if (isNotAvailable || isNotMeasured) return 'medium';
+    if (isNotTested) return 'medium';
     if (issuesList && issuesList.length > 4) return 'high';
     return 'medium';
   };
@@ -918,8 +1544,8 @@ function createFinding(
         ? 'Résoudre les problèmes détectés listés en annexe.'
         : 'Veuillez corriger ou ajuster ce point selon les règles métier.')
       : isNotAvailable
-        ? 'La mesure n\'est pas disponible dans le contexte actuel. Vérifiez les dépendances techniques requises.'
-        : 'KPI non mesuré : relancer le scan avec les prérequis complets pour obtenir une mesure exploitable.';
+        ? 'KPI non testé : relancer le scan avec les prérequis complets pour obtenir une mesure exploitable.'
+        : 'KPI non testé : relancer le scan avec les prérequis complets pour obtenir une mesure exploitable.';
 
   return {
     id: `${axisId}-${idSuffix}`,
@@ -931,6 +1557,7 @@ function createFinding(
     status,
     recommendation,
     annexes: issuesList,
+    origin: isNotTested ? 'coverage' : undefined,
   };
 }
 
@@ -1105,14 +1732,10 @@ function buildStructuredFindingFromCoverage(item: AuditCoverageItem): AuditFindi
   return {
     id: item.id,
     title: item.label,
-    description: item.status === 'not_available'
-      ? 'Contrôle non disponible dans le contexte technique du scan.'
-      : 'Contrôle non mesuré dans les données remontées par le scan.',
+    description: 'Contrôle non testé dans les données remontées par le scan.',
     criticality: item.status === 'not_available' ? 'low' : 'medium',
     priority: 'moyen-terme',
-    recommendation: item.status === 'not_available'
-      ? 'Préparer les dépendances nécessaires pour rendre ce contrôle disponible.'
-      : 'Relancer ou compléter le scan pour mesurer ce contrôle.',
+    recommendation: 'Relancer ou compléter le scan pour mesurer ce contrôle.',
     type: 'recommendation',
     status: item.status,
     annexes: normalizedEvidence,
@@ -1129,9 +1752,10 @@ function buildStructuredFindingFromCoverage(item: AuditCoverageItem): AuditFindi
 
 function formatStructuredDetailLines(prefix: string, value: unknown): string[] {
   if (value === null || value === undefined || value === '') return [];
+  const label = humanizeEvidenceLabel(prefix);
 
   if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
-    return [`${prefix}: ${String(value)}`];
+    return [`${label}: ${String(value)}`];
   }
 
   if (Array.isArray(value)) {
@@ -1140,9 +1764,9 @@ function formatStructuredDetailLines(prefix: string, value: unknown): string[] {
       .filter(Boolean)
       .slice(0, 4);
     if (primitives.length > 0) {
-      return [`${prefix}: ${primitives.join(', ')}`];
+      return [`${label}: ${primitives.join(', ')}`];
     }
-    return [`${prefix}: ${value.length} element(s) structures`];
+    return [`${label}: ${value.length} element(s) structures`];
   }
 
   if (isRecord(value)) {
@@ -1155,10 +1779,10 @@ function formatStructuredDetailLines(prefix: string, value: unknown): string[] {
       .slice(0, 4);
 
     if (direct.length > 0) {
-      return [`${prefix}: ${direct.join(' | ')}`];
+      return [`${label}: ${direct.join(' | ')}`];
     }
 
-    return [`${prefix}: donnee structuree disponible dans le detail`];
+    return [`${label}: donnee technique structuree disponible dans les details bruts`];
   }
 
   return [];
@@ -1185,7 +1809,12 @@ function normalizeRecommendationFromStructuredKpi(kpi: KpiItem, isFailure: boole
 }
 
 function buildStructuredFindingFromKpi(kpi: KpiItem): AuditFinding {
-  const isFailure = kpi.status === 'failing';
+  const normalizedStatus = normalizeFindingStatus(kpi.status);
+  const isFailure = normalizedStatus === 'fail';
+  const isNotTested =
+    normalizedStatus === 'not_available' ||
+    normalizedStatus === 'not_measured' ||
+    normalizedStatus === 'not_evaluated';
   const affectedUrls = kpi.evidence?.items?.map(i => i.found_on) ?? [];
   const affectedPages = kpi.evidence?.affected_pages ?? [];
   const evidenceSummary = kpi.evidence?.summary ?? '';
@@ -1224,14 +1853,16 @@ function buildStructuredFindingFromKpi(kpi: KpiItem): AuditFinding {
     id: `kpi-${kpi.kpi_name.toLowerCase().replace(/\s+/g, '-')}`,
     title: kpi.kpi_name,
     description: isFailure
-      ? `KPI échoué : ${evidenceSummary}`
-      : `KPI passant : ${evidenceSummary}`,
+      ? `KPI non concluant : ${evidenceSummary}`
+      : isNotTested
+        ? `KPI non testé : ${evidenceSummary}`
+        : `KPI concluant : ${evidenceSummary}`,
     criticality: isFailure ? 'high' : 'low',
     priority: isFailure ? 'moyen-terme' : 'long-terme',
     recommendation: recommendationDetails.text,
-    type: isFailure ? kpi.type === 'bug' ? 'bug' : 'recommendation' : 'pass',
-    status: isFailure ? 'fail' : 'pass',
-    origin: kpi.type === 'RGPD' ? 'RGPD' : kpi.type,
+    type: isFailure ? kpi.type === 'bug' ? 'bug' : 'recommendation' : isNotTested ? 'recommendation' : 'pass',
+    status: isFailure ? 'fail' : isNotTested ? normalizedStatus : 'pass',
+    origin: isNotTested ? 'coverage' : kpi.type === 'RGPD' || kpi.type === 'compliance' ? 'RGPD' : kpi.type === 'bug' ? 'bug' : 'recommendation',
     impact: kpi.client_impact,
     fix: typeof kpi.evidence?.fix === 'string' ? kpi.evidence.fix : undefined,
     affectedCount: Math.max(affectedUrls.length, affectedPages.length),
@@ -1242,9 +1873,11 @@ function buildStructuredFindingFromKpi(kpi: KpiItem): AuditFinding {
       digest: kpi.evidence_digest,
       evidence: kpi.evidence,
     },
+    sourceKpi: kpi.kpi_name,
     recommendationSource: recommendationDetails.source,
     effort: affectedUrls.length > 10 ? 'high' : affectedUrls.length > 5 ? 'medium' : 'low',
     annexes: evidenceList.map((line) => sanitizeEvidenceLine(line)).filter(Boolean),
+    kpiLabels: resolveKpiLabels(kpi.kpi_name, kpi.status, isFailure ? 'high' : null, kpi.evidence?.detail ?? {}),
   };
 }
 
@@ -1273,6 +1906,14 @@ function buildStructuredReport(
     ECO_INDEX: [],
     RGPD: [],
   };
+  const seenFindingKeys = new Set<string>();
+
+  const dedupeKeysForFinding = (axisKey: keyof typeof AXIS_META, finding: AuditFinding): string[] => {
+    return [finding.sourceKpi, finding.id, finding.title]
+      .map((value) => String(value ?? '').trim().toLowerCase())
+      .filter(Boolean)
+      .map((value) => `${axisKey}:${value}`);
+  };
 
   const pushFinding = (axisKey: keyof typeof AXIS_META, finding: AuditFinding) => {
     // VETO: Filter out quick-win priority findings completely
@@ -1280,6 +1921,11 @@ function buildStructuredReport(
       console.log(`[auditMapper] Excluding quick-win finding: ${finding.title}`);
       return;
     }
+    const dedupeKeys = dedupeKeysForFinding(axisKey, finding);
+    if (dedupeKeys.some((key) => seenFindingKeys.has(key))) {
+      return;
+    }
+    dedupeKeys.forEach((key) => seenFindingKeys.add(key));
     axisBuckets[axisKey].push(finding);
   };
 
@@ -1428,7 +2074,7 @@ export function mapApiResponseToReport(
     if (raw === 'covered' || raw === 'pass' || raw === 'passed' || source?.passed === true) return 'pass';
     if (raw === 'fail' || raw === 'failed' || source?.passed === false) return 'fail';
     if (raw === 'not_available' || raw === 'not-available' || source?.available === false) return 'not_available';
-    if (raw === 'not_measured' || raw === 'not-measured' || raw === 'not_evaluated') return 'not_measured';
+    if (isNonTestedStatus(raw)) return raw === 'not_available' || raw === 'not-available' ? 'not_available' : 'not_measured';
     return 'not_measured';
   };
 

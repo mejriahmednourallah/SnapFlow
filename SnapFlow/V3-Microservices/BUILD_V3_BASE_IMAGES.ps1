@@ -33,8 +33,14 @@ if ($Pull) { $fastapiBuildFlags += "--pull" }
 function Test-V3ImageExists {
     param([Parameter(Mandatory = $true)][string]$Tag)
 
+    Write-Host "Inspecting Docker image: $Tag" -ForegroundColor DarkGray
     & docker image inspect $Tag *> $null
-    return ($LASTEXITCODE -eq 0)
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "Image exists: $Tag" -ForegroundColor Cyan
+        return $true
+    }
+    Write-Host "Image missing: $Tag" -ForegroundColor Yellow
+    return $false
 }
 
 function Invoke-V3BaseBuild {
@@ -45,19 +51,41 @@ function Invoke-V3BaseBuild {
     )
 
     Write-Host "Building $Tag" -ForegroundColor Yellow
-    $args = @("build") + $BuildFlags + @("-f", $Dockerfile, "-t", $Tag, $baseDir)
+    Write-Host "Context: $baseDir" -ForegroundColor DarkGray
+    Write-Host "Dockerfile: $Dockerfile" -ForegroundColor DarkGray
+    Write-Host "Extra build flags: $($BuildFlags -join ' ')" -ForegroundColor DarkGray
+    $args = @("build", "--progress=plain") + $BuildFlags + @("-f", $Dockerfile, "-t", $Tag, $baseDir)
+    Write-Host "Command: docker $($args -join ' ')" -ForegroundColor DarkGray
     & docker @args
     if ($LASTEXITCODE -ne 0) {
         throw "Docker build failed for $Tag"
     }
 }
 
+Write-Host "Checking V3 base images..." -ForegroundColor Cyan
+Write-Host "Flags: rebuild_base=$RebuildBase no_cache=$NoCacheBuild pull=$Pull" -ForegroundColor DarkGray
+
 $buildFastapi = $RebuildBase -or -not (Test-V3ImageExists -Tag $fastapiTag)
 $buildHeavy = $RebuildBase -or -not (Test-V3ImageExists -Tag $heavyTag)
 
+if (-not $RebuildBase) {
+    if ($buildFastapi) {
+        Write-Host "Plan: build missing $fastapiTag" -ForegroundColor Yellow
+    } else {
+        Write-Host "Plan: reuse existing $fastapiTag" -ForegroundColor Cyan
+    }
+    if ($buildHeavy) {
+        Write-Host "Plan: build missing $heavyTag" -ForegroundColor Yellow
+    } else {
+        Write-Host "Plan: reuse existing $heavyTag" -ForegroundColor Cyan
+    }
+} else {
+    Write-Host "Plan: -RebuildBase was passed, so both base images will be rebuilt." -ForegroundColor Yellow
+}
+
 if (-not $buildFastapi -and -not $buildHeavy) {
     Write-Host "V3 base images already exist. Reusing cached images." -ForegroundColor Cyan
-    Write-Host "Use -RebuildBase to force rebuilding both base images." -ForegroundColor Cyan
+    Write-Host "Use -RebuildBase to rebuild them; combine with -NoCacheBuild for a cacheless base rebuild." -ForegroundColor Cyan
     return
 }
 

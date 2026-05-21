@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { mapApiResponseToReport } from '@/lib/auditMapper';
+import { getAxisScoreBreakdown } from '@/data/mockAuditData';
 import type { ApiResponse } from '@/lib/auditMapper';
 
 describe('Axis Mapping', () => {
@@ -55,6 +56,12 @@ describe('Axis Mapping', () => {
         scan_id: 'test-scan-v2-flat-1',
         domain: 'https://example.com',
         report_version: 'v2',
+        top_level_kpis: {
+          total_kpis: 10,
+          passed_kpis: 7,
+          critical_kpis: 1,
+          headline: 'Synthese backend prioritaire.',
+        },
         axes: {
           'Performance et Temps de réponse': {
             lcp_homepage: {
@@ -74,6 +81,19 @@ describe('Axis Mapping', () => {
                 affected_pages: 2,
                 affected_page_urls_all: ['https://example.com/', 'https://example.com/pricing'],
                 lcp_ms: 4200,
+              },
+              evidence_digest: {
+                quality: 'VALID',
+                proof_lines: [
+                  'LCP mesure a 4200 ms sur les pages d entree analysees.',
+                  '2 URLs testees: https://example.com/ et https://example.com/pricing',
+                ],
+                rows: [
+                  { url: 'https://example.com/', lcp_ms: 4200, threshold_ms: 2500 },
+                  { url: 'https://example.com/pricing', lcp_ms: 4100, threshold_ms: 2500 },
+                ],
+                urls: ['https://example.com/', 'https://example.com/pricing'],
+                csv_columns: ['url', 'lcp_ms', 'threshold_ms'],
               },
               fix: 'Optimiser les assets LCP sur la page d’accueil et la page pricing.',
             },
@@ -96,7 +116,12 @@ describe('Axis Mapping', () => {
       expect(finding?.affectedCount).toBe(2);
       expect(finding?.exampleUrls).toContain('https://example.com/');
       expect(finding?.recommendation).toContain('Optimiser');
-      expect(finding?.evidence?.some((line) => line.includes('evidence.lcp_ms'))).toBe(true);
+      expect(report.globalScore).toBe(70);
+      expect(report.summary?.total).toBe(10);
+      expect(report.summary?.critical).toBe(1);
+      expect(report.strategicSummary).toBe('Synthese backend prioritaire.');
+      expect(finding?.evidence?.some((line) => line.includes('4200'))).toBe(true);
+      expect((finding?.evidence ?? []).some((line) => /evidence\.|data quality|VALID/i.test(line))).toBe(false);
     });
 
     it('maps nested sous_axes -> kpis payload into the correct axis', () => {
@@ -186,7 +211,194 @@ describe('Axis Mapping', () => {
       expect(finding?.origin).toBe('bug');
       expect(finding?.affectedCount).toBe(1);
       expect(finding?.exampleUrls).toContain('https://example.com/login');
-      expect(finding?.evidence?.some((line) => line.includes('metrics.missing_headers'))).toBe(true);
+      expect(finding?.evidence?.some((line) => line.includes('Content-Security-Policy'))).toBe(true);
+      expect((finding?.evidence ?? []).some((line) => /metrics\.|data quality|VALID/i.test(line))).toBe(false);
+    });
+
+    it('counts non-tested KPIs in visible totals without classifying them as actions', () => {
+      const api: ApiResponse = {
+        scan_id: 'test-scan-non-tested-tech-1',
+        domain: 'https://example.com',
+        report_version: 'v2',
+        axes: {
+          'Audit Technique': {
+            cms: {
+              kpi_id: 'tech_cms_version',
+              type: null,
+              name: 'Version CMS/Framework',
+              status: 'passing',
+              evidence_digest: { quality: 'VALID', proof_lines: ['CMS detecte: Drupal 10'] },
+            },
+            modules: {
+              kpi_id: 'tech_modules_versions',
+              type: null,
+              name: 'Version Modules Installes',
+              status: 'passing',
+              evidence_digest: { quality: 'VALID', proof_lines: ['3 modules detectes avec version'] },
+            },
+            server: {
+              kpi_id: 'tech_server_version',
+              type: null,
+              name: 'Version Langage de Programmation',
+              status: 'passing',
+              evidence_digest: { quality: 'VALID', proof_lines: ['Serveur detecte: Apache 2.4'] },
+            },
+            language: {
+              kpi_id: 'tech_programming_language',
+              type: 'recommendation',
+              name: 'Langage de Programmation',
+              status: 'not_evaluated',
+              severity: 'high',
+              evidence_digest: { quality: 'MISSING', missing_reason: 'Runtime non detecte par le scan.' },
+            },
+            cve: {
+              kpi_id: 'tech_cve_check',
+              type: 'bug',
+              name: 'Verification du Code',
+              status: 'not_evaluated',
+              severity: 'critical',
+              evidence_digest: { quality: 'MISSING', missing_reason: 'Aucune table CVE exploitable.' },
+            },
+          },
+        },
+      };
+
+      const report = mapApiResponseToReport(api, 'audit-non-tested-tech-1', {
+        url: 'https://example.com',
+        site_name: 'Test Site',
+      });
+
+      const techAxis = report.axes.find((axis) => axis.id === 'technique');
+      const breakdown = getAxisScoreBreakdown(techAxis!);
+      const nonTested = techAxis?.findings.filter((finding) => finding.origin === 'coverage') ?? [];
+
+      expect(techAxis?.findings).toHaveLength(5);
+      expect(breakdown.x).toBe(3);
+      expect(breakdown.y).toBe(5);
+      expect(nonTested).toHaveLength(2);
+      expect(nonTested.every((finding) => finding.kpiLabels?.statut === 'Non testé')).toBe(true);
+      expect(nonTested.every((finding) => finding.kpiLabels?.typeLabel === 'Indéterminé')).toBe(true);
+      expect(report.bugs.some((item) => item.source_kpi === 'tech_cve_check')).toBe(false);
+      expect(report.recommendations.some((item) => item.source_kpi === 'tech_programming_language')).toBe(false);
+    });
+
+    it('normalizes all backend non-tested status variants before badge/action classification', () => {
+      const api: ApiResponse = {
+        scan_id: 'test-scan-non-tested-variants-1',
+        domain: 'https://example.com',
+        report_version: 'v2',
+        axes: {
+          Security: {
+            unavailable: {
+              kpi_id: 'sec_unavailable',
+              type: 'bug',
+              name: 'Unavailable',
+              status: 'not_available',
+              evidence_digest: { quality: 'MISSING', missing_reason: 'Probe unavailable.' },
+            },
+            unevaluated: {
+              kpi_id: 'sec_unevaluated',
+              type: 'bug',
+              name: 'Unevaluated',
+              status: 'not_evaluated',
+              evidence_digest: { quality: 'MISSING', missing_reason: 'Evidence missing.' },
+            },
+            unmeasured: {
+              kpi_id: 'sec_unmeasured',
+              type: 'recommendation',
+              name: 'Unmeasured',
+              status: 'not_measured',
+              evidence_digest: { quality: 'MISSING', missing_reason: 'Metric missing.' },
+            },
+            frenchLegacy: {
+              kpi_id: 'sec_french_legacy',
+              type: 'bug',
+              name: 'French legacy',
+              status: 'non_evalue',
+              evidence_digest: { quality: 'MISSING', missing_reason: 'Legacy missing state.' },
+            },
+          },
+        },
+      };
+
+      const report = mapApiResponseToReport(api, 'audit-non-tested-variants-1', {
+        url: 'https://example.com',
+        site_name: 'Test Site',
+      });
+
+      const securityFindings = report.axes.find((axis) => axis.id === 'security')?.findings ?? [];
+
+      expect(securityFindings).toHaveLength(4);
+      expect(securityFindings.every((finding) => finding.origin === 'coverage')).toBe(true);
+      expect(securityFindings.every((finding) => finding.status !== 'fail')).toBe(true);
+      expect(securityFindings.every((finding) => finding.kpiLabels?.statut === 'Non testé')).toBe(true);
+      expect(report.bugs).toHaveLength(0);
+      expect(report.recommendations).toHaveLength(0);
+    });
+  });
+
+  describe('Structured payload dedupe', () => {
+    it('does not inject duplicate legacy rows for a KPI already present in structured kpis', () => {
+      const api: ApiResponse = {
+        scan_id: 'test-scan-dedupe-1',
+        domain: 'https://example.com',
+        kpis: [
+          {
+            kpi_name: 'SSL',
+            axis: 'Security',
+            status: 'failing',
+            type: 'bug',
+            evidence: { summary: 'SSL failed.' },
+            client_impact: 'Trust loss.',
+          },
+        ],
+        bugs: [
+          {
+            id: 'legacy-ssl',
+            title: 'SSL',
+            type: 'bug',
+            severity: 'high',
+            scope: 'global',
+            description: 'Legacy SSL duplicate.',
+            impact: 'Trust loss.',
+            effort: 'medium',
+            affected_count: 1,
+            example_urls: ['https://example.com'],
+            fix: 'Fix SSL.',
+            source_kpi: 'SSL',
+            evidence: ['Legacy evidence'],
+          },
+        ],
+        recommendations: [],
+        compliance: [],
+        audit_coverage: [
+          {
+            id: 'coverage-ssl',
+            label: 'SSL',
+            status: 'not_measured',
+            evidence: ['Legacy coverage duplicate'],
+          },
+        ],
+        passing_kpis: [
+          {
+            id: 'passing-ssl',
+            label: 'SSL',
+            source_kpi: 'SSL',
+            observed_value: 'Legacy passing duplicate',
+            status: 'pass',
+            evidence: ['Legacy pass'],
+          },
+        ],
+      };
+
+      const report = mapApiResponseToReport(api, 'audit-dedupe-1', {
+        url: 'https://example.com',
+        site_name: 'Test Site',
+      });
+
+      const securityFindings = report.axes.find((axis) => axis.id === 'security')?.findings ?? [];
+
+      expect(securityFindings.filter((finding) => finding.title === 'SSL')).toHaveLength(1);
     });
   });
 
@@ -234,7 +446,7 @@ describe('Axis Mapping', () => {
       expect(finding?.recommendationSource).toBe('fix');
     });
 
-    it('keeps full evidence in evidenceRaw while showing compact previews', () => {
+    it('uses curated digest previews and hides raw evidence payloads by default', () => {
       const api: ApiResponse = {
         scan_id: 'test-scan-evidence-1',
         domain: 'https://example.com',
@@ -261,6 +473,24 @@ describe('Axis Mapping', () => {
                 title_missing_count: 0,
                 title_missing_urls_all: [],
               },
+              evidence_digest: {
+                quality: 'VALID',
+                proof_lines: [
+                  '2 pages sans meta description sur 12 pages testees.',
+                  'URLs concernees: https://example.com/a, https://example.com/b',
+                  'Titre present sur toutes les pages testees.',
+                ],
+                rows: [
+                  { page_url: 'https://example.com/a', issue: 'meta description manquante', title_length: 51 },
+                  { page_url: 'https://example.com/b', issue: 'meta description manquante', title_length: 48 },
+                ],
+                urls: ['https://example.com/a', 'https://example.com/b', 'https://example.com/c'],
+                csv_columns: ['page_url', 'issue', 'title_length'],
+                csv_rows: [
+                  { page_url: 'https://example.com/a', issue: 'meta description manquante', title_length: 51 },
+                  { page_url: 'https://example.com/b', issue: 'meta description manquante', title_length: 48 },
+                ],
+              },
               fix: 'Ajouter une meta description unique sur chaque page affectée.',
             },
           },
@@ -277,11 +507,19 @@ describe('Axis Mapping', () => {
 
       expect(finding).toBeDefined();
       expect(finding?.exampleUrls).toEqual(['https://example.com/a', 'https://example.com/b', 'https://example.com/c'].slice(0, 10));
-      expect((finding?.evidenceRaw as any)?.evidence?.meta_missing_urls_all).toHaveLength(3);
-      expect((finding?.evidence ?? []).some((line) => line.includes('[object Object]'))).toBe(false);
+      expect(finding?.evidence).toEqual([
+        '2 pages sans meta description sur 12 pages testees.',
+        'URLs concernees: https://example.com/a, https://example.com/b',
+        'Titre present sur toutes les pages testees.',
+      ]);
+      expect(finding?.evidenceRows).toHaveLength(2);
+      expect(finding?.evidenceCsvColumns).toEqual(['page_url', 'issue', 'title_length']);
+      expect((finding?.evidenceRaw as any)?.digest?.quality).toBe('VALID');
+      expect((finding?.evidenceRaw as any)?.evidence).toBeUndefined();
+      expect((finding?.evidence ?? []).some((line) => /VALID|data_quality|meta_missing_urls_all|\[object Object\]/i.test(line))).toBe(false);
     });
 
-    it('keeps full anomalous fuzz payloads in evidenceRaw and readable previews in evidence', () => {
+    it('uses curated form-fuzzer rows and does not expose dangerous payloads as raw JSON', () => {
       const api: ApiResponse = {
         scan_id: 'test-scan-forms-1',
         domain: 'https://example.com',
@@ -325,6 +563,39 @@ describe('Axis Mapping', () => {
                   },
                 ],
               },
+              evidence_digest: {
+                quality: 'PARTIAL',
+                proof_lines: [
+                  '2 formulaires avec signaux anormaux sur 4 tests executes.',
+                  'Formulaire concerne: https://example.com/contact',
+                  'Payloads dangereux masques dans les preuves client.',
+                ],
+                rows: [
+                  {
+                    page_url: 'https://example.com/contact',
+                    action_url: 'https://example.com/api/contact',
+                    form_id: 'contact-form',
+                    test_type: 'xss_payload',
+                    payload: '[masque]',
+                    status_code: 500,
+                    anomaly: 'server_error',
+                    anomaly_reason: '500 returned after payload submission',
+                  },
+                ],
+                urls: ['https://example.com/contact', 'https://example.com/devis'],
+                csv_columns: ['page_url', 'action_url', 'form_id', 'test_type', 'status_code', 'anomaly', 'anomaly_reason'],
+                csv_rows: [
+                  {
+                    page_url: 'https://example.com/contact',
+                    action_url: 'https://example.com/api/contact',
+                    form_id: 'contact-form',
+                    test_type: 'xss_payload',
+                    status_code: 500,
+                    anomaly: 'server_error',
+                    anomaly_reason: '500 returned after payload submission',
+                  },
+                ],
+              },
               fix: 'Étendre la couverture du form fuzzer et corriger les anomalies remontées.',
             },
           },
@@ -341,10 +612,15 @@ describe('Axis Mapping', () => {
 
       expect(finding).toBeDefined();
       expect(finding?.exampleUrls).toContain('https://example.com/contact');
-      expect((finding?.evidenceRaw as any)?.evidence?.anomalous_tests_all?.[0]?.payload).toEqual({
-        message: '<script>alert(1)</script>',
-      });
-      expect((finding?.evidence ?? []).some((line) => line.includes('xss_payload') || line.includes('server_error'))).toBe(true);
+      expect(finding?.evidence).toEqual([
+        '2 formulaires avec signaux anormaux sur 4 tests executes.',
+        'Formulaire concerne: https://example.com/contact',
+        'Payloads dangereux masques dans les preuves client.',
+      ]);
+      expect(finding?.evidenceRows?.[0]?.payload).toBe('[masque]');
+      expect((finding?.evidenceRaw as any)?.digest?.quality).toBe('PARTIAL');
+      expect((finding?.evidenceRaw as any)?.evidence?.anomalous_tests_all).toBeUndefined();
+      expect((finding?.evidence ?? []).some((line) => /<script>|data_quality|PARTIAL/i.test(line))).toBe(false);
     });
   });
 });

@@ -266,7 +266,7 @@ _PURPOSE_RE = re.compile(
 )
 _LEGAL_BASIS_RE = re.compile(r"base.{0,15}legale|legal.{0,10}basis|consentement|obligation.{0,10}legale|interet.{0,10}legitime", re.I)
 
-_llms_cache: dict[str, bool] = {}
+_llms_cache: dict[str, dict] = {}
 
 _SPACY_NLP = None
 _SPACY_LOAD_FAILED = False
@@ -810,19 +810,55 @@ def check_og_hreflang(soup: BeautifulSoup) -> dict:
 
 def check_llms_txt(base_url: str) -> dict:
     base = (base_url or "").rstrip("/")
+    llms_url = base + "/llms.txt" if base else ""
     if not base:
-        return {"llms_txt_present": False}
+        return {
+            "llms_txt_present": False,
+            "llms_url": "",
+            "status_code": None,
+            "content_type": None,
+            "length": 0,
+            "useful_lines": [],
+            "parse_status": "missing_base_url",
+        }
     if base in _llms_cache:
-        return {"llms_txt_present": _llms_cache[base]}
-    present = False
+        return dict(_llms_cache[base])
+    result = {
+        "llms_txt_present": False,
+        "llms_url": llms_url,
+        "status_code": None,
+        "content_type": None,
+        "length": 0,
+        "useful_lines": [],
+        "parse_status": "not_found",
+    }
     try:
-        req = Request(base + "/llms.txt", method="HEAD", headers={"User-Agent": "SnapFlowBot/3.0"})
+        req = Request(llms_url, method="GET", headers={"User-Agent": "SnapFlowBot/3.0", "Accept": "text/plain,*/*;q=0.8"})
         with urlopen(req, timeout=4) as resp:
-            present = int(getattr(resp, "status", 0) or 0) == 200
-    except Exception:
-        present = False
-    _llms_cache[base] = present
-    return {"llms_txt_present": present}
+            status_code = int(getattr(resp, "status", 0) or 0)
+            content_type = resp.headers.get("Content-Type", "")
+            body = resp.read(65536) or b""
+            text = body.decode("utf-8", errors="replace")
+            useful_lines = []
+            for raw_line in text.splitlines():
+                line = raw_line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                useful_lines.append(line[:240])
+                if len(useful_lines) >= 8:
+                    break
+            result.update({
+                "llms_txt_present": status_code == 200,
+                "status_code": status_code,
+                "content_type": content_type,
+                "length": len(body),
+                "useful_lines": useful_lines,
+                "parse_status": "parsed" if status_code == 200 and useful_lines else "empty" if status_code == 200 else "not_found",
+            })
+    except Exception as exc:
+        result["parse_status"] = f"fetch_error:{exc.__class__.__name__}"
+    _llms_cache[base] = dict(result)
+    return result
 
 
 def check_thin_content_by_type(word_count: int, page_type: str, lang: str = "en") -> dict:
@@ -1470,6 +1506,7 @@ def analyze_rgpd_text(url: str, text: str) -> dict:
         retention_sentences = [s for s in sentences if _RETENTION_RE_NORM.search(_normalize_for_rgpd_match(s))]
 
     minimization_found = bool(_MINIMIZATION_RE.search(text) or _MINIMIZATION_RE_NORM.search(text_norm))
+    minimization_sentences = [s for s in sentences if _MINIMIZATION_RE.search(s) or _MINIMIZATION_RE_NORM.search(_normalize_for_rgpd_match(s))]
     purpose_sentences = [s for s in sentences if _PURPOSE_RE.search(_normalize_for_rgpd_match(s))]
     has_rgpd_content_signal = has_rgpd_content_signal or bool(retention_sentences) or minimization_found
 
@@ -1479,6 +1516,7 @@ def analyze_rgpd_text(url: str, text: str) -> dict:
         "purpose_mentioned": len(purpose_sentences) > 0,
         "purpose_phrases": purpose_sentences[:3],
         "retention_phrases": retention_sentences[:3],
+        "minimization_phrases": minimization_sentences[:3],
         "used_strong_signal": (not is_privacy_url) and strong_signal,
         "has_rgpd_content_signal": has_rgpd_content_signal,
         "rgpd_keyword_hits": rgpd_keyword_hits,

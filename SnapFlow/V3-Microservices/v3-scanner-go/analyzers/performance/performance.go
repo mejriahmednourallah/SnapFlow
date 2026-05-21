@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"math/rand"
+	"net/url"
 	"os"
 	"strings"
 	"sync"
@@ -24,6 +25,50 @@ import (
 func jitterSleep(minMs, maxMs int) {
 	ms := minMs + rand.Intn(maxMs-minMs+1)
 	time.Sleep(time.Duration(ms) * time.Millisecond)
+}
+
+type trackerSignature struct {
+	Fragment string
+	Vendor   string
+	Category string
+}
+
+var trackerSignatures = []trackerSignature{
+	{"google-analytics.com", "Google Analytics", "analytics"},
+	{"googletagmanager.com", "Google Tag Manager", "tag_manager"},
+	{"doubleclick.net", "Google Ads", "advertising"},
+	{"facebook.net", "Meta Pixel", "advertising"},
+	{"facebook.com/tr", "Meta Pixel", "advertising"},
+	{"hotjar.com", "Hotjar", "analytics"},
+	{"clarity.ms", "Microsoft Clarity", "analytics"},
+	{"matomo", "Matomo", "analytics"},
+	{"linkedin.com/px", "LinkedIn Insight", "advertising"},
+	{"snap.licdn.com", "LinkedIn Insight", "advertising"},
+	{"tiktok.com/i18n/pixel", "TikTok Pixel", "advertising"},
+	{"criteo.com", "Criteo", "advertising"},
+}
+
+func trackerEvidenceFromURL(rawURL string, order int, pageURL string) (map[string]interface{}, bool) {
+	lower := strings.ToLower(rawURL)
+	for _, sig := range trackerSignatures {
+		if strings.Contains(lower, sig.Fragment) {
+			domain := sig.Fragment
+			if parsed, err := url.Parse(rawURL); err == nil && parsed.Host != "" {
+				domain = parsed.Host
+			}
+			return map[string]interface{}{
+				"page_url":       pageURL,
+				"tracker_domain": domain,
+				"request_url":    rawURL,
+				"category":       sig.Category,
+				"vendor":         sig.Vendor,
+				"order":          order,
+				"before_consent": true,
+				"source":         "scanner_runtime",
+			}, true
+		}
+	}
+	return nil, false
 }
 
 type AssetCategory struct {
@@ -66,6 +111,8 @@ type HeadlessResult struct {
 	ConsoleErrors              []string                    `json:"console_errors"`
 	ConsoleErrorCount          int                         `json:"console_error_count"`
 	ConsoleErrorKPIPassed      bool                        `json:"console_error_kpi_passed"`
+	TrackerTimeline            []map[string]interface{}    `json:"tracker_timeline,omitempty"`
+	CMPBanner                  map[string]interface{}      `json:"cmp_banner,omitempty"`
 	NonFunctionalButtons       []string                    `json:"non_functional_buttons"`
 	NonFunctionalButtonDetails []NonFunctionalButtonDetail `json:"non_functional_button_details"`
 	NonFunctionalButtonCount   int                         `json:"non_functional_button_count"`
@@ -84,7 +131,7 @@ type MobilePerformanceResult struct {
 	SpeedIndexMS      float64  `json:"speed_index_ms"`
 	Available         bool     `json:"available"`
 	MeasurementStatus string   `json:"measurement_status,omitempty"`
-	DataQuality        string   `json:"data_quality,omitempty"`
+	DataQuality       string   `json:"data_quality,omitempty"`
 	Passed            bool     `json:"passed"`
 	Issues            []string `json:"issues"`
 	Error             string   `json:"error,omitempty"`
@@ -310,6 +357,8 @@ func renderPagesViaBrowserPool(urls []string, concurrency int) []HeadlessResult 
 			res.InvisibleLinks = renderResult.InvisibleLinks
 			res.ConsoleErrors = renderResult.ConsoleErrors
 			res.ConsoleErrorCount = renderResult.ConsoleErrorCount
+			res.TrackerTimeline = renderResult.TrackerTimeline
+			res.CMPBanner = renderResult.CMPBanner
 			if res.ConsoleErrorCount == 0 && len(res.ConsoleErrors) > 0 {
 				res.ConsoleErrorCount = len(res.ConsoleErrors)
 			}
@@ -375,6 +424,7 @@ func analyzePageHeadless(browser *rod.Browser, targetURL string) HeadlessResult 
 		"fonts":       {0, 0, 0},
 		"other":       {0, 0, 0},
 	}
+	trackerTimeline := []map[string]interface{}{}
 
 	go page.EachEvent(func(e *proto.NetworkResponseReceived) {
 		networkMu.Lock()
@@ -407,6 +457,13 @@ func analyzePageHeadless(browser *rod.Browser, targetURL string) HeadlessResult 
 		catData.Count++
 		catData.SizeBytes += size
 		breakdown[category] = catData
+
+		if len(trackerTimeline) < 50 {
+			if row, ok := trackerEvidenceFromURL(e.Response.URL, requestCount, targetURL); ok {
+				row["resource_type"] = category
+				trackerTimeline = append(trackerTimeline, row)
+			}
+		}
 	})()
 
 	// G-2: Console error/warning listener (must be attached before Navigate)
@@ -846,6 +903,7 @@ func analyzePageHeadless(browser *rod.Browser, targetURL string) HeadlessResult 
 		breakdown[category] = catData
 	}
 	result.AssetBreakdown = breakdown
+	result.TrackerTimeline = append([]map[string]interface{}{}, trackerTimeline...)
 	result.EmissionsPerPageLoad = math.Round(totalEmissions*1000) / 1000
 	networkMu.Unlock()
 
@@ -875,6 +933,41 @@ func analyzePageHeadless(browser *rod.Browser, targetURL string) HeadlessResult 
 		result.InvisibleLinks = int(invisibleLinksVal.Value.Num())
 	}
 
+	cmpBannerVal, err := page.Eval(`() => {
+		const selectors = [
+			'[id*="cookie" i]', '[class*="cookie" i]',
+			'[id*="consent" i]', '[class*="consent" i]',
+			'[id*="tarteaucitron" i]', '[class*="tarteaucitron" i]',
+			'[id*="didomi" i]', '[class*="didomi" i]',
+			'[id*="onetrust" i]', '[class*="onetrust" i]',
+			'[aria-label*="cookie" i]', '[aria-label*="consent" i]',
+		];
+		for (const selector of selectors) {
+			const element = document.querySelector(selector);
+			if (!element) continue;
+			const style = window.getComputedStyle(element);
+			const rect = element.getBoundingClientRect();
+			const visible = style.display !== 'none'
+				&& style.visibility !== 'hidden'
+				&& style.opacity !== '0'
+				&& rect.width > 0
+				&& rect.height > 0;
+			if (!visible) continue;
+			return {
+				selector,
+				text: (element.innerText || element.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 240),
+				visible: true,
+				source: 'scanner_runtime',
+			};
+		}
+		return null;
+	}`)
+	if err == nil && cmpBannerVal != nil {
+		if banner, ok := cmpBannerVal.Value.Raw().(map[string]interface{}); ok {
+			result.CMPBanner = banner
+		}
+	}
+
 	// Calculate Official Eco-Index based on quantiles
 	result.EcoIndex, result.EcoScore = calculateEcoIndex(result.DOMNodes, result.HTTPRequests, result.TransferSizeKB)
 
@@ -892,7 +985,7 @@ func AnalyzeHomepageMobile(br *rod.Browser, targetURL string) MobilePerformanceR
 	res := MobilePerformanceResult{
 		Available:         false,
 		MeasurementStatus: "not_started",
-		DataQuality:        "MISSING",
+		DataQuality:       "MISSING",
 	}
 
 	page, err := br.Page(proto.TargetCreateTarget{URL: "about:blank"})

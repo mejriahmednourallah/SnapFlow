@@ -32,6 +32,13 @@ class TestKPICentricReport(unittest.TestCase):
         cls.report = json.loads(fixture_path.read_text(encoding="utf-8"))
         cls.kpi_report = build_kpi_centric_report(cls.report)
 
+    def _find_kpi(self, kpi_report: dict, kpi_id: str) -> dict:
+        for axis_kpis in kpi_report.get("axes", {}).values():
+            for kpi in axis_kpis.values():
+                if isinstance(kpi, dict) and kpi.get("kpi_id") == kpi_id:
+                    return kpi
+        self.fail(f"KPI not found: {kpi_id}")
+
     def test_report_structure(self):
         self.assertIn("scan_id", self.kpi_report)
         self.assertIn("domain", self.kpi_report)
@@ -72,6 +79,7 @@ class TestKPICentricReport(unittest.TestCase):
             "score",
             "impact",
             "evidence",
+            "evidence_digest",
             "fix",
         }
         legacy_fields = {
@@ -80,7 +88,6 @@ class TestKPICentricReport(unittest.TestCase):
             "business_impact",
             "recommended_action",
             "recommendation_source",
-            "evidence_digest",
             "ticket_payload",
             "metrics",
             "scope",
@@ -104,6 +111,7 @@ class TestKPICentricReport(unittest.TestCase):
                 self.assertIn(kpi["confidence"], ["high", "medium", "low"], f"{axis}/{kpi_name} invalid confidence")
                 self.assertIsInstance(kpi["constat"], str, f"{axis}/{kpi_name} constat not str")
                 self.assertIsInstance(kpi["evidence"], dict, f"{axis}/{kpi_name} evidence not dict")
+                self.assertIsInstance(kpi["evidence_digest"], dict, f"{axis}/{kpi_name} evidence_digest not dict")
 
                 if kpi["severity"] is not None:
                     self.assertIn(kpi["severity"], ["critical", "high", "medium", "low"], f"{axis}/{kpi_name} invalid severity")
@@ -145,6 +153,95 @@ class TestKPICentricReport(unittest.TestCase):
                 self.assertIsInstance(evidence["detection_source"], list, f"{axis}/{kpi_name} detection_source not list")
                 self.assertIsInstance(evidence["pages_checked"], int, f"{axis}/{kpi_name} pages_checked not int")
                 self.assertIsInstance(evidence["affected_pages"], int, f"{axis}/{kpi_name} affected_pages not int")
+
+    def test_curated_evidence_digest_contract(self):
+        for axis, axis_kpis in self.kpi_report["axes"].items():
+            for kpi_name, kpi in axis_kpis.items():
+                digest = kpi["evidence_digest"]
+                self.assertIn("quality", digest, f"{axis}/{kpi_name} missing digest.quality")
+                self.assertIn("proof_lines", digest, f"{axis}/{kpi_name} missing digest.proof_lines")
+                self.assertIn("rows", digest, f"{axis}/{kpi_name} missing digest.rows")
+                self.assertIn("urls", digest, f"{axis}/{kpi_name} missing digest.urls")
+                self.assertIn("csv_columns", digest, f"{axis}/{kpi_name} missing digest.csv_columns")
+                self.assertIn("csv_rows", digest, f"{axis}/{kpi_name} missing digest.csv_rows")
+                self.assertIn(digest["quality"], ["VALID", "PARTIAL", "MISSING"], f"{axis}/{kpi_name} invalid digest.quality")
+                self.assertIsInstance(digest["proof_lines"], list, f"{axis}/{kpi_name} proof_lines not list")
+                self.assertIsInstance(digest["rows"], list, f"{axis}/{kpi_name} rows not list")
+                self.assertIsInstance(digest["urls"], list, f"{axis}/{kpi_name} urls not list")
+                self.assertIsInstance(digest["csv_columns"], list, f"{axis}/{kpi_name} csv_columns not list")
+                self.assertIsInstance(digest["csv_rows"], list, f"{axis}/{kpi_name} csv_rows not list")
+                rendered = json.dumps(digest, ensure_ascii=False)
+                self.assertNotIn("<script>alert(1)</script>", rendered, f"{axis}/{kpi_name} exposes dangerous payload")
+                if digest["quality"] == "MISSING":
+                    self.assertEqual(kpi["status"], "not_evaluated", f"{axis}/{kpi_name} missing evidence should be not_evaluated")
+                    self.assertIn("missing_reason", digest, f"{axis}/{kpi_name} missing digest.missing_reason")
+
+    def test_row_required_issue_without_rows_becomes_not_evaluated(self):
+        report = json.loads(json.dumps(self.report))
+        report.setdefault("domain_analysis", {}).setdefault("security", {})["vulnerable_js_dependencies"] = {
+            "status": "fail",
+            "vulnerable_count": 1,
+            "vulnerable_libraries": [],
+        }
+
+        rebuilt = build_kpi_centric_report(report)
+        kpi = self._find_kpi(rebuilt, "sec_js_deps")
+
+        self.assertEqual(kpi["status"], "not_evaluated")
+        self.assertEqual(kpi["evidence_digest"]["quality"], "MISSING")
+        self.assertIn("missing_reason", kpi["evidence_digest"])
+
+    def test_search_detection_without_execution_is_not_evaluated(self):
+        report = json.loads(json.dumps(self.report))
+        report.setdefault("domain_analysis", {}).setdefault("functional_kpi", {})["has_search"] = True
+
+        rebuilt = build_kpi_centric_report(report)
+        kpi = self._find_kpi(rebuilt, "func_search")
+
+        self.assertEqual(kpi["status"], "not_evaluated")
+        self.assertEqual(kpi["evidence_digest"]["quality"], "MISSING")
+
+    def test_search_non_executed_row_is_not_treated_as_execution(self):
+        report = json.loads(json.dumps(self.report))
+        functional = report.setdefault("domain_analysis", {}).setdefault("functional_kpi", {})
+        functional["has_search"] = True
+        functional["search_executed"] = False
+        functional["search_tests"] = [{
+            "search_url": "https://example.com/search?q=snapflow-test",
+            "query": "snapflow-test",
+            "status": "not_executed",
+            "result_behavior": "",
+            "details": "Search form method is not GET; safe backend probe skipped",
+            "executed": False,
+        }]
+
+        rebuilt = build_kpi_centric_report(report)
+        kpi = self._find_kpi(rebuilt, "func_search")
+
+        self.assertEqual(kpi["status"], "not_evaluated")
+        self.assertEqual(kpi["evidence_digest"]["quality"], "MISSING")
+
+    def test_search_executed_probe_can_pass_with_rows(self):
+        report = json.loads(json.dumps(self.report))
+        functional = report.setdefault("domain_analysis", {}).setdefault("functional_kpi", {})
+        functional["has_search"] = True
+        functional["search_executed"] = True
+        functional["search_passed"] = True
+        functional["search_tests"] = [{
+            "search_url": "https://example.com/search?q=snapflow-test",
+            "query": "snapflow-test",
+            "status": "passed",
+            "status_code": 200,
+            "result_behavior": "search_response",
+            "executed": True,
+        }]
+
+        rebuilt = build_kpi_centric_report(report)
+        kpi = self._find_kpi(rebuilt, "func_search")
+
+        self.assertEqual(kpi["status"], "passing")
+        self.assertEqual(kpi["evidence_digest"]["quality"], "VALID")
+        self.assertTrue(kpi["evidence_digest"]["rows"])
 
     def test_french_text_present(self):
         all_text = json.dumps(self.kpi_report, ensure_ascii=False)

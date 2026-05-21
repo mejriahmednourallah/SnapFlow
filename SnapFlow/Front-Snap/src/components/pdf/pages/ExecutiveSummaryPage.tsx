@@ -30,7 +30,7 @@ export function ExecutiveSummaryPage({ report, theme, clientLogoSrc }: Executive
   const distributionRows = [
     { label: 'Validés', count: validatedCount, color: '#16A34A' },
     { label: 'En échec', count: failedCount, color: '#DC2626' },
-    { label: 'Non mesurés / non disponibles', count: notMeasuredOrUnavailableCount, color: '#F97316' },
+    { label: 'Non testés', count: notMeasuredOrUnavailableCount, color: '#F97316' },
   ];
 
   const toPercent = (count: number): string => {

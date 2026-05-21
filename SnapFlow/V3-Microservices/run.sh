@@ -10,6 +10,10 @@ REBUILD_BASE=false
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
+log() {
+    printf '[%s] %s\n' "$(date '+%H:%M:%S')" "$*"
+}
+
 # Parse flags manually
 for arg in "$@"; do
     case $(echo "$arg" | tr '[:upper:]' '[:lower:]') in
@@ -53,12 +57,13 @@ fi
 
 echo -e "\n[$STEP/$TOTAL_STEPS] Building V3 Python base images..."
 BASE_BUILD_ARGS=()
-if [ "$NO_CACHE" = true ]; then
-    BASE_BUILD_ARGS+=(--no-cache --pull)
-fi
 if [ "$REBUILD_BASE" = true ]; then
     BASE_BUILD_ARGS+=(--rebuildbase)
+    if [ "$NO_CACHE" = true ]; then
+        BASE_BUILD_ARGS+=(--no-cache --pull)
+    fi
 fi
+log "Command: $SCRIPT_DIR/BUILD_V3_BASE_IMAGES.sh ${BASE_BUILD_ARGS[*]:-(no args)}"
 "$SCRIPT_DIR/BUILD_V3_BASE_IMAGES.sh" "${BASE_BUILD_ARGS[@]}"
 echo "Base image build complete."
 STEP=$((STEP + 1))
@@ -67,9 +72,11 @@ echo -e "\n[$STEP/$TOTAL_STEPS] Building Docker images..."
 if [ "$NO_CACHE" = true ]; then
     # Do not pass --pull here: service Dockerfiles use local snapflow base images
     # (e.g. snapflow/v3-python-fastapi-base), and --pull forces Docker Hub lookup.
-    docker compose build --no-cache
+    log "Command: docker compose build --progress=plain --no-cache"
+    docker compose build --progress=plain --no-cache
 else
-    docker compose build
+    log "Command: docker compose build --progress=plain"
+    docker compose build --progress=plain
 fi
 echo "Build complete."
 STEP=$((STEP + 1))

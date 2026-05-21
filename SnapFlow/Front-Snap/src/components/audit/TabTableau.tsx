@@ -1,4 +1,4 @@
-import { getAxisScoreBreakdown, getRiskLevelFromScore, getScoreColor, getCriticalityLabel, getPriorityLabel, type Criticality, type FindingStatus, type FindingType, type FindingOrigin, type AuditReport } from '@/data/mockAuditData';
+import { getAxisScoreBreakdown, getRiskLevelFromScore, getScoreColor, getCriticalityLabel, getPriorityLabel, isNonTestedFinding, type Criticality, type FindingStatus, type FindingType, type FindingOrigin, type AuditReport } from '@/data/mockAuditData';
 import { useState } from 'react';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Bug, CheckCircle, FlaskConical, Lightbulb, ShieldAlert } from 'lucide-react';
@@ -32,7 +32,10 @@ export function TabTableau({ audit }: TabTableauProps) {
   const filtered = allFindings.filter(f => {
     if (filterCrit !== 'all' && f.criticality !== filterCrit) return false;
     if (filterType !== 'all' && f.type !== filterType) return false;
-    if (filterStatus !== 'all' && f.status !== filterStatus) return false;
+    if (filterStatus !== 'all') {
+      if (filterStatus === 'not_measured' && !isNonTestedFinding(f)) return false;
+      if (filterStatus !== 'not_measured' && f.status !== filterStatus) return false;
+    }
     return true;
   });
 
@@ -59,7 +62,7 @@ export function TabTableau({ audit }: TabTableauProps) {
                     <th className="text-left p-3">Axe</th>
                     <th className="text-center p-3">Score</th>
                     <th className="text-center p-3">Risque</th>
-                    <th className="text-center p-3">Anomalies</th>
+                    <th className="text-center p-3">Bugs</th>
                     <th className="text-center p-3">Critiques</th>
                     <th className="text-center p-3">Total</th>
                   </tr>
@@ -68,16 +71,23 @@ export function TabTableau({ audit }: TabTableauProps) {
                   {audit.axes.map(ax => {
                     const breakdown = getAxisScoreBreakdown(ax);
                     const cc = ax.findings.filter(f => f.criticality === 'critical').length;
-                    const anomalies = ax.findings.filter(f => f.type === 'bug').length;
+                    const bugs = ax.findings.filter(f => f.status === 'fail' && f.type === 'bug').length;
+                    const allNonTeste = ax.findings.length > 0 && ax.findings.every(isNonTestedFinding);
                     const riskLevel = getRiskLevelFromScore(breakdown.scorePct);
                     return (
                       <tr key={ax.id} className="border-b border-border/30 hover:bg-muted/20">
                         <td className="p-3 font-medium"><span className="inline-flex items-center gap-2"><AxisIcon id={ax.id} className="w-4 h-4" />{ax.name}</span></td>
-                        <td className={`p-3 text-center font-mono font-bold ${getScoreColor(breakdown.scorePct)}`}>{breakdown.x}/{breakdown.y}</td>
-                        <td className="p-3 text-center">
-                          <span className={`criticality-${riskLevel} px-2 py-0.5 rounded-full text-xs border`}>{getCriticalityLabel(riskLevel)}</span>
+                        <td className={`p-3 text-center font-mono font-bold ${getScoreColor(breakdown.scorePct)}`}>
+                          {allNonTeste ? 'N/T' : `${breakdown.x}/${breakdown.y}`}
                         </td>
-                        <td className="p-3 text-center font-mono">{anomalies}</td>
+                        <td className="p-3 text-center">
+                          {allNonTeste ? (
+                            <span className="px-2 py-0.5 rounded-full text-xs border text-yellow-400 bg-yellow-500/10 border-yellow-500/20">Non testé</span>
+                          ) : (
+                            <span className={`criticality-${riskLevel} px-2 py-0.5 rounded-full text-xs border`}>{getCriticalityLabel(riskLevel)}</span>
+                          )}
+                        </td>
+                        <td className="p-3 text-center font-mono">{bugs}</td>
                         <td className="p-3 text-center font-mono">{cc}</td>
                         <td className="p-3 text-center font-mono">{ax.findings.length}</td>
                       </tr>
@@ -111,8 +121,7 @@ export function TabTableau({ audit }: TabTableauProps) {
                   <option value="all">Tout statut</option>
                   <option value="pass">Pass</option>
                   <option value="fail">Fail</option>
-                  <option value="not_measured">Non mesuré</option>
-                  <option value="not_available">Non disponible</option>
+                  <option value="not_measured">Non testé</option>
                 </select>
               </div>
               <span className="text-xs text-muted-foreground">{sorted.length} résultat{sorted.length > 1 ? 's' : ''}</span>
@@ -136,12 +145,12 @@ export function TabTableau({ audit }: TabTableauProps) {
                       <td className="p-3 text-center">
                         {(() => {
                           const origin: FindingOrigin | undefined = f.origin;
+                          if (isNonTestedFinding(f))
+                            return <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border text-yellow-400 bg-yellow-500/10 border-yellow-500/20"><FlaskConical className="w-3 h-3" />Non testé</span>;
                           if (origin === 'passing_kpi' || f.status === 'pass')
                             return <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border text-emerald-400 bg-emerald-500/10 border-emerald-500/20"><CheckCircle className="w-3 h-3" />KPI validé</span>;
                           if (origin === 'compliance' || origin === 'RGPD')
                             return <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border text-orange-400 bg-orange-500/10 border-orange-500/20"><ShieldAlert className="w-3 h-3" />RGPD</span>;
-                          if (origin === 'coverage')
-                            return <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border text-stone-400 bg-stone-500/10 border-stone-500/20"><FlaskConical className="w-3 h-3" />Non mesuré</span>;
                           if (origin === 'bug' || f.type === 'bug')
                             return <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border text-red-400 bg-red-500/10 border-red-500/20"><Bug className="w-3 h-3" />Bug</span>;
                           return <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border text-blue-400 bg-blue-500/10 border-blue-500/20"><Lightbulb className="w-3 h-3" />Recommandation</span>;

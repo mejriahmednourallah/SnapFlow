@@ -26,7 +26,9 @@ class TestKPINewModeEndpoints(unittest.TestCase):
         self.old_count_pages = main.count_pages
         self.old_persist = main._persist_kpi_payload
         self.old_load_persisted = main._load_persisted_kpi_payload
+        self.old_build_and_persist = main._build_and_persist_kpi_payload
         self.old_prev_quality = main._load_previous_quality_drift_artifact
+        self.old_get_db = main.get_db
 
         main.scans["scan_kpi_mode"] = {
             "scan_id": "scan_kpi_mode",
@@ -42,7 +44,9 @@ class TestKPINewModeEndpoints(unittest.TestCase):
         main.count_pages = self.old_count_pages
         main._persist_kpi_payload = self.old_persist
         main._load_persisted_kpi_payload = self.old_load_persisted
+        main._build_and_persist_kpi_payload = self.old_build_and_persist
         main._load_previous_quality_drift_artifact = self.old_prev_quality
+        main.get_db = self.old_get_db
         main.scans.pop("scan_kpi_mode", None)
 
     def _stub_builders(self):
@@ -102,6 +106,32 @@ class TestKPINewModeEndpoints(unittest.TestCase):
         self.assertEqual(body["quality_drift_artifact"]["scan_id"], "scan_kpi_mode")
         self.assertEqual(body["quality_drift_artifact"]["kpi_mode"], "new")
 
+    def test_kpis_endpoint_returns_persisted_payload_without_rebuild(self):
+        cached = {
+            "kpi_mode": "new",
+            "axes": {},
+            "summary": {},
+            "top_level_kpis": {"health_status": "cached"},
+        }
+        main._load_persisted_kpi_payload = lambda scan_id: dict(cached)
+
+        def fail_build(_scan_id):
+            raise AssertionError("KPI endpoint should use persisted payload before rebuilding")
+
+        main.build_report = fail_build
+
+        resp = self.client.get("/scan/scan_kpi_mode/kpis")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["top_level_kpis"]["health_status"], "cached")
+
+    def test_kpis_endpoint_waits_while_payload_is_finalizing(self):
+        main.scans["scan_kpi_mode"]["status"] = main.ScanStatus.FINALIZING
+        main._load_persisted_kpi_payload = lambda scan_id: None
+
+        resp = self.client.get("/scan/scan_kpi_mode/kpis")
+        self.assertEqual(resp.status_code, 202)
+        self.assertIn("finalized", resp.json()["detail"])
+
     def test_kpis_top_endpoint_returns_canonical_block(self):
         self._stub_builders()
         resp = self.client.get("/scan/scan_kpi_mode/kpis/top")
@@ -125,6 +155,59 @@ class TestKPINewModeEndpoints(unittest.TestCase):
         self.assertEqual(artifact["scan_id"], "scan_kpi_mode")
         self.assertIn("quality", artifact)
         self.assertIn("drift", artifact)
+
+    def test_previous_quality_loader_ignores_unparseable_jsonb_object(self):
+        class FakeCursor:
+            def execute(self, *_args, **_kwargs):
+                pass
+
+            def fetchone(self):
+                return {"scan_id": "scan_previous", "quality_drift_artifact": dict}
+
+            def close(self):
+                pass
+
+        class FakeConn:
+            def cursor(self, *_args, **_kwargs):
+                return FakeCursor()
+
+            def close(self):
+                pass
+
+        main.get_db = lambda: FakeConn()
+
+        scan_id, artifact = main._load_previous_quality_drift_artifact("https://example.com", "scan_current")
+
+        self.assertEqual(scan_id, "scan_previous")
+        self.assertIsNone(artifact)
+
+    def test_previous_quality_loader_accepts_bytes_jsonb(self):
+        class FakeCursor:
+            def execute(self, *_args, **_kwargs):
+                pass
+
+            def fetchone(self):
+                return {
+                    "scan_id": "scan_previous",
+                    "quality_drift_artifact": b'{"quality": {"quality_score": 91.5}}',
+                }
+
+            def close(self):
+                pass
+
+        class FakeConn:
+            def cursor(self, *_args, **_kwargs):
+                return FakeCursor()
+
+            def close(self):
+                pass
+
+        main.get_db = lambda: FakeConn()
+
+        scan_id, artifact = main._load_previous_quality_drift_artifact("https://example.com", "scan_current")
+
+        self.assertEqual(scan_id, "scan_previous")
+        self.assertEqual(artifact["quality"]["quality_score"], 91.5)
 
 
 if __name__ == "__main__":

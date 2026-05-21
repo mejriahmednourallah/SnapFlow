@@ -63,6 +63,8 @@ class RenderResult:
     invisible_links:  int = 0
     console_errors: Optional[list[str]] = None
     console_error_count: int = 0
+    tracker_timeline: Optional[list[dict]] = None
+    cmp_banner: Optional[dict] = None
     error:         Optional[str] = None
 
 
@@ -264,14 +266,47 @@ class BrowserPool:
                     ...performance.getEntriesByType('navigation'),
                     ...performance.getEntriesByType('resource'),
                 ];
+                const trackerCatalog = [
+                    {fragment: 'google-analytics.com', vendor: 'Google Analytics', category: 'analytics'},
+                    {fragment: 'googletagmanager.com', vendor: 'Google Tag Manager', category: 'tag_manager'},
+                    {fragment: 'doubleclick.net', vendor: 'Google Ads', category: 'advertising'},
+                    {fragment: 'facebook.net', vendor: 'Meta Pixel', category: 'advertising'},
+                    {fragment: 'facebook.com/tr', vendor: 'Meta Pixel', category: 'advertising'},
+                    {fragment: 'hotjar.com', vendor: 'Hotjar', category: 'analytics'},
+                    {fragment: 'clarity.ms', vendor: 'Microsoft Clarity', category: 'analytics'},
+                    {fragment: 'matomo', vendor: 'Matomo', category: 'analytics'},
+                    {fragment: 'linkedin.com/px', vendor: 'LinkedIn Insight', category: 'advertising'},
+                    {fragment: 'snap.licdn.com', vendor: 'LinkedIn Insight', category: 'advertising'},
+                    {fragment: 'tiktok.com/i18n/pixel', vendor: 'TikTok Pixel', category: 'advertising'},
+                    {fragment: 'criteo.com', vendor: 'Criteo', category: 'advertising'},
+                ];
+                const trackerTimeline = [];
                 let transferBytes = 0;
-                for (const entry of resources) {
+                resources.forEach((entry, index) => {
                     const size = sizeOf(entry);
                     const category = classify(entry);
                     transferBytes += size;
                     breakdown[category].size_bytes += size;
                     breakdown[category].count += 1;
-                }
+                    const name = String(entry.name || '');
+                    const lowerName = name.toLowerCase();
+                    const matched = trackerCatalog.find((item) => lowerName.includes(item.fragment));
+                    if (matched && trackerTimeline.length < 50) {
+                        let host = '';
+                        try { host = new URL(name, window.location.href).host; } catch (e) {}
+                        trackerTimeline.push({
+                            page_url: window.location.href,
+                            tracker_domain: host || matched.fragment,
+                            request_url: name,
+                            category: matched.category,
+                            vendor: matched.vendor,
+                            resource_type: entry.initiatorType || 'resource',
+                            order: index + 1,
+                            before_consent: true,
+                            source: 'browser_pool_runtime',
+                        });
+                    }
+                });
                 const invisibleLinks = Array.from(document.querySelectorAll('a')).filter((el) => {
                     const style = window.getComputedStyle(el);
                     const rect = el.getBoundingClientRect();
@@ -283,6 +318,34 @@ class BrowserPool:
                 }).length;
                 const overflow = () => document.documentElement.scrollWidth >
                     (Math.max(document.documentElement.clientWidth, window.innerWidth || 0) + 5);
+                const bannerSelectors = [
+                    '[id*="cookie" i]', '[class*="cookie" i]',
+                    '[id*="consent" i]', '[class*="consent" i]',
+                    '[id*="tarteaucitron" i]', '[class*="tarteaucitron" i]',
+                    '[id*="didomi" i]', '[class*="didomi" i]',
+                    '[id*="onetrust" i]', '[class*="onetrust" i]',
+                    '[aria-label*="cookie" i]', '[aria-label*="consent" i]',
+                ];
+                let cmpBanner = null;
+                for (const selector of bannerSelectors) {
+                    const element = document.querySelector(selector);
+                    if (!element) continue;
+                    const style = window.getComputedStyle(element);
+                    const rect = element.getBoundingClientRect();
+                    const visible = style.display !== 'none'
+                        && style.visibility !== 'hidden'
+                        && style.opacity !== '0'
+                        && rect.width > 0
+                        && rect.height > 0;
+                    if (!visible) continue;
+                    cmpBanner = {
+                        selector,
+                        text: (element.innerText || element.textContent || '').replace(/\\s+/g, ' ').trim().slice(0, 240),
+                        visible: true,
+                        source: 'browser_pool_runtime',
+                    };
+                    break;
+                }
                 return {
                     fcp_ms: round(fcp, 1),
                     lcp_ms: round(lcp, 1),
@@ -293,6 +356,8 @@ class BrowserPool:
                     asset_breakdown: breakdown,
                     desktop_overflow: overflow(),
                     invisible_links: invisibleLinks,
+                    tracker_timeline: trackerTimeline,
+                    cmp_banner: cmpBanner,
                 };
             }"""
         )
@@ -379,6 +444,8 @@ class BrowserPool:
                     invisible_links=metrics.get("invisible_links", 0),
                     console_errors=console_errors,
                     console_error_count=len(console_errors),
+                    tracker_timeline=metrics.get("tracker_timeline") or [],
+                    cmp_banner=metrics.get("cmp_banner") or None,
                 )
             except asyncio.TimeoutError:
                 self._timeout_count += 1

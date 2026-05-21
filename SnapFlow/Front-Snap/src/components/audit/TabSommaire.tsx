@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { getAxisScoreBreakdown, getScoreColor, type AuditAxis, type AuditReport } from '@/data/mockAuditData';
+import { getAxisScoreBreakdown, getScoreColor, isNonTestedFinding, type AuditAxis, type AuditReport } from '@/data/mockAuditData';
 import { AxisIcon } from '@/components/audit/AxisIcon';
 import { AxisDetailSheet } from '@/components/audit/AxisDetailSheet';
 import { ScoreGauge } from '@/components/ScoreGauge';
@@ -72,6 +72,7 @@ export function TabSommaire({ audit, selectedAxisId, onSelectAxis }: TabSommaire
             const breakdown = getAxisScoreBreakdown(ax);
             const criticalCount = ax.findings.filter(f => f.criticality === 'critical').length;
             const highCount     = ax.findings.filter(f => f.criticality === 'high').length;
+            const allNonTeste = ax.findings.length > 0 && ax.findings.every(isNonTestedFinding);
             return (
               <button
                 key={ax.id}
@@ -83,7 +84,11 @@ export function TabSommaire({ audit, selectedAxisId, onSelectAxis }: TabSommaire
                 <div className="flex-1 min-w-0">
                   <p className="font-semibold">{ax.name}</p>
                   <p className="text-xs text-muted-foreground mt-0.5 truncate">{ax.description}</p>
-                  <p className="text-xs text-muted-foreground mt-1">{ax.score}/{ax.maxScore} réussis — {ax.findings.length} constat{ax.findings.length !== 1 ? 's' : ''}</p>
+                  {allNonTeste ? (
+                    <p className="text-xs text-yellow-400 mt-1">Statut axe : Non testé</p>
+                  ) : (
+                    <p className="text-xs text-muted-foreground mt-1">{breakdown.x}/{breakdown.y} réussis — {ax.findings.length} constat{ax.findings.length !== 1 ? 's' : ''}</p>
+                  )}
                 </div>
                 <div className="flex items-center gap-3 flex-shrink-0">
                   {criticalCount > 0 && (
@@ -92,7 +97,9 @@ export function TabSommaire({ audit, selectedAxisId, onSelectAxis }: TabSommaire
                   {highCount > 0 && (
                     <span className="text-xs criticality-high px-2 py-0.5 rounded-full border">{highCount} {highCount > 1 ? 'élevés' : 'élevé'}</span>
                   )}
-                  <span className={`font-mono font-bold text-lg ${getScoreColor(breakdown.scorePct)}`}>{breakdown.x}/{breakdown.y}</span>
+                  <span className={`font-mono font-bold text-lg ${getScoreColor(breakdown.scorePct)}`}>
+                    {allNonTeste ? 'N/T' : `${breakdown.x}/${breakdown.y}`}
+                  </span>
                 </div>
               </button>
             );
@@ -105,11 +112,12 @@ export function TabSommaire({ audit, selectedAxisId, onSelectAxis }: TabSommaire
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {audit.axes.map(ax => {
             const breakdown = getAxisScoreBreakdown(ax);
-            const bugCount  = ax.findings.filter(f => f.type === 'bug').length;
-            const recoCount = ax.findings.filter(f => f.type === 'recommendation').length;
+            const bugCount  = ax.findings.filter(f => f.status === 'fail' && f.type === 'bug').length;
+            const recoCount = ax.findings.filter(f => f.status === 'fail' && f.type === 'recommendation').length;
             const passed    = breakdown.passed;
-            const total     = ax.findings.length;
-            const gaugeScore = total > 0 ? Math.round((passed / total) * 100) : 0;
+            const total     = breakdown.y;
+            const allNonTeste = ax.findings.length > 0 && ax.findings.every(isNonTestedFinding);
+            const gaugeScore = total > 0 && !allNonTeste ? breakdown.scorePct : 0;
             return (
               <button
                 key={ax.id}
@@ -122,13 +130,17 @@ export function TabSommaire({ audit, selectedAxisId, onSelectAxis }: TabSommaire
                     score={gaugeScore}
                     size={66}
                     strokeWidth={4}
-                    valueText={`${gaugeScore}%`}
+                    valueText={allNonTeste ? 'N/T' : `${gaugeScore}%`}
                     centerScale={1.2}
                   />
                   <div className="flex-1 flex items-start justify-between gap-2">
                     <div className="flex flex-col items-end text-right leading-tight">
                       <p className="font-semibold text-sm">{ax.name}</p>
-                      <p className="text-xs text-muted-foreground font-mono">{passed}/{total}</p>
+                      {allNonTeste ? (
+                        <p className="text-xs text-yellow-400 font-mono">Non testé</p>
+                      ) : (
+                        <p className="text-xs text-muted-foreground font-mono">{passed}/{total}</p>
+                      )}
                     </div>
                     <div className="p-1.5 rounded-lg bg-muted/40">
                       <AxisIcon id={ax.id} className="w-5 h-5 text-muted-foreground" />

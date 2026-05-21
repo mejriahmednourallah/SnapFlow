@@ -2,22 +2,17 @@
 .SYNOPSIS
     SnapFlow V3 Stack Launcher
 .DESCRIPTION
-    Builds and runs the entire V3 scanning stack using Docker Compose.
-    All flags are required — no defaults, no caching.
-.PARAMETER Url
-    The website URL to scan (required)
-.PARAMETER MaxPages
-    Maximum number of pages to crawl (default: 150)
-.PARAMETER HeadlessConcurrency
-    Number of concurrent headless browser tabs (default: 3)
+    Builds and runs the V3 scanning stack using Docker Compose.
 .PARAMETER NoCacheBuild
-    If set, forces Docker to rebuild all images from scratch (no cache)
+    Rebuilds service images without Docker cache. Does not rebuild base images by itself.
 .PARAMETER Down
     If set, tears down the stack and removes volumes before starting
+.PARAMETER RebuildBase
+    Explicitly rebuilds shared Python base images. Combine with -NoCacheBuild for a cacheless base rebuild.
 .EXAMPLE
-    .\run.ps1 -Url "https://www.auchan.sn" -MaxPages 200 -NoCacheBuild
+    .\run.ps1 -NoCacheBuild
 .EXAMPLE
-    .\run.ps1 -Url "https://medianet.com.tn"
+    .\run.ps1 -RebuildBase -NoCacheBuild
 #>
 
 param(
@@ -56,12 +51,12 @@ if ($Down) {
 Write-Host "`n[$step/$totalSteps] Building V3 Python base images..." -ForegroundColor Yellow
 $baseBuildScript = Join-Path $scriptDir "BUILD_V3_BASE_IMAGES.ps1"
 $baseArgs = @()
-if ($NoCacheBuild) {
-    $baseArgs += "-NoCacheBuild"
-    $baseArgs += "-Pull"
-}
 if ($RebuildBase) {
     $baseArgs += "-RebuildBase"
+    if ($NoCacheBuild) {
+        $baseArgs += "-NoCacheBuild"
+        $baseArgs += "-Pull"
+    }
 }
 & $baseBuildScript @baseArgs
 
@@ -79,9 +74,11 @@ Write-Host "`n[$step/$totalSteps] Building Docker images..." -ForegroundColor Ye
 if ($NoCacheBuild) {
     # Do not pass --pull here: service Dockerfiles depend on local snapflow
     # base images and --pull forces Docker Hub lookups for local-only tags.
-    docker compose build --no-cache
+    Write-Host "Command: docker compose build --progress=plain --no-cache" -ForegroundColor DarkGray
+    docker compose build --progress=plain --no-cache
 } else {
-    docker compose build
+    Write-Host "Command: docker compose build --progress=plain" -ForegroundColor DarkGray
+    docker compose build --progress=plain
 }
 
 if ($LASTEXITCODE -ne 0) {

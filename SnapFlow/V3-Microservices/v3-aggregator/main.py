@@ -96,6 +96,31 @@ def _to_float(value, default=0.0):
         return default
 
 
+def _jsonb_object(value, default: Optional[dict] = None) -> Optional[dict]:
+    """Return a dict from a JSONB/text payload without raising on driver quirks."""
+    fallback = default if default is not None else None
+    if value is None:
+        return fallback
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, type):
+        return fallback
+    if isinstance(value, memoryview):
+        value = value.tobytes()
+    if isinstance(value, (bytes, bytearray)):
+        value = value.decode("utf-8", errors="replace")
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return fallback
+        try:
+            parsed = json.loads(text)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return fallback
+        return parsed if isinstance(parsed, dict) else fallback
+    return fallback
+
+
 def _build_kpi_quality_drift_artifact(
     scan_id: str,
     scan_url: str,
@@ -250,9 +275,8 @@ def _load_previous_quality_drift_artifact(scan_url: str, exclude_scan_id: str) -
         conn.close()
         if not row:
             return None, None
-        artifact = row.get("quality_drift_artifact")
-        artifact = artifact if isinstance(artifact, dict) else json.loads(artifact or "{}")
-        return row.get("scan_id"), artifact if isinstance(artifact, dict) else None
+        artifact = _jsonb_object(row.get("quality_drift_artifact"))
+        return row.get("scan_id"), artifact
     except Exception as exc:
         logger.warning("Could not load previous quality artifact for %s: %s", scan_url, exc)
         return None, None
@@ -285,6 +309,8 @@ def _scanner_base_candidates() -> list[str]:
 # In-memory scan status store (survives container restarts only via DB)
 scans: dict[str, dict] = {}
 scans_lock = threading.RLock()
+_kpi_build_locks: dict[str, threading.Lock] = {}
+_kpi_build_locks_guard = threading.Lock()
 _heartbeat_started = False
 
 # Ignore trivial high-frequency words when building cannibalization clusters.
@@ -386,20 +412,82 @@ def _load_persisted_kpi_payload(scan_id: str) -> Optional[dict]:
         if not row:
             return None
 
-        payload = row.get("kpi_json")
-        payload = payload if isinstance(payload, dict) else json.loads(payload)
+        payload = _jsonb_object(row.get("kpi_json"))
+        if payload is None:
+            return None
         if isinstance(payload, dict) and "top_level_kpis" not in payload:
-            top_level = row.get("top_level_kpis")
-            top_level = top_level if isinstance(top_level, dict) else json.loads(top_level or "{}")
+            top_level = _jsonb_object(row.get("top_level_kpis"), {})
             payload["top_level_kpis"] = top_level
         if isinstance(payload, dict) and "quality_drift_artifact" not in payload:
-            artifact = row.get("quality_drift_artifact")
-            artifact = artifact if isinstance(artifact, dict) else json.loads(artifact or "{}")
+            artifact = _jsonb_object(row.get("quality_drift_artifact"), {})
             payload["quality_drift_artifact"] = artifact
         return payload
     except Exception as exc:
         logger.warning("Could not load persisted KPI payload for %s: %s", scan_id, exc)
         return None
+
+
+def _get_kpi_build_lock(scan_id: str) -> threading.Lock:
+    with _kpi_build_locks_guard:
+        lock = _kpi_build_locks.get(scan_id)
+        if lock is None:
+            lock = threading.Lock()
+            _kpi_build_locks[scan_id] = lock
+        return lock
+
+
+def _build_and_persist_kpi_payload(
+    scan_id: str,
+    scan: Optional[dict] = None,
+    wait_for_lock: bool = True,
+) -> Optional[dict]:
+    """Build the canonical KPI payload once and persist it for fast polling reads."""
+    cached = _load_persisted_kpi_payload(scan_id)
+    if cached is not None:
+        return cached
+
+    build_lock = _get_kpi_build_lock(scan_id)
+    acquired = build_lock.acquire(blocking=wait_for_lock)
+    if not acquired:
+        return None
+
+    try:
+        cached = _load_persisted_kpi_payload(scan_id)
+        if cached is not None:
+            return cached
+
+        started = time.time()
+        scan_meta = scan or get_scan_entry(scan_id) or {}
+        report = build_report(scan_id)
+        if report.get("error"):
+            raise RuntimeError(str(report["error"]))
+
+        kpi_report = build_kpi_centric_report(report)
+        if kpi_report.get("error"):
+            raise RuntimeError(str(kpi_report["error"]))
+
+        if scan_meta.get("nlp_partiel"):
+            kpi_report["nlp_partiel"] = True
+            kpi_report["nlp_partiel_avertissement"] = (
+                "L'enrichissement NLP est incomplet pour ce scan. "
+                "Les KPIs de contenu, lisibilite et RGPD peuvent etre imprecis."
+            )
+
+        kpi_report["kpi_mode"] = "new"
+        kpi_report["top_level_kpis"] = _build_top_level_kpis(kpi_report)
+        prev_scan_id, prev_artifact = _load_previous_quality_drift_artifact(scan_meta.get("url", ""), scan_id)
+        kpi_report["quality_drift_artifact"] = _build_kpi_quality_drift_artifact(
+            scan_id,
+            scan_meta.get("url", ""),
+            kpi_report,
+            previous_artifact=prev_artifact,
+            previous_scan_id=prev_scan_id,
+        )
+        _persist_kpi_payload(scan_id, kpi_report, scan_url=scan_meta.get("url", ""))
+        logger.info("KPI payload ready for %s in %.1fs", scan_id, time.time() - started)
+        return kpi_report
+    finally:
+        build_lock.release()
 
 
 def _ensure_scan_state_table() -> None:
@@ -521,6 +609,7 @@ class ScanStatus(str, Enum):
     PENDING = "pending"
     RUNNING = "running"
     NLP_PROCESSING = "nlp_processing"
+    FINALIZING = "finalizing"
     COMPLETE = "complete"
     FAILED = "failed"
 
@@ -1098,6 +1187,8 @@ def evaluate_multi_browser_compatibility(scan_url: str) -> dict:
         "diff_pct": float(data.get("diff_pct", 0.0) or 0.0),
         "threshold_pct": float(data.get("threshold_pct", 5.0) or 5.0),
         "engines": data.get("engines", ["chromium", "webkit"]),
+        "browser_matrix": _safe_list(data.get("browser_matrix") or data.get("rows")),
+        "rows": _safe_list(data.get("rows") or data.get("browser_matrix")),
     }
 
 
@@ -1388,6 +1479,13 @@ def _safe_dict(value) -> dict:
     if isinstance(value, dict):
         return value
     return {}
+
+
+def _evidence_snippet(value, limit: int = 220) -> str:
+    text = re.sub(r"\s+", " ", str(value or "")).strip()
+    if len(text) <= limit:
+        return text
+    return text[: max(limit - 1, 0)].rstrip() + "..."
 
 
 def _status_from_bool(value) -> str:
@@ -2323,6 +2421,10 @@ def build_report(scan_id: str) -> dict:
             "total_forms":     raw_func.get("total_forms", 0),
             "passed":          raw_func.get("passed", False),
             "issues":          raw_func.get("issues", []),
+            "search_executed":  raw_func.get("search_executed", False),
+            "search_passed":    raw_func.get("search_passed"),
+            "search_tests":     _safe_list(raw_func.get("search_tests")),
+            "search_rows":      _safe_list(raw_func.get("search_rows")),
         }
         functional_fuzzer_kpi = _build_functional_fuzzer_kpi(summary_row, form_fuzzer_table_stats)
 
@@ -2380,6 +2482,7 @@ def build_report(scan_id: str) -> dict:
     ux_mobile_checked_pages = 0
     ux_mobile_overflow_pages = 0
     ux_mobile_overflow_urls = []
+    ux_mobile_rows = []
     headless_fcp = []
     headless_lcp = []
     headless_cls = []
@@ -2435,6 +2538,26 @@ def build_report(scan_id: str) -> dict:
     typo_pages = 0
     typo_density_total = 0.0
     typo_density_samples = []
+    seo_non_clean_url_rows = []
+    seo_external_link_rows = []
+    seo_h1_quality_rows = []
+    seo_meta_nlp_rows = []
+    seo_llms_rows_by_url = {}
+    perf_console_error_rows = []
+    content_freshness_rows = []
+    content_thin_rows = []
+    content_cta_rows = []
+    content_broken_structure_rows = []
+    content_lexical_rows = []
+    rgpd_retention_rows = []
+    rgpd_minimization_rows = []
+    rgpd_purpose_rows = []
+    rgpd_rights_rows = []
+    rgpd_pre_consent_rows = []
+    rgpd_privacy_score_rows = []
+    rgpd_runtime_pre_consent_urls = set()
+    rgpd_cookie_consent_rows = []
+    audience_rows = []
     cannibalization_map = defaultdict(list)
     cannibalization_keywords = defaultdict(list)
     brand_exclusion_terms = _build_brand_exclusion_terms(scan_start_url)
@@ -2490,6 +2613,11 @@ def build_report(scan_id: str) -> dict:
             seo_bad_heading_pages.append(page_url)
         if not seo.get("url_clean", True):
             seo_not_url_clean += 1
+            seo_non_clean_url_rows.append({
+                "url": page_url,
+                "issue": "non_clean_url",
+                "guidance": "Use short readable slugs without node ids or tracking query strings",
+            })
         if not seo.get("has_lazy_images", True):
             seo_without_lazy += 1
         seo_node_style_url_count += seo.get("node_style_url_count", 0)
@@ -2504,6 +2632,12 @@ def build_report(scan_id: str) -> dict:
                 normalized = normalized[4:]
             if normalized:
                 seo_external_domains_recount.add(normalized)
+                if len(seo_external_link_rows) < 200:
+                    seo_external_link_rows.append({
+                        "page_url": page_url,
+                        "external_domain": normalized,
+                        "quality_signal": "domain_detected",
+                    })
 
         # Phase K-1: detect homepage H1
         if page_url.rstrip("/") == scan_start_url:
@@ -2587,13 +2721,64 @@ def build_report(scan_id: str) -> dict:
                     if isinstance(mobile_overflow, bool)
                     else str(mobile_overflow).strip().lower() in {"1", "true", "yes"}
                 )
+                ux_mobile_rows.append({
+                    "page_url": page_url,
+                    "viewport": "mobile",
+                    "overflow": bool(is_mobile_overflow),
+                    "tap_issue": False,
+                    "layout_issue": "horizontal_overflow" if is_mobile_overflow else "none",
+                })
                 if is_mobile_overflow:
                     ux_mobile_overflow_pages += 1
                     ux_mobile_overflow_urls.append(page_url)
+            cmp_banner = _safe_dict(headless.get("cmp_banner"))
+            if cmp_banner:
+                rgpd_cookie_consent_rows.append({
+                    "page_url": page_url,
+                    "selector": cmp_banner.get("selector"),
+                    "visible": cmp_banner.get("visible"),
+                    "text": _evidence_snippet(cmp_banner.get("text")),
+                    "source": cmp_banner.get("source") or "runtime",
+                })
+            tracker_timeline = _safe_list(headless.get("tracker_timeline"))
+            if tracker_timeline:
+                rgpd_runtime_pre_consent_urls.add(page_url)
+                for tracker in tracker_timeline[:50]:
+                    if not isinstance(tracker, dict):
+                        continue
+                    rgpd_pre_consent_rows.append({
+                        "page_url": page_url,
+                        "tracker_domain": tracker.get("tracker_domain"),
+                        "category": tracker.get("category"),
+                        "order": tracker.get("order"),
+                        "before_consent": tracker.get("before_consent", True),
+                        "request_url": tracker.get("request_url"),
+                        "vendor": tracker.get("vendor"),
+                        "resource_type": tracker.get("resource_type"),
+                        "source": tracker.get("source") or "runtime_network",
+                    })
             # Phase G: console errors + non-functional buttons
             if headless.get("console_error_count", 0) > 0:
                 perf_console_error_pages += 1
                 perf_console_error_page_urls.append(page_url)
+                messages = _safe_list(headless.get("console_errors"))
+                if messages:
+                    for message in messages[:10]:
+                        perf_console_error_rows.append({
+                            "page_url": page_url,
+                            "message": _evidence_snippet(message, 260),
+                            "source": "browser_console",
+                            "line": None,
+                            "count": 1,
+                        })
+                else:
+                    perf_console_error_rows.append({
+                        "page_url": page_url,
+                        "message": "Console errors detected but messages were not retained",
+                        "source": "browser_console",
+                        "line": None,
+                        "count": int(headless.get("console_error_count", 0) or 0),
+                    })
             if headless.get("non_functional_button_count", 0) > 0:
                 perf_nonfunc_button_pages += 1
                 perf_nonfunc_button_page_urls.append(page_url)
@@ -2705,6 +2890,13 @@ def build_report(scan_id: str) -> dict:
                     pub = _date.fromisoformat(str(lpd))
                     if pub <= _date.today():
                         content_pub_dates.append(str(lpd))
+                        content_freshness_rows.append({
+                            "page_url": page_url,
+                            "latest_date": str(lpd),
+                            "source": nlp.get("last_pub_date_source"),
+                            "page_type": nlp.get("page_type"),
+                            "stale_threshold_days": 365,
+                        })
                 except (TypeError, ValueError):
                     pass
             if nlp.get("is_news_page"):
@@ -2720,8 +2912,22 @@ def build_report(scan_id: str) -> dict:
             if nlp.get("content_type_hint") == "stuffed":
                 nlp_keyword_stuffing_pages += 1
                 context_keyword_stuffing_pages.append(page_url)
+                content_thin_rows.append({
+                    "page_url": page_url,
+                    "word_count": nlp.get("word_count"),
+                    "typo_density": nlp.get("typo_density"),
+                    "stuffing_signal": True,
+                    "snippet": _evidence_snippet(_safe_dict(_safe_dict(nlp.get("content_kpis")).get("above_fold")).get("above_fold_snippet")),
+                })
             if (nlp.get("word_count") or 0) < 300:
                 nlp_thin_content_pages += 1
+                content_thin_rows.append({
+                    "page_url": page_url,
+                    "word_count": nlp.get("word_count"),
+                    "typo_density": nlp.get("typo_density"),
+                    "stuffing_signal": nlp.get("content_type_hint") == "stuffed",
+                    "snippet": _evidence_snippet(_safe_dict(_safe_dict(nlp.get("content_kpis")).get("above_fold")).get("above_fold_snippet")),
+                })
             typo_density = float(nlp.get("typo_density", 0.0) or 0.0)
             # Count typo-affected pages only at the failing threshold.
             # Tiny non-zero densities are often benign/noise and can inflate page counts.
@@ -2746,6 +2952,14 @@ def build_report(scan_id: str) -> dict:
             audience_segment_counts[seg] += 1
             if conf in audience_confidence_counts:
                 audience_confidence_counts[conf] += 1
+            if len(audience_rows) < 200:
+                audience_rows.append({
+                    "page_url": page_url,
+                    "segment": seg,
+                    "confidence": conf,
+                    "source": audience.get("source"),
+                    "snippet": _evidence_snippet(_safe_dict(_safe_dict(nlp.get("content_kpis")).get("above_fold")).get("above_fold_snippet")),
+                })
 
             rgpd_text = nlp.get("rgpd_text_analysis", {})
             page_url_lower = page_url.lower()
@@ -2764,8 +2978,23 @@ def build_report(scan_id: str) -> dict:
                 rgpd_declared_purpose_inferred_urls.add(page_url)
             if rgpd_text.get("data_retention_mentioned"):   # Gap #41
                 nlp_rgpd_retention_pages += 1
+                rgpd_retention_rows.append({
+                    "page_url": page_url,
+                    "snippet": _evidence_snippet((_safe_list(rgpd_text.get("retention_phrases")) or [""])[0]),
+                    "retention_period": rgpd_text.get("retention_period"),
+                })
             if rgpd_text.get("data_minimization_mentioned"):  # Gap #42
                 nlp_rgpd_minimization_pages += 1
+                rgpd_minimization_rows.append({
+                    "page_url": page_url,
+                    "snippet": _evidence_snippet((_safe_list(rgpd_text.get("minimization_phrases")) or _safe_list(rgpd_text.get("purpose_phrases")) or [""])[0]),
+                })
+            if rgpd_text.get("purpose_mentioned"):
+                rgpd_purpose_rows.append({
+                    "page_url": page_url,
+                    "purpose": "mentioned",
+                    "snippet": _evidence_snippet((_safe_list(rgpd_text.get("purpose_phrases")) or [""])[0]),
+                })
 
             # Nested NLP KPI aggregation (flat-safe)
             seo_kpis = _j(nlp.get("seo_kpis"))
@@ -2778,18 +3007,55 @@ def build_report(scan_id: str) -> dict:
                 llms_kpi = _j(seo_kpis.get("llms_txt"))
                 if h1_quality.get("h1_missing"):
                     nlp_seo_h1_missing_pages += 1
+                    seo_h1_quality_rows.append({
+                        "page_url": page_url,
+                        "issue": "h1_missing",
+                        "h1_text": h1_quality.get("h1_text"),
+                        "h1_count": h1_quality.get("h1_count"),
+                        "title": title_quality.get("title_text"),
+                    })
                 if h1_quality.get("h1_multiple"):
                     nlp_seo_h1_multiple_pages += 1
+                    seo_h1_quality_rows.append({
+                        "page_url": page_url,
+                        "issue": "h1_multiple",
+                        "h1_text": h1_quality.get("h1_text"),
+                        "h1_count": h1_quality.get("h1_count"),
+                        "title": title_quality.get("title_text"),
+                    })
                 if title_quality.get("title_too_long"):
                     nlp_seo_title_too_long_pages += 1
+                    seo_meta_nlp_rows.append({
+                        "page_url": page_url,
+                        "issue": "title_too_long",
+                        "meta_description": meta_desc.get("meta_description_text"),
+                        "length": title_quality.get("title_length"),
+                    })
                 if not meta_desc.get("meta_description_present", True):
                     nlp_seo_meta_missing_pages += 1
+                    seo_meta_nlp_rows.append({
+                        "page_url": page_url,
+                        "issue": "meta_missing",
+                        "meta_description": meta_desc.get("meta_description_text"),
+                        "length": meta_desc.get("meta_description_length"),
+                    })
                 if links_kpi.get("has_no_internal_links"):
                     nlp_seo_no_internal_links_pages += 1
                 if schema_kpi.get("schema_faq_present"):
                     nlp_seo_schema_faq_pages += 1
                 if llms_kpi.get("llms_txt_present"):
                     nlp_seo_llms_present_pages += 1
+                llms_url = llms_kpi.get("llms_url") or f"https://{base_domain}/llms.txt"
+                if llms_url and llms_url not in seo_llms_rows_by_url:
+                    useful_lines = _safe_list(llms_kpi.get("useful_lines"))
+                    seo_llms_rows_by_url[llms_url] = {
+                        "llms_url": llms_url,
+                        "status": llms_kpi.get("status_code"),
+                        "content_type": llms_kpi.get("content_type"),
+                        "length": llms_kpi.get("length"),
+                        "useful_line": _evidence_snippet(useful_lines[0] if useful_lines else ""),
+                        "parse_status": llms_kpi.get("parse_status") or ("present" if llms_kpi.get("llms_txt_present") else "missing"),
+                    }
 
             content_kpis = _j(nlp.get("content_kpis"))
             if content_kpis:
@@ -2798,14 +3064,32 @@ def build_report(scan_id: str) -> dict:
                 tone_kpi = _j(content_kpis.get("tone"))
                 if intent_kpi.get("intent") == "transactional" and int(cta_kpi.get("cta_count", 0) or 0) == 0:
                     nlp_content_transactional_no_cta_pages += 1
+                    content_cta_rows.append({
+                        "page_url": page_url,
+                        "intent": intent_kpi.get("intent"),
+                        "cta_count": cta_kpi.get("cta_count", 0),
+                        "snippet": _evidence_snippet(_safe_dict(content_kpis.get("above_fold")).get("above_fold_snippet")),
+                    })
                 if int(content_kpis.get("broken_structure_index", 0) or 0) >= 50:
                     nlp_content_high_broken_structure_pages += 1
+                    content_broken_structure_rows.append({
+                        "page_url": page_url,
+                        "broken_structure_index": content_kpis.get("broken_structure_index"),
+                        "page_type": nlp.get("page_type"),
+                        "snippet": _evidence_snippet(_safe_dict(content_kpis.get("above_fold")).get("above_fold_snippet")),
+                    })
                 lex_div = content_kpis.get("lexical_diversity")
                 if isinstance(lex_div, (int, float)):
                     lexical_diversity_sum += float(lex_div)
                     lexical_diversity_count += 1
                     if float(lex_div) < 0.4:
                         nlp_content_low_lexical_diversity_pages += 1
+                        content_lexical_rows.append({
+                            "page_url": page_url,
+                            "lexical_diversity": round(float(lex_div), 4),
+                            "token_count": content_kpis.get("lexical_diversity_token_count"),
+                            "threshold": 0.4,
+                        })
                 reading_kpi = _j(content_kpis.get("reading_time"))
                 if isinstance(reading_kpi.get("reading_time_minutes"), (int, float)):
                     reading_minutes_sum += float(reading_kpi.get("reading_time_minutes"))
@@ -2825,11 +3109,40 @@ def build_report(scan_id: str) -> dict:
                 rights_score = rights_kpi.get("rights_coverage_score")
                 if isinstance(rights_score, int) and rights_score < 4:
                     nlp_rgpd_rights_low_pages += 1
+                if isinstance(rights_score, int):
+                    rgpd_rights_rows.append({
+                        "page_url": page_url,
+                        "rights_found": ", ".join(_safe_list(rights_kpi.get("rights_found"))),
+                        "rights_missing": ", ".join(_safe_list(rights_kpi.get("rights_missing"))),
+                        "score": rights_score,
+                    })
                 if pre_consent_kpi.get("pre_consent_violation") is True:
                     nlp_rgpd_pre_consent_violation_pages += 1
+                    for order, tracker in enumerate(_safe_list(pre_consent_kpi.get("pre_consent_trackers")), start=1):
+                        rgpd_pre_consent_rows.append({
+                            "page_url": page_url,
+                            "tracker_domain": tracker,
+                            "category": "advertising",
+                            "order": order,
+                            "before_consent": True,
+                        })
                 privacy_score = privacy_score_kpi.get("privacy_policy_score")
                 if isinstance(privacy_score, int) and privacy_score < 60:
                     nlp_rgpd_privacy_score_low_pages += 1
+                    rgpd_privacy_score_rows.append({
+                        "page_url": page_url,
+                        "score": privacy_score,
+                        "weakness": ", ".join([
+                            name for name, present in [
+                                ("retention", rgpd_text.get("data_retention_mentioned")),
+                                ("minimization", rgpd_text.get("data_minimization_mentioned")),
+                                ("purpose", privacy_score_kpi.get("purpose_mentioned")),
+                                ("legal_basis", privacy_score_kpi.get("legal_basis_mentioned")),
+                            ]
+                            if not present
+                        ]),
+                        "snippet": _evidence_snippet(_safe_dict(_safe_dict(nlp.get("content_kpis")).get("above_fold")).get("above_fold_snippet")),
+                    })
                 if privacy_score_kpi.get("purpose_mentioned") is True:
                     rgpd_declared_purpose_inferred_urls.add(page_url)
                 dpo_score = dpo_kpi.get("dpo_completeness_score")
@@ -2903,6 +3216,12 @@ def build_report(scan_id: str) -> dict:
             "Internal-link total could not be reconstructed from summary or per-page SEO metrics"
         )
     effective_total_external_links = summary_external_links if summary_external_links > 0 else seo_external_links_recount
+    runtime_pre_consent_violation_pages = len(rgpd_runtime_pre_consent_urls)
+    if rgpd_cookie_consent_rows:
+        consent = privacy_kpi.setdefault("cookie_consent", {})
+        consent["rows"] = rgpd_cookie_consent_rows[:50]
+        consent["has_banner"] = True
+        consent["cmp_present"] = True
     # ─── Phase L post-loop computations ─────────────────────────────────────
     latest_pub_date = max(content_pub_dates) if content_pub_dates else None
     # Freshness KPI: passed if latest date is within the last 365 days
@@ -2933,6 +3252,18 @@ def build_report(scan_id: str) -> dict:
             "count": len(pages),
             "pages": pages[:10],
         })
+    duplicate_clusters = []
+    for idx, (content_hash, urls) in enumerate(seo_content_hashes.items(), start=1):
+        if len(urls) <= 1:
+            continue
+        for url in urls[:10]:
+            duplicate_clusters.append({
+                "cluster": idx,
+                "url": url,
+                "similarity": 1.0,
+                "hash": content_hash[:12],
+                "confidence": "hash_match",
+            })
 
     menu_passed = menu_bad_pages == 0
     with ThreadPoolExecutor(max_workers=2) as _pool:
@@ -2970,6 +3301,7 @@ def build_report(scan_id: str) -> dict:
             "internal_linking_source": internal_linking_source,
             "internal_linking_note": internal_linking_note,
             "node_style_url_count": seo_node_style_url_count,
+            "non_clean_urls_all": seo_non_clean_url_rows[:200],
             "node_style_url_kpi_passed": seo_node_style_url_count == 0,
             # Phase J: broken links KPI
             "broken_link_kpi": _build_broken_link_kpi(summary_row),
@@ -2986,9 +3318,11 @@ def build_report(scan_id: str) -> dict:
                 "duplication_reliability": duplication_reliability,
                 "pipeline_suspect": duplication_reliability == "pipeline_suspect",
                 "note": duplication_note,
+                "duplicate_clusters": duplicate_clusters[:200],
                 "passed": dup_content_kpi_passed,
             },
             "unique_external_domains": unique_external_domains,
+            "external_link_rows": seo_external_link_rows[:200],
             "robots_url": raw_seo_kpi.get("robots_url"),
             "robots_detected_via": raw_seo_kpi.get("robots_detected_via"),
             "sitemap_url": raw_seo_kpi.get("sitemap_url"),
@@ -3011,13 +3345,16 @@ def build_report(scan_id: str) -> dict:
             "nlp_seo_h1_kpi": {
                 "h1_missing_pages": nlp_seo_h1_missing_pages,
                 "h1_multiple_pages": nlp_seo_h1_multiple_pages,
+                "rows": seo_h1_quality_rows[:200],
             },
             "nlp_seo_meta_kpi": {
                 "title_too_long_pages": nlp_seo_title_too_long_pages,
                 "meta_missing_pages": nlp_seo_meta_missing_pages,
+                "rows": seo_meta_nlp_rows[:200],
             },
             "nlp_seo_ai_readiness_kpi": {
                 "llms_txt_present_pages": nlp_seo_llms_present_pages,
+                "rows": list(seo_llms_rows_by_url.values())[:20],
             },
             "contextual_link_measurement": {
                 "pages_checked": total_pages,
@@ -3062,6 +3399,16 @@ def build_report(scan_id: str) -> dict:
                 "pages_checked": ux_mobile_checked_pages,
                 "pages_with_mobile_overflow": ux_mobile_overflow_pages,
                 "affected_page_urls": sorted(set(ux_mobile_overflow_urls)),
+                "rows": [
+                    {
+                        "page_url": url,
+                        "viewport": "mobile",
+                        "overflow": True,
+                        "tap_issue": None,
+                        "layout_issue": "horizontal_overflow",
+                    }
+                    for url in sorted(set(ux_mobile_overflow_urls))
+                ] or ux_mobile_rows[:200],
                 "passed": (ux_mobile_overflow_pages == 0) if ux_mobile_checked_pages > 0 else None,
                 "reason": None if ux_mobile_checked_pages > 0 else "mobile_overflow_not_collected",
             },
@@ -3074,14 +3421,17 @@ def build_report(scan_id: str) -> dict:
             "avg_speed_index_ms": avg(headless_speed),
             "avg_eco_index": avg(headless_eco),
             "html_compression_applied": bool((domain_analysis.get("security", {}) or {}).get("has_compression", False)),
+            "headless_rows": headless_sample[:200],
             "total_resource_size_kb": float(raw_seo_kpi.get("total_resource_size_kb", 0.0) or 0.0),
             "gateway_timeout_count": int(raw_seo_kpi.get("gateway_timeout_count", 0) or 0),
             "headless_sample_size": len(headless_sample),
             "console_error_kpi": {
                 "pages_with_console_errors": perf_console_error_pages,
+                "page_urls": perf_console_error_page_urls[:200],
                 # Phase M-4: homepage-specific (most critical for UX)
                 "homepage_console_error_count": homepage_console_error_count,
                 "homepage_console_errors": homepage_console_errors,
+                "rows": perf_console_error_rows[:200],
                 "passed": perf_console_error_pages == 0,
             },
             "button_kpi": {
@@ -3104,6 +3454,7 @@ def build_report(scan_id: str) -> dict:
         "content": {
             "freshness_kpi": {
                 "latest_pub_date": latest_pub_date,
+                "rows": content_freshness_rows[:200],
                 "passed": freshness_passed,
             },
             "news_page_count": content_news_page_count,
@@ -3117,6 +3468,7 @@ def build_report(scan_id: str) -> dict:
             "nlp_not_evaluated_pages": nlp_not_evaluated_pages,
             "pages_with_keyword_stuffing": nlp_keyword_stuffing_pages,
             "pages_thin_content_nlp": nlp_thin_content_pages,
+            "thin_content_rows": content_thin_rows[:200],
             "cannibalized_keywords": cannibalized_keywords,
             "typo_detection": {
                 "pages_with_typos": typo_pages,
@@ -3127,6 +3479,7 @@ def build_report(scan_id: str) -> dict:
             "audience_segments": {
                 "counts": dict(audience_segment_counts),
                 "confidence": audience_confidence_counts,
+                "rows": audience_rows[:200],
             },
             "advanced_content_kpis": {
                 "transactional_no_cta_pages": nlp_content_transactional_no_cta_pages,
@@ -3136,16 +3489,26 @@ def build_report(scan_id: str) -> dict:
                 "commercial_tone_pages": nlp_content_commercial_tone_pages,
                 "avg_lexical_diversity": avg_lexical_diversity,
                 "avg_reading_time_minutes": avg_reading_time_minutes,
+                "cta_rows": content_cta_rows[:200],
+                "broken_structure_rows": content_broken_structure_rows[:200],
+                "lexical_diversity_rows": content_lexical_rows[:200],
             },
             "migration_note": "UX thin-content KPI (<50 words) kept unchanged; NLP thin-content KPI (<300 words) added in parallel.",
             # Gap #41/#42: RGPD signal pages from NLP analysis
             "rgpd_retention_signal_pages": nlp_rgpd_retention_pages,
             "rgpd_minimization_signal_pages": nlp_rgpd_minimization_pages,
+            "rgpd_retention_rows": rgpd_retention_rows[:200],
+            "rgpd_minimization_rows": rgpd_minimization_rows[:200],
+            "rgpd_purpose_rows": rgpd_purpose_rows[:200],
             "advanced_rgpd_kpis": {
                 "rights_low_pages": nlp_rgpd_rights_low_pages,
-                "pre_consent_violation_pages": nlp_rgpd_pre_consent_violation_pages,
+                "pre_consent_violation_pages": nlp_rgpd_pre_consent_violation_pages + runtime_pre_consent_violation_pages,
+                "runtime_pre_consent_violation_pages": runtime_pre_consent_violation_pages,
                 "privacy_score_low_pages": nlp_rgpd_privacy_score_low_pages,
                 "dpo_incomplete_pages": nlp_rgpd_dpo_incomplete_pages,
+                "rights_rows": rgpd_rights_rows[:200],
+                "pre_consent_rows": rgpd_pre_consent_rows[:200],
+                "privacy_score_rows": rgpd_privacy_score_rows[:200],
             },
         },
     }
@@ -3274,6 +3637,17 @@ def run_scanner(scan_id: str, url: str, max_pages: int, headless_concurrency: in
             f"NLP partiel pour {scan_id}: {nlp_done}/{total} pages enrichies. "
             "Le rapport contiendra des KPIs NLP incomplets."
         )
+    update_scan_entry(scan_id, status=ScanStatus.FINALIZING, nlp_partiel=nlp_partiel)
+    logger.info(f"Scanner/NLP done for {scan_id}; building KPI payload before completion.")
+    try:
+        _build_and_persist_kpi_payload(scan_id, scan=get_scan_entry(scan_id), wait_for_lock=True)
+    except Exception as exc:
+        err_msg = f"KPI payload build failed: {exc}"
+        if len(err_msg) > 500:
+            err_msg = err_msg[:500]
+        update_scan_entry(scan_id, status=ScanStatus.FAILED, error=err_msg)
+        logger.exception("KPI payload build failed for %s", scan_id)
+        return
     update_scan_entry(scan_id, status=ScanStatus.COMPLETE, nlp_partiel=nlp_partiel)
     logger.info(f"Scan {scan_id} complet avec {total} pages (nlp_partiel={nlp_partiel}).")
 
@@ -3386,43 +3760,37 @@ async def get_kpis(scan_id: str):
     scan = get_scan_entry(scan_id)
     if not scan:
         raise HTTPException(status_code=404, detail="Scan not found")
+    payload = _load_persisted_kpi_payload(scan_id)
+    if payload is not None:
+        return payload
+
+    if scan["status"] == ScanStatus.FINALIZING:
+        raise HTTPException(
+            status_code=202,
+            detail="KPI report is being finalized"
+        )
     if scan["status"] != ScanStatus.COMPLETE:
         raise HTTPException(
             status_code=202,
             detail=f"KPI report not available yet. Current status: {scan['status']}"
         )
 
-    report = await asyncio.to_thread(build_report, scan_id)
-    if report.get("error"):
-        raise HTTPException(status_code=500, detail=report["error"])
+    try:
+        payload = await asyncio.to_thread(
+            _build_and_persist_kpi_payload,
+            scan_id,
+            scan,
+            False,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+    if payload is None:
+        raise HTTPException(
+            status_code=202,
+            detail="KPI report is already being finalized"
+        )
+    return payload
 
-    kpi_report = build_kpi_centric_report(report)
-    if kpi_report.get("error"):
-        raise HTTPException(status_code=500, detail=kpi_report["error"])
-
-    def _decorate_nlp_partial(payload: dict):
-        if not isinstance(payload, dict):
-            return
-        if scan.get("nlp_partiel"):
-            payload["nlp_partiel"] = True
-            payload["nlp_partiel_avertissement"] = (
-                "L'enrichissement NLP est incomplet pour ce scan. "
-                "Les KPIs de contenu, lisibilité et RGPD peuvent être imprécis."
-            )
-
-    _decorate_nlp_partial(kpi_report)
-    kpi_report["kpi_mode"] = "new"
-    kpi_report["top_level_kpis"] = _build_top_level_kpis(kpi_report)
-    prev_scan_id, prev_artifact = _load_previous_quality_drift_artifact(scan.get("url", ""), scan_id)
-    kpi_report["quality_drift_artifact"] = _build_kpi_quality_drift_artifact(
-        scan_id,
-        scan.get("url", ""),
-        kpi_report,
-        previous_artifact=prev_artifact,
-        previous_scan_id=prev_scan_id,
-    )
-    _persist_kpi_payload(scan_id, kpi_report, scan_url=scan.get("url", ""))
-    return kpi_report
 
 
 @app.get("/scan/{scan_id}/kpis/top")

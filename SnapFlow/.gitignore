@@ -54,3 +54,4 @@ coverage/
 !docker-compose.traefik.yml
 # And keep sales demo config
 !docker-compose.sales-demo.yml
+.gocache

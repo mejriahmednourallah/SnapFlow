@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { getAxisScoreBreakdown, getScoreColor, getPagesWithoutMeta, getPagesWithLongMeta, getRecentNews, type AuditFinding, type AuditReport, type Criticality, type FindingStatus, type Priority } from '@/data/mockAuditData';
+import { getAxisScoreBreakdown, getScoreColor, getPagesWithoutMeta, getPagesWithLongMeta, getRecentNews, isNonTestedFinding, type AuditFinding, type AuditReport, type Criticality, type FindingStatus, type Priority } from '@/data/mockAuditData';
 import { CriticalityBadge } from '@/components/CriticalityBadge';
 import { PriorityBadge } from '@/components/PriorityBadge';
 import { ScoreGauge } from '@/components/ScoreGauge';
@@ -55,7 +55,7 @@ export function TabDetails({ audit, selectedAxisId, isEditMode = false, onUpdate
   const canEditFindings = Boolean(isEditMode && onUpdateFinding);
 
   const critFilters: Array<Criticality | 'all'> = ['all', 'critical', 'high', 'medium', 'low'];
-  const stateFilters: Array<FindingStatus | 'all'> = ['all', 'pass', 'fail', 'not_measured', 'not_available'];
+  const stateFilters: Array<FindingStatus | 'all'> = ['all', 'pass', 'fail', 'not_measured'];
 
   const pagesWithoutMeta = getPagesWithoutMeta(audit);
   const pagesWithLongMeta = getPagesWithLongMeta(audit);
@@ -162,7 +162,7 @@ export function TabDetails({ audit, selectedAxisId, isEditMode = false, onUpdate
                 : s === 'fail'
                   ? 'Fail'
                   : s === 'not_measured'
-                    ? 'Non mesuré'
+                    ? 'Non testé'
                     : 'Non disponible'}
           </button>
         ))}
@@ -181,7 +181,10 @@ export function TabDetails({ audit, selectedAxisId, isEditMode = false, onUpdate
         const findings = ax.findings.filter(f => {
           if (isRiskPassingFinding(f)) return false;
           if (filterCriticality !== 'all' && f.criticality !== filterCriticality) return false;
-          if (filterState !== 'all' && (f.status ?? (f.type === 'pass' ? 'pass' : f.type === 'bug' ? 'fail' : 'not_measured')) !== filterState) return false;
+          if (filterState !== 'all') {
+            if (filterState === 'not_measured' && !isNonTestedFinding(f)) return false;
+            if (filterState !== 'not_measured' && (f.status ?? (f.type === 'pass' ? 'pass' : f.type === 'bug' ? 'fail' : 'not_measured')) !== filterState) return false;
+          }
           return true;
         });
         const isSeoAxis = ax.id === 'seo';
@@ -208,7 +211,7 @@ export function TabDetails({ audit, selectedAxisId, isEditMode = false, onUpdate
                   <ScoreGauge score={breakdown.scorePct} size={64} strokeWidth={5} valueText={`${breakdown.x}/${breakdown.y}`} />
                   <div>
                     <p className="text-sm text-muted-foreground">{findings.length} constat{findings.length > 1 ? 's' : ''}</p>
-                    <p className="text-xs text-muted-foreground">Pass {breakdown.passed} • Fail {breakdown.failed} • NM {breakdown.notMeasured} • ND {breakdown.notAvailable}</p>
+                    <p className="text-xs text-muted-foreground">Pass {breakdown.passed} - Fail {breakdown.failed} - Non testé {breakdown.notMeasured + breakdown.notAvailable}</p>
                   </div>
                 </div>
 
@@ -333,7 +336,7 @@ export function TabDetails({ audit, selectedAxisId, isEditMode = false, onUpdate
                   findings.map(f => (
                     (() => {
                       const hasEvidenceDetails =
-                        Boolean(f.evidenceRaw) ||
+                        (f.evidenceRows?.length ?? 0) > 0 ||
                         (f.evidenceSummary?.length ?? 0) > 0 ||
                         (f.evidence?.length ?? 0) > 0 ||
                         (f.annexes?.length ?? 0) > 0 ||
@@ -342,17 +345,7 @@ export function TabDetails({ audit, selectedAxisId, isEditMode = false, onUpdate
                     <div key={f.id} className="p-4 rounded-lg bg-muted/20 border border-border/30 space-y-3">
                       <div className="flex items-start justify-between gap-3">
                         <div>
-                          <h4 className="font-semibold text-sm">{f.title}</h4>
-                          {f.page && (
-                            <p className="text-xs text-muted-foreground mt-0.5 flex items-center gap-1">
-                              <FileText className="w-3 h-3" /> {f.page}
-                              {f.pageUrl && (
-                                <a href={f.pageUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 ml-2 text-primary hover:underline">
-                                  <ExternalLink className="w-3 h-3" />
-                                </a>
-                              )}
-                            </p>
-                          )}
+                          <h4 className="font-semibold text-base leading-snug">{f.title}</h4>
                         </div>
                         <div className="flex items-center gap-2 flex-shrink-0">
                           {canEditFindings && (
@@ -375,19 +368,11 @@ export function TabDetails({ audit, selectedAxisId, isEditMode = false, onUpdate
                                 </span>
                               );
                             }
-                            if (f.status === 'not_measured' || f.origin === 'coverage') {
+                            if (isNonTestedFinding(f)) {
                               return (
-                                <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border text-blue-400 bg-blue-500/10 border-blue-500/20">
+                                <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border text-yellow-400 bg-yellow-500/10 border-yellow-500/20">
                                   <FlaskConical className="w-3 h-3" />
-                                  <span>Non mesuré</span>
-                                </span>
-                              );
-                            }
-                            if (f.status === 'not_available') {
-                              return (
-                                <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border text-stone-300 bg-stone-500/10 border-stone-500/20">
-                                  <FlaskConical className="w-3 h-3" />
-                                  <span>Non disponible</span>
+                                  <span>Non testé</span>
                                 </span>
                               );
                             }
@@ -585,9 +570,9 @@ export function TabDetails({ audit, selectedAxisId, isEditMode = false, onUpdate
                   >
                     <option value="pass">Pass</option>
                     <option value="fail">Fail</option>
-                    <option value="not_measured">Non mesure</option>
-                    <option value="not_available">Non disponible</option>
-                    <option value="not_evaluated">Non evalue</option>
+                    <option value="not_measured">Non testé</option>
+                    <option value="not_available">Non testé</option>
+                    <option value="not_evaluated">Non testé</option>
                   </select>
                 </div>
 

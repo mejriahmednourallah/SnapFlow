@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { getAxisScoreBreakdown, getAuditGlobalScore, getScoreColor, getCriticalCount, getTotalFindings, type AuditReport } from '@/data/mockAuditData';
+import { getAxisScoreBreakdown, getAuditGlobalScore, getScoreColor, getCriticalCount, getTotalFindings, isNonTestedFinding, type AuditReport } from '@/data/mockAuditData';
 import { ScoreGauge } from '@/components/ScoreGauge';
 import { CriticalityBadge } from '@/components/CriticalityBadge';
 import { AlertTriangle, TrendingUp, CheckCircle, Pencil, Save, XCircle } from 'lucide-react';
@@ -130,6 +130,7 @@ export function TabResume({ audit, isEditMode = false, onSelectAxis, onUpdateSum
           <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
             {audit.axes.map(ax => {
               const breakdown = getAxisScoreBreakdown(ax);
+              const allNonTeste = ax.findings.length > 0 && ax.findings.every(isNonTestedFinding);
               return (
                 <button
                   key={ax.id}
@@ -139,7 +140,7 @@ export function TabResume({ audit, isEditMode = false, onSelectAxis, onUpdateSum
                   <AxisIcon id={ax.id} className="w-5 h-5 text-muted-foreground flex-shrink-0" />
                   <div className="min-w-0">
                     <p className={`font-mono font-bold text-sm ${getScoreColor(breakdown.scorePct)}`}>
-                      {breakdown.x}/{breakdown.y}
+                      {allNonTeste ? 'N/T' : `${breakdown.x}/${breakdown.y}`}
                     </p>
                     <p className="text-xs text-muted-foreground truncate">{ax.name}</p>
                   </div>

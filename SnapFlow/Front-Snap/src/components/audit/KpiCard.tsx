@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { ChevronDown, AlertCircle, CheckCircle, Lightbulb, Bug, ShieldAlert } from 'lucide-react';
 import { CriticalityBadge } from '@/components/CriticalityBadge';
-import type { AuditFinding } from '@/data/mockAuditData';
+import { isNonTestedFinding, type AuditFinding } from '@/data/mockAuditData';
 import { KpiUrlIndex } from './KpiUrlIndex';
 import { EvidenceDetailsDialog } from '@/components/audit/EvidenceDetailsDialog';
 
@@ -14,17 +14,69 @@ export function KpiCard({ kpi }: KpiCardProps) {
   const [showFix, setShowFix] = useState(false);
 
   const isFailure = kpi.status === 'fail';
+  const isNonTested = isNonTestedFinding(kpi);
   const hasUrls = kpi.exampleUrls && kpi.exampleUrls.length > 0;
   const urlCount = kpi.exampleUrls?.length ?? 0;
   const showUrlIndex = urlCount >= 10;
   const hasEvidenceDetails =
-    Boolean(kpi.evidenceRaw) ||
+    (kpi.evidenceRows?.length ?? 0) > 0 ||
     (kpi.evidenceSummary?.length ?? 0) > 0 ||
     (kpi.evidence?.length ?? 0) > 0 ||
     (kpi.annexes?.length ?? 0) > 0 ||
     (kpi.exampleUrls?.length ?? 0) > 0;
+  const proofLines = (kpi.evidenceSummary ?? kpi.evidence ?? kpi.annexes ?? []).slice(0, 3);
 
   const getBadge = () => {
+    if (isNonTested) {
+      return (
+        <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border text-yellow-400 bg-yellow-500/10 border-yellow-500/20">
+          <AlertCircle className="w-3 h-3" />
+          <span>Non testé</span>
+        </span>
+      );
+    }
+
+    // Use the new KPI labels when available
+    if (kpi.kpiLabels) {
+      const { statut, typeLabel } = kpi.kpiLabels;
+      const isConcluant = statut === 'Concluant';
+      const isNonTeste = statut === 'Non testé';
+
+      if (isConcluant) {
+        return (
+          <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border text-emerald-400 bg-emerald-500/10 border-emerald-500/20">
+            <CheckCircle className="w-3 h-3" />
+            <span>KPI validé</span>
+          </span>
+        );
+      }
+      if (typeLabel === 'Bug') {
+        return (
+          <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border text-red-400 bg-red-500/10 border-red-500/20">
+            <Bug className="w-3 h-3" />
+            <span>Bug</span>
+          </span>
+        );
+      }
+      if (typeLabel === 'Recommandation') {
+        return (
+          <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border text-blue-400 bg-blue-500/10 border-blue-500/20">
+            <Lightbulb className="w-3 h-3" />
+            <span>Recommandation</span>
+          </span>
+        );
+      }
+      if (isNonTeste || typeLabel === 'Indéterminé') {
+        return (
+          <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border text-yellow-400 bg-yellow-500/10 border-yellow-500/20">
+            <AlertCircle className="w-3 h-3" />
+            <span>Non testé</span>
+          </span>
+        );
+      }
+    }
+
+    // Fallback to legacy logic
     if (kpi.origin === 'RGPD') {
       return (
         <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border text-orange-400 bg-orange-500/10 border-orange-500/20">
@@ -62,7 +114,7 @@ export function KpiCard({ kpi }: KpiCardProps) {
       {/* Header */}
       <div className="flex items-start justify-between gap-3">
         <div className="flex-1">
-          <h4 className="font-semibold text-sm">{kpi.title}</h4>
+          <h4 className="font-semibold text-base leading-snug">{kpi.title}</h4>
           <p className="text-xs text-muted-foreground mt-0.5">{kpi.description}</p>
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
@@ -70,6 +122,41 @@ export function KpiCard({ kpi }: KpiCardProps) {
           <CriticalityBadge level={kpi.criticality} />
         </div>
       </div>
+
+      {/* French KPI labels row */}
+      {kpi.kpiLabels && (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+          <span>
+            <span className="font-medium">Statut :</span>{' '}
+            <span className={kpi.kpiLabels.statut === 'Concluant' ? 'text-emerald-400' : kpi.kpiLabels.statut === 'Non testé' ? 'text-yellow-400' : 'text-red-400'}>
+              {kpi.kpiLabels.statut}
+            </span>
+          </span>
+          <span>
+            <span className="font-medium">Type :</span>{' '}
+            {kpi.kpiLabels.typeLabel}
+          </span>
+        </div>
+      )}
+
+      {proofLines.length > 0 && (
+        <div className="p-3 rounded-md bg-muted/20 border border-border/20">
+          <div className="flex items-center justify-between gap-2 mb-1.5">
+            <p className="text-xs font-semibold text-muted-foreground">Preuves cles</p>
+            {hasEvidenceDetails && (
+              <EvidenceDetailsDialog finding={kpi} triggerLabel="Preuves detaillees" />
+            )}
+          </div>
+          <ul className="space-y-1">
+            {proofLines.map((line, index) => (
+              <li key={`${line}-${index}`} className="text-xs text-muted-foreground flex items-start gap-1.5">
+                <span className="text-muted-foreground/60 mt-0.5">-</span>
+                <span>{line}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {/* Evidence accordion (if failure) */}
       {isFailure && (
@@ -81,7 +168,7 @@ export function KpiCard({ kpi }: KpiCardProps) {
             >
               <ChevronDown className={`w-4 h-4 transition-transform ${showEvidence ? 'rotate-180' : ''}`} />
               <AlertCircle className="w-4 h-4" />
-              Détails de l'échec ({kpi.evidence?.length ?? 0})
+              Preuves du contrôle ({kpi.evidence?.length ?? 0})
             </button>
             {hasEvidenceDetails && (
               <EvidenceDetailsDialog finding={kpi} triggerLabel="Preuves detaillees" />
@@ -118,7 +205,7 @@ export function KpiCard({ kpi }: KpiCardProps) {
 
               {hasEvidenceDetails && (
                 <p className="text-xs text-muted-foreground mt-3">
-                  Astuce: utilisez le bouton "Preuves detaillees" pour voir le resume, les URLs et le JSON formate.
+                  Utilisez le bouton "Preuves detaillees" pour voir le resume, les URLs et les lignes structurees disponibles.
                 </p>
               )}
             </div>

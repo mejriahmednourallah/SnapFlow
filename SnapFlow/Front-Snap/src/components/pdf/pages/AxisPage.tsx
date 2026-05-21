@@ -19,14 +19,13 @@ interface AxisPageProps {
 
 function findingStatus(status: string) {
   if (status === 'pass') return 'success' as const;
-  if (status === 'not_measured' || status === 'not_evaluated') return 'warning' as const;
+  if (status === 'not_measured' || status === 'not_evaluated' || status === 'not_available') return 'warning' as const;
   return 'danger' as const;
 }
 
 function findingBadgeLabel(finding: AuditAxisItem['findings'][number]) {
   if (finding.status === 'pass') return 'OK';
-  if (finding.status === 'not_available') return 'NON DISPONIBLE';
-  if (finding.status === 'not_measured' || finding.status === 'not_evaluated') return 'NON MESURÉ';
+  if (finding.status === 'not_available' || finding.status === 'not_measured' || finding.status === 'not_evaluated') return 'NON TESTÉ';
   return finding.type === 'bug' ? 'ANOMALIE' : 'RECO';
 }
 
@@ -82,7 +81,7 @@ export function AxisPage({ report, axis, index, theme, clientLogoSrc }: AxisPage
                     <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
                       <StatusBadge label={`Conformes ${axis.score.passed}`} status="success" />
                       <StatusBadge label={`Échecs ${axis.score.failed}`} status="danger" />
-                      <StatusBadge label={`NM ${axis.score.notMeasured}`} status="warning" />
+                      <StatusBadge label={`Non testé ${axis.score.notMeasured + axis.score.notAvailable}`} status="warning" />
                     </View>
                   </View>
                   <View style={{ ...s.card, width: 172, alignItems: 'center', paddingVertical: 10 }}>

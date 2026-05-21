@@ -70,6 +70,8 @@ type RenderResult struct {
 	InvisibleLinks    int                      `json:"invisible_links"`
 	ConsoleErrors     []string                 `json:"console_errors"`
 	ConsoleErrorCount int                      `json:"console_error_count"`
+	TrackerTimeline   []map[string]interface{} `json:"tracker_timeline"`
+	CMPBanner         map[string]interface{}   `json:"cmp_banner"`
 	Error             string                   `json:"error"`
 }
 

@@ -757,7 +757,7 @@ func startScan(ctx context.Context, config ScannerConfig) {
 	}()
 	go func() {
 		defer analyzeWg.Done()
-		domainFuncRes = functional.Analyze(htmlBody)
+		domainFuncRes = functional.AnalyzeWithBaseURL(baseURL, htmlBody)
 	}()
 	analyzeWg.Wait()
 	domainAnalysisMS := time.Since(domainAnalyzeStart).Milliseconds()

@@ -9,6 +9,10 @@ REBUILD_BASE=false
 FASTAPI_TAG="snapflow/v3-python-fastapi-base:latest"
 HEAVY_TAG="snapflow/v3-python-heavy-base:latest"
 
+log() {
+    printf '[%s] %s\n' "$(date '+%H:%M:%S')" "$*"
+}
+
 for arg in "$@"; do
     case "${arg,,}" in
         -nocachebuild|--no-cache-build|-nocache|--no-cache)
@@ -37,8 +41,18 @@ if [ ! -f "$BASE_DIR/Dockerfile.fastapi" ] || [ ! -f "$BASE_DIR/Dockerfile.heavy
 fi
 
 image_exists() {
-    docker image inspect "$1" >/dev/null 2>&1
+    local tag="$1"
+    log "Inspecting Docker image: $tag"
+    if docker image inspect "$tag" >/dev/null 2>&1; then
+        log "Image exists: $tag"
+        return 0
+    fi
+    log "Image missing: $tag"
+    return 1
 }
+
+log "Checking V3 base images..."
+log "Flags: rebuild_base=$REBUILD_BASE no_cache=$NO_CACHE pull=$PULL"
 
 BUILD_FASTAPI=true
 BUILD_HEAVY=true
@@ -46,16 +60,22 @@ BUILD_HEAVY=true
 if [ "$REBUILD_BASE" != true ]; then
     if image_exists "$FASTAPI_TAG"; then
         BUILD_FASTAPI=false
+    else
+        log "Plan: build missing $FASTAPI_TAG"
     fi
     if image_exists "$HEAVY_TAG"; then
         BUILD_HEAVY=false
+    else
+        log "Plan: build missing $HEAVY_TAG"
     fi
 
     if [ "$BUILD_FASTAPI" = false ] && [ "$BUILD_HEAVY" = false ]; then
-        echo "V3 base images already exist. Reusing cached images."
-        echo "Use --rebuildbase to force rebuilding both base images."
+        log "V3 base images already exist. Reusing cached images."
+        log "Use --rebuildbase to rebuild them; combine with --no-cache for a cacheless base rebuild."
         exit 0
     fi
+else
+    log "Plan: --rebuildbase was passed, so both base images will be rebuilt."
 fi
 
 COMMON_BUILD_ARGS=()
@@ -75,29 +95,35 @@ if [ "$PULL" = true ]; then
 fi
 
 if [ "$BUILD_FASTAPI" = true ]; then
-    echo "Building $FASTAPI_TAG"
+    log "Building $FASTAPI_TAG"
+    log "Context: $BASE_DIR"
+    log "Dockerfile: Dockerfile.fastapi"
+    log "Extra build flags: ${FASTAPI_BUILD_ARGS[*]:-(none)}"
     (
         cd "$BASE_DIR"
-        docker build "${FASTAPI_BUILD_ARGS[@]}" -f "Dockerfile.fastapi" -t "$FASTAPI_TAG" .
+        docker build --progress=plain "${FASTAPI_BUILD_ARGS[@]}" -f "Dockerfile.fastapi" -t "$FASTAPI_TAG" .
     )
 else
-    echo "Reusing existing $FASTAPI_TAG"
+    log "Reusing existing $FASTAPI_TAG"
 fi
 
 if ! image_exists "$FASTAPI_TAG"; then
-    echo "Required local base image missing: $FASTAPI_TAG"
-    echo "Build the fastapi base first before building heavy base."
+    log "Required local base image missing: $FASTAPI_TAG"
+    log "Build the fastapi base first before building heavy base."
     exit 1
 fi
 
 if [ "$BUILD_HEAVY" = true ]; then
-    echo "Building $HEAVY_TAG"
+    log "Building $HEAVY_TAG"
+    log "Context: $BASE_DIR"
+    log "Dockerfile: Dockerfile.heavy"
+    log "Extra build flags: ${HEAVY_BUILD_ARGS[*]:-(none)}"
     (
         cd "$BASE_DIR"
-        docker build "${HEAVY_BUILD_ARGS[@]}" -f "Dockerfile.heavy" -t "$HEAVY_TAG" .
+        docker build --progress=plain "${HEAVY_BUILD_ARGS[@]}" -f "Dockerfile.heavy" -t "$HEAVY_TAG" .
     )
 else
-    echo "Reusing existing $HEAVY_TAG"
+    log "Reusing existing $HEAVY_TAG"
 fi
 
-echo "V3 Python base images are ready."
+log "V3 Python base images are ready."

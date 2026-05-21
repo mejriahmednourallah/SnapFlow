@@ -135,7 +135,12 @@ function toAxisItem(axis: SourceAuditAxis): AuditAxisItem {
 function toRecommendations(axes: AuditAxisItem[]): RecommendationItem[] {
   const list = axes.flatMap((axis) =>
     axis.findings
-      .filter((finding) => finding.status !== 'pass' && finding.status !== 'not_available')
+      .filter((finding) => (
+        finding.status !== 'pass' &&
+        finding.status !== 'not_available' &&
+        finding.status !== 'not_measured' &&
+        finding.status !== 'not_evaluated'
+      ))
       .map((finding) => ({
         id: `${axis.id}-${finding.id}`,
         axisName: axis.name,

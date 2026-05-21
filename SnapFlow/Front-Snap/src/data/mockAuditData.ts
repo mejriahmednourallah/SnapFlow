@@ -4,6 +4,32 @@ export type FindingType = 'bug' | 'recommendation' | 'pass';
 export type FindingStatus = 'pass' | 'fail' | 'not_measured' | 'not_available' | 'not_evaluated';
 export type FindingOrigin = 'bug' | 'recommendation' | 'RGPD' | 'coverage' | 'passing_kpi' | 'legacy';
 
+// ── French display labels for the new KPI contract ───────────────────
+export type KpiStatut = 'Concluant' | 'Non concluant' | 'Non testé';
+export type KpiTypeLabel = 'Conforme' | 'Bug' | 'Recommandation' | 'Indéterminé' | 'Non applicable';
+export type KpiPriorite = 'Majeure' | 'Mineure' | 'Normale';
+
+export interface KpiLabels {
+  statut: KpiStatut;
+  typeLabel: KpiTypeLabel;
+  priorite: KpiPriorite;
+}
+
+export interface KpiEvidenceDigest {
+  quality?: 'VALID' | 'PARTIAL' | 'MISSING' | string;
+  summary?: string;
+  proof_lines?: string[];
+  rows?: Record<string, string | number | boolean | null | undefined>[];
+  urls?: string[];
+  affected_pages?: number;
+  csv_columns?: string[];
+  csv_rows?: Record<string, string | number | boolean | null | undefined>[];
+  missing_reason?: string;
+  top_urls?: string[];
+  top_items?: string[];
+  key_metrics?: Record<string, string | number | boolean>;
+}
+
 export interface AxisScoreBreakdown {
   passed: number;
   failed: number;
@@ -70,17 +96,11 @@ export interface KpiEvidenceItem {
 
 export interface KpiItem {
   kpi_name: string;
-  status: 'passing' | 'failing';
-  type: 'bug' | 'recommendation' | 'RGPD';
+  status: 'passing' | 'failing' | 'warning' | 'not_available' | 'not_evaluated' | 'not_measured' | 'non_evalue';
+  type: 'bug' | 'recommendation' | 'RGPD' | 'compliance' | null;
   recommended_action?: string;
   recommendation_source?: 'fix' | 'ticket_payload' | 'generated' | string;
-  evidence_digest?: {
-    summary?: string;
-    affected_pages?: number;
-    top_urls?: string[];
-    top_items?: string[];
-    key_metrics?: Record<string, string | number | boolean>;
-  };
+  evidence_digest?: KpiEvidenceDigest;
   axis: string;
   evidence: {
     summary?: string;
@@ -159,8 +179,14 @@ export interface AuditFinding {
   exampleUrls?: string[];
   evidence?: string[];
   evidenceSummary?: string[];
+  evidenceRows?: Record<string, string | number | boolean | null | undefined>[];
+  evidenceCsvColumns?: string[];
+  evidenceCsvRows?: Record<string, string | number | boolean | null | undefined>[];
+  evidenceMissingReason?: string;
   evidenceRaw?: unknown;
   recommendationSource?: string;
+  /** French display labels per the new KPI contract */
+  kpiLabels?: KpiLabels;
 }
 
 export interface NewsItem {
@@ -439,6 +465,28 @@ export function getPriorityLabel(p: Priority): string {
   return map[p];
 }
 
+export function isNonTestedStatus(statusRaw: unknown): boolean {
+  const status = String(statusRaw ?? '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[\s-]+/g, '_');
+
+  return (
+    status === 'not_measured' ||
+    status === 'not_available' ||
+    status === 'not_evaluated' ||
+    status === 'not_applicable' ||
+    status === 'non_evalue' ||
+    status === 'non_teste'
+  );
+}
+
+export function isNonTestedFinding(finding: AuditFinding): boolean {
+  return finding.origin === 'coverage' || isNonTestedStatus(resolveFindingStatus(finding));
+}
+
 export function getTotalFindings(audit: AuditReport): number {
   return audit.axes.reduce((sum, ax) => sum + ax.findings.length, 0);
 }
@@ -448,14 +496,15 @@ export function getCriticalCount(audit: AuditReport): number {
 }
 
 export function getAxisScoreBreakdown(axis: AuditAxis): AxisScoreBreakdown {
-  const passed = axis.findings.filter(f => f.status === 'pass' || (!f.status && f.type === 'pass')).length;
-  const failed = axis.findings.filter(f => f.status === 'fail' || (!f.status && f.type === 'bug')).length;
-  const notMeasured = axis.findings.filter(
-    f => f.status === 'not_measured' || f.status === 'not_evaluated',
+  const statuses = axis.findings.map(resolveFindingStatus);
+  const passed = statuses.filter(status => status === 'pass').length;
+  const failed = statuses.filter(status => status === 'fail').length;
+  const notAvailable = statuses.filter(status => status === 'not_available').length;
+  const notMeasured = statuses.filter(
+    status => isNonTestedStatus(status) && status !== 'not_available',
   ).length;
-  const notAvailable = axis.findings.filter(f => f.status === 'not_available').length;
   const x = passed;
-  const y = passed + failed + notMeasured;
+  const y = passed + failed + notMeasured + notAvailable;
   const scorePct = y > 0 ? Math.round((x / y) * 100) : 0;
 
   return {
@@ -479,8 +528,8 @@ export function getRiskLevelFromScore(scorePct: number): RiskLevel {
 export function getAuditGlobalScore(audit: AuditReport): number {
   const passCount = audit.passingKpis?.length ?? 0;
   const failCount = (audit.bugs?.length ?? 0) + (audit.recommendations?.length ?? 0) + (audit.compliance?.length ?? 0);
-  const notMeasuredCount = audit.auditCoverage?.filter(item => item.status === 'not_measured').length ?? 0;
-  const rawTotal = passCount + failCount + notMeasuredCount;
+  const coverageCount = audit.auditCoverage?.length ?? 0;
+  const rawTotal = passCount + failCount + coverageCount;
 
   if (rawTotal > 0) {
     return Math.round((passCount / rawTotal) * 100);
@@ -547,9 +596,7 @@ export function recomputeAuditReport(audit: AuditReport): AuditReport {
     .map((entry) => entry.finding);
 
   const coverageFindings = findingsWithStatus
-    .filter((entry) => {
-      return entry.status === 'not_measured' || entry.status === 'not_available' || entry.status === 'not_evaluated';
-    })
+    .filter((entry) => isNonTestedStatus(entry.status))
     .map((entry) => entry.finding);
 
   const bugFindings: AuditFinding[] = [];

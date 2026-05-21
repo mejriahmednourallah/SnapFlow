@@ -1,4 +1,4 @@
-import { getAxisScoreBreakdown, getScoreColor, type AuditAxis, type Criticality } from '@/data/mockAuditData';
+import { getAxisScoreBreakdown, getScoreColor, isNonTestedFinding, type AuditAxis, type Criticality } from '@/data/mockAuditData';
 import { CriticalityBadge } from '@/components/CriticalityBadge';
 import { PriorityBadge } from '@/components/PriorityBadge';
 import { ScoreGauge } from '@/components/ScoreGauge';
@@ -40,6 +40,7 @@ export function AxisDetailSheet({ axis, open, onClose }: AxisDetailSheetProps) {
   const mediumCount   = axis.findings.filter(f => f.criticality === 'medium').length;
   const lowCount      = axis.findings.filter(f => f.criticality === 'low').length;
   const breakdown = getAxisScoreBreakdown(axis);
+  const nonTestedCount = breakdown.notMeasured + breakdown.notAvailable;
 
   return (
     <Sheet open={open} onOpenChange={v => { if (!v) onClose(); }}>
@@ -68,16 +69,11 @@ export function AxisDetailSheet({ axis, open, onClose }: AxisDetailSheetProps) {
               {breakdown.x}/{breakdown.y}
             </span>
             <span className="text-xs px-3 py-1 rounded-full border border-border text-muted-foreground">
-              {axis.score}/{axis.maxScore} réussis — {axis.findings.length} constat{axis.findings.length !== 1 ? 's' : ''}
+              {breakdown.passed}/{breakdown.y} réussis - {axis.findings.length} constat{axis.findings.length !== 1 ? 's' : ''}
             </span>
-            {breakdown.notMeasured > 0 && (
-              <span className="text-xs px-3 py-1 rounded-full border border-blue-500/20 bg-blue-500/10 text-blue-400">
-                {breakdown.notMeasured} non mesuré{breakdown.notMeasured > 1 ? 's' : ''}
-              </span>
-            )}
-            {breakdown.notAvailable > 0 && (
-              <span className="text-xs px-3 py-1 rounded-full border border-stone-500/20 bg-stone-500/10 text-stone-300">
-                {breakdown.notAvailable} non disponible{breakdown.notAvailable > 1 ? 's' : ''}
+            {nonTestedCount > 0 && (
+              <span className="text-xs px-3 py-1 rounded-full border border-yellow-500/20 bg-yellow-500/10 text-yellow-400">
+                {nonTestedCount} Non testé{nonTestedCount > 1 ? 's' : ''}
               </span>
             )}
             {criticalCount > 0 && (
@@ -114,6 +110,7 @@ export function AxisDetailSheet({ axis, open, onClose }: AxisDetailSheetProps) {
             <Accordion type="multiple" className="space-y-2">
               {sorted.map(f => {
                 const isPassing = f.status === 'pass' || f.origin === 'passing_kpi';
+                const isNonTested = isNonTestedFinding(f);
                 return (
                 <AccordionItem
                   key={f.id}
@@ -133,19 +130,11 @@ export function AxisDetailSheet({ axis, open, onClose }: AxisDetailSheetProps) {
                             </span>
                           );
                         }
-                        if (f.status === 'not_measured' || f.origin === 'coverage') {
+                        if (isNonTested) {
                           return (
-                            <span className="inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded border flex-shrink-0 mt-0.5 text-blue-400 bg-blue-500/10 border-blue-500/20">
+                            <span className="inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded border flex-shrink-0 mt-0.5 text-yellow-400 bg-yellow-500/10 border-yellow-500/20">
                               <FlaskConical className="w-3 h-3" />
-                              <span>Non mesuré</span>
-                            </span>
-                          );
-                        }
-                        if (f.status === 'not_available') {
-                          return (
-                            <span className="inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded border flex-shrink-0 mt-0.5 text-stone-300 bg-stone-500/10 border-stone-500/20">
-                              <FlaskConical className="w-3 h-3" />
-                              <span>Non disponible</span>
+                              <span>Non testé</span>
                             </span>
                           );
                         }
@@ -173,8 +162,7 @@ export function AxisDetailSheet({ axis, open, onClose }: AxisDetailSheetProps) {
                         );
                       })()}
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium leading-snug">{f.title}</p>
-                        {f.page && <p className="text-xs text-muted-foreground mt-0.5 truncate">{f.page}</p>}
+                        <p className="text-base font-semibold leading-snug">{f.title}</p>
                       </div>
                       <CriticalityBadge level={f.criticality} />
                     </div>
@@ -223,7 +211,7 @@ export function AxisDetailSheet({ axis, open, onClose }: AxisDetailSheetProps) {
 
                       {(() => {
                         const hasEvidenceDetails =
-                          Boolean(f.evidenceRaw) ||
+                          (f.evidenceRows?.length ?? 0) > 0 ||
                           (f.evidenceSummary?.length ?? 0) > 0 ||
                           (f.evidence?.length ?? 0) > 0 ||
                           (f.annexes?.length ?? 0) > 0 ||

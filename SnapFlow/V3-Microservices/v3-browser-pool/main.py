@@ -99,6 +99,8 @@ async def render(req: RenderRequest):
         "invisible_links":  result.invisible_links,
         "console_errors": result.console_errors,
         "console_error_count": result.console_error_count,
+        "tracker_timeline": result.tracker_timeline or [],
+        "cmp_banner": result.cmp_banner,
         "error":         result.error,
     }
 
