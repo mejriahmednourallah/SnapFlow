@@ -56,6 +56,16 @@ Follow logs:
 docker compose --env-file .env.preprod -f docker-compose.preprod.yml logs -f
 ```
 
+Check browser-pool capacity:
+
+```bash
+docker exec v3-browser-pool curl -s http://localhost:8084/health
+```
+
+In the aggressive OVH preprod profile, `pool_size` is `64`, `active_sessions` is the number of render/screenshot jobs currently running, and `ignore_https_errors` should be `true`. `pool_size` does not mean 64 Chrome processes are preloaded; the pool keeps one shared Chromium runtime and opens concurrent contexts/pages on demand, so RAM usage stays modest until scans are actively rendering many pages.
+
+Default scans now request `headless_concurrency=24` and clamp request overrides to `1..48`, so a single scan can use more of the browser pool without one request consuming the whole server.
+
 ## Local Preprod Run
 
 The local launcher uses `.env.local` and the `snapflow-local-preprod` compose project.
@@ -164,3 +174,34 @@ When disk space is tight, building one target first can make the failure easier 
 docker compose -p snapflow-local-preprod --env-file .env.local -f docker-compose.preprod.yml build --progress=plain --no-cache aggregator
 docker compose -p snapflow-local-preprod --env-file .env.local -f docker-compose.preprod.yml build --progress=plain --no-cache frontend
 ```
+--------------------------------------------------------------------
+cd ~/snapflowv2.medianet.tn/SnapFlow
+
+git status --short
+git diff -- SnapFlow/V3-Microservices/run-all.sh
+
+# optional safety backup
+cp SnapFlow/V3-Microservices/run-all.sh /tmp/run-all.sh.server-backup
+
+# restore only that file from git
+git checkout -- SnapFlow/V3-Microservices/run-all.sh
+
+# pull latest
+git pull --ff-only
+If you want to keep the server edit for later, use stash instead:
+
+bash
+
+cd ~/snapflowv2.medianet.tn/SnapFlow
+
+git stash push -m "server local run-all.sh before preprod pull" -- SnapFlow/V3-Microservices/run-all.sh
+git pull --ff-only
+
+# only if you want to reapply the server edit after pulling:
+git stash pop
+For your case, I’d use the first path if run-all.sh should now match the repo. Then continue with:
+
+bash
+
+cd SnapFlow/V3-Microservices
+./run-all.sh --no-cache

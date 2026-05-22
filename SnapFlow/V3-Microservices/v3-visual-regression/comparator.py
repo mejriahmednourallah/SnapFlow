@@ -126,6 +126,7 @@ SCREENSHOT_GOTO_TIMEOUT_MS = int(os.getenv("SCREENSHOT_GOTO_TIMEOUT_MS", "30000"
 SCREENSHOT_WAIT_UNTIL = _normalize_wait_until(os.getenv("SCREENSHOT_WAIT_UNTIL", "domcontentloaded"))
 SCREENSHOT_SETTLE_MS = max(0, int(os.getenv("SCREENSHOT_SETTLE_MS", "1000")))
 SCREENSHOT_LOAD_STATE_TIMEOUT_MS = max(0, int(os.getenv("SCREENSHOT_LOAD_STATE_TIMEOUT_MS", "8000")))
+SCREENSHOT_IGNORE_HTTPS_ERRORS = os.getenv("SCREENSHOT_IGNORE_HTTPS_ERRORS", "").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -234,7 +235,10 @@ async def capture_screenshot(url: str, width: int = 1280, height: int = 800, bro
             raise ValueError(f"Unsupported browser engine: {browser_engine}")
         browser = await launcher.launch(args=get_browser_args())
         try:
-            page = await browser.new_page(viewport={"width": width, "height": height})
+            page = await browser.new_page(
+                viewport={"width": width, "height": height},
+                ignore_https_errors=SCREENSHOT_IGNORE_HTTPS_ERRORS,
+            )
             await _wait_for_screenshot_ready(page, url, SCREENSHOT_GOTO_TIMEOUT_MS)
 
             if full_page:
@@ -307,7 +311,10 @@ async def capture_screenshots_batch(
         try:
             async def _capture(index: int, url: str):
                 async with semaphore:
-                    page = await browser.new_page(viewport={"width": width, "height": height})
+                    page = await browser.new_page(
+                        viewport={"width": width, "height": height},
+                        ignore_https_errors=SCREENSHOT_IGNORE_HTTPS_ERRORS,
+                    )
                     try:
                         await _wait_for_screenshot_ready(page, url, SCREENSHOT_GOTO_TIMEOUT_MS)
 

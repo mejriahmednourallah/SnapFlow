@@ -91,6 +91,8 @@ services:
       SCANNER_API_URL: http://scanner:8081
       VISUAL_REGRESSION_API_URL: http://v3-visual-regression:8083
       BROWSER_POOL_URL: http://v3-browser-pool:8084
+      DEFAULT_HEADLESS_CONCURRENCY: "24"
+      MAX_HEADLESS_CONCURRENCY: "48"
     restart: unless-stopped
 
   # ─── Browser Pool (Playwright) ──────────────────────────────────────
@@ -100,10 +102,11 @@ services:
     # No host port — internal only
     environment:
       CHROME_NO_SANDBOX: "true"
-      BROWSER_POOL_CONCURRENCY: "24"
-      BROWSER_POOL_RECYCLE_AFTER: "80"
+      BROWSER_POOL_CONCURRENCY: "64"
+      BROWSER_POOL_RECYCLE_AFTER: "160"
       BROWSER_POOL_DEFAULT_TIMEOUT_MS: "30000"
-      BROWSER_POOL_ACQUIRE_TIMEOUT_S: "20"
+      BROWSER_POOL_ACQUIRE_TIMEOUT_S: "45"
+      BROWSER_POOL_IGNORE_HTTPS_ERRORS: "true"
       BROWSER_POOL_SCREENSHOT_WAIT_UNTIL: "domcontentloaded"
       BROWSER_POOL_SCREENSHOT_SETTLE_MS: "1000"
       BROWSER_POOL_SCREENSHOT_LOAD_STATE_TIMEOUT_MS: "8000"
@@ -133,7 +136,8 @@ services:
       VISUAL_REGRESSION_ENABLED: "true"
       CHROME_NO_SANDBOX: "true"
       BROWSER_POOL_URL: http://v3-browser-pool:8084
-      VISUAL_SCREENSHOT_MAX_CONCURRENCY: "10"
+      VISUAL_SCREENSHOT_MAX_CONCURRENCY: "24"
+      SCREENSHOT_IGNORE_HTTPS_ERRORS: "true"
       SCREENSHOT_WAIT_UNTIL: "domcontentloaded"
       SCREENSHOT_SETTLE_MS: "1000"
       SCREENSHOT_LOAD_STATE_TIMEOUT_MS: "8000"

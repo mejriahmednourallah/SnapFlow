@@ -49,6 +49,16 @@ SCANNER_API_URL = os.getenv("SCANNER_API_URL", "http://scanner:8081")
 VISUAL_REGRESSION_API_URL = os.getenv("VISUAL_REGRESSION_API_URL", "http://v3-visual-regression:8083")
 BROWSER_POOL_URL = os.getenv("BROWSER_POOL_URL", "http://v3-browser-pool:8084")
 MULTI_BROWSER_FALLBACK_TIMEOUT = int(os.getenv("MULTI_BROWSER_FALLBACK_TIMEOUT", "20"))
+DEFAULT_HEADLESS_CONCURRENCY = int(os.getenv("DEFAULT_HEADLESS_CONCURRENCY", "24"))
+MAX_HEADLESS_CONCURRENCY = int(os.getenv("MAX_HEADLESS_CONCURRENCY", "48"))
+
+
+def _clamp_headless_concurrency(value: Optional[int]) -> int:
+    try:
+        requested = int(value) if value is not None else DEFAULT_HEADLESS_CONCURRENCY
+    except (TypeError, ValueError):
+        requested = DEFAULT_HEADLESS_CONCURRENCY
+    return max(1, min(requested, MAX_HEADLESS_CONCURRENCY))
 
 
 def _build_top_level_kpis(kpi_report: dict) -> dict:
@@ -624,7 +634,7 @@ class ScanStatus(str, Enum):
 class ScanRequest(BaseModel):
     url: str
     max_pages: Optional[int] = 150
-    headless_concurrency: Optional[int] = 3
+    headless_concurrency: Optional[int] = DEFAULT_HEADLESS_CONCURRENCY
     enable_visual_regression: Optional[bool] = False
     visual_baseline_scan_id: Optional[str] = None
 
@@ -3719,10 +3729,11 @@ async def start_scan(req: ScanRequest):
     """Start a new scan asynchronously. Returns a scan_id for polling."""
     scan_id = f"scan_{uuid.uuid4().hex[:12]}"
     create_scan_entry(scan_id, req)
-    logger.info(f"Starting async scan {scan_id} for {req.url}")
+    headless_concurrency = _clamp_headless_concurrency(req.headless_concurrency)
+    logger.info(f"Starting async scan {scan_id} for {req.url} with headless_concurrency={headless_concurrency}")
     thread = threading.Thread(
         target=run_scanner,
-        args=(scan_id, req.url, req.max_pages or 150, req.headless_concurrency or 3),
+        args=(scan_id, req.url, req.max_pages or 150, headless_concurrency),
         daemon=True,
     )
     thread.start()
@@ -3736,7 +3747,8 @@ async def start_scan_sync(req: ScanRequest):
     """
     scan_id = f"scan_{uuid.uuid4().hex[:12]}"
     create_scan_entry(scan_id, req)
-    logger.info(f"Starting SYNC scan {scan_id} for {req.url}")
+    headless_concurrency = _clamp_headless_concurrency(req.headless_concurrency)
+    logger.info(f"Starting SYNC scan {scan_id} for {req.url} with headless_concurrency={headless_concurrency}")
     
     # Keep response synchronous for caller, while avoiding event-loop blocking.
     await asyncio.to_thread(
@@ -3744,7 +3756,7 @@ async def start_scan_sync(req: ScanRequest):
         scan_id,
         req.url,
         req.max_pages or 150,
-        req.headless_concurrency or 3,
+        headless_concurrency,
     )
     
     scan = get_scan_entry(scan_id)

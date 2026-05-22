@@ -18,6 +18,17 @@ sys.modules.setdefault("psycopg2.extras", psycopg2_extras_stub)
 import main
 
 
+class TestHeadlessConcurrencyDefaults(unittest.TestCase):
+    def test_scan_request_defaults_to_aggressive_headless_concurrency(self):
+        req = main.ScanRequest(url="https://example.com")
+        self.assertEqual(req.headless_concurrency, 24)
+
+    def test_headless_concurrency_is_clamped(self):
+        self.assertEqual(main._clamp_headless_concurrency(None), 24)
+        self.assertEqual(main._clamp_headless_concurrency(0), 1)
+        self.assertEqual(main._clamp_headless_concurrency(96), 48)
+
+
 class TestKPINewModeEndpoints(unittest.TestCase):
     def setUp(self):
         self.client = TestClient(main.app)

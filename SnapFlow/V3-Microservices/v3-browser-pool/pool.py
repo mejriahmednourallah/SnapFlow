@@ -36,6 +36,7 @@ def _normalize_wait_until(value: Optional[str], default: str = "domcontentloaded
 POOL_CONCURRENCY = int(os.getenv("BROWSER_POOL_CONCURRENCY", "15"))
 RECYCLE_AFTER    = int(os.getenv("BROWSER_POOL_RECYCLE_AFTER", "50"))
 DEFAULT_TIMEOUT  = int(os.getenv("BROWSER_POOL_DEFAULT_TIMEOUT_MS", "30000"))
+_BROWSER_POOL_IGNORE_HTTPS_ERRORS = os.getenv("BROWSER_POOL_IGNORE_HTTPS_ERRORS", "").strip().lower() in ("1", "true", "yes", "on")
 DEFAULT_SCREENSHOT_WAIT_UNTIL = _normalize_wait_until(
     os.getenv("BROWSER_POOL_SCREENSHOT_WAIT_UNTIL", "domcontentloaded"),
 )
@@ -208,8 +209,8 @@ class BrowserPool:
         self._semaphore  = asyncio.Semaphore(POOL_CONCURRENCY)
         self._started    = True
         logger.info(
-            "BrowserPool ready: concurrency=%d  recycle_after=%d  timeout_ms=%d",
-            POOL_CONCURRENCY, RECYCLE_AFTER, DEFAULT_TIMEOUT,
+            "BrowserPool ready: concurrency=%d  recycle_after=%d  timeout_ms=%d  ignore_https_errors=%s",
+            POOL_CONCURRENCY, RECYCLE_AFTER, DEFAULT_TIMEOUT, _BROWSER_POOL_IGNORE_HTTPS_ERRORS,
         )
 
     async def stop(self) -> None:
@@ -512,7 +513,10 @@ class BrowserPool:
             page = None
             console_errors: list[str] = []
             try:
-                context = await browser.new_context(viewport={"width": 1366, "height": 768})
+                context = await browser.new_context(
+                    viewport={"width": 1366, "height": 768},
+                    ignore_https_errors=_BROWSER_POOL_IGNORE_HTTPS_ERRORS,
+                )
                 page    = await context.new_page()
                 page.on(
                     "console",
@@ -601,13 +605,22 @@ class BrowserPool:
             try:
                 if use_obscura:
                     remote_browser = await self._playwright.chromium.connect_over_cdp(_OBSCURA_CDP_URL)
-                    context = await remote_browser.new_context(viewport={"width": 1366, "height": 768})
+                    context = await remote_browser.new_context(
+                        viewport={"width": 1366, "height": 768},
+                        ignore_https_errors=_BROWSER_POOL_IGNORE_HTTPS_ERRORS,
+                    )
                     engine = "obscura"
                 else:
-                    context = await browser.new_context(viewport={"width": 1366, "height": 768})
+                    context = await browser.new_context(
+                        viewport={"width": 1366, "height": 768},
+                        ignore_https_errors=_BROWSER_POOL_IGNORE_HTTPS_ERRORS,
+                    )
             except Exception as exc:
                 logger.warning("Obscura discovery unavailable, falling back to Chromium: %s", exc)
-                context = await browser.new_context(viewport={"width": 1366, "height": 768})
+                context = await browser.new_context(
+                    viewport={"width": 1366, "height": 768},
+                    ignore_https_errors=_BROWSER_POOL_IGNORE_HTTPS_ERRORS,
+                )
                 engine = "chromium"
 
             page = await context.new_page()
@@ -834,7 +847,10 @@ class BrowserPool:
             context = None
             page = None
             try:
-                context = await browser.new_context(viewport={"width": width, "height": height})
+                context = await browser.new_context(
+                    viewport={"width": width, "height": height},
+                    ignore_https_errors=_BROWSER_POOL_IGNORE_HTTPS_ERRORS,
+                )
                 page    = await context.new_page()
                 logger.info(
                     "screenshot navigation url=%s wait_until=%s timeout_ms=%d settle_ms=%d",
@@ -965,4 +981,5 @@ class BrowserPool:
             "timeout_count":   self._timeout_count,
             "crash_count":     self._crash_count,
             "browser_alive":   alive,
+            "ignore_https_errors": _BROWSER_POOL_IGNORE_HTTPS_ERRORS,
         }

@@ -5,7 +5,7 @@ from unittest.mock import patch
 from fastapi import HTTPException
 
 import main as visual_main
-from comparator import SCREENSHOT_WAIT_UNTIL, _normalize_wait_until, get_browser_args
+from comparator import SCREENSHOT_IGNORE_HTTPS_ERRORS, SCREENSHOT_WAIT_UNTIL, _normalize_wait_until, get_browser_args
 from main import compare, browser_compat, CompareRequest, BrowserCompatRequest
 
 
@@ -43,6 +43,9 @@ class FlagBehaviorTests(unittest.TestCase):
         self.assertEqual(_normalize_wait_until(None), "domcontentloaded")
         self.assertEqual(_normalize_wait_until("not-real"), "domcontentloaded")
         self.assertEqual(_normalize_wait_until("networkidle"), "networkidle")
+
+    def test_screenshot_ignore_https_errors_flag_is_boolean(self):
+        self.assertIsInstance(SCREENSHOT_IGNORE_HTTPS_ERRORS, bool)
 
     def test_compare_disabled_returns_503(self):
         os.environ["VISUAL_REGRESSION_ENABLED"] = "false"
