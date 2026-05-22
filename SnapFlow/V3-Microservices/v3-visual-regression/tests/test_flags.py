@@ -5,7 +5,7 @@ from unittest.mock import patch
 from fastapi import HTTPException
 
 import main as visual_main
-from comparator import get_browser_args
+from comparator import SCREENSHOT_WAIT_UNTIL, _normalize_wait_until, get_browser_args
 from main import compare, browser_compat, CompareRequest, BrowserCompatRequest
 
 
@@ -37,6 +37,12 @@ class FlagBehaviorTests(unittest.TestCase):
         args = get_browser_args()
         self.assertNotIn("--no-sandbox", args)
         self.assertIn("--disable-dev-shm-usage", args)
+
+    def test_screenshot_wait_defaults_to_domcontentloaded(self):
+        self.assertEqual(SCREENSHOT_WAIT_UNTIL, "domcontentloaded")
+        self.assertEqual(_normalize_wait_until(None), "domcontentloaded")
+        self.assertEqual(_normalize_wait_until("not-real"), "domcontentloaded")
+        self.assertEqual(_normalize_wait_until("networkidle"), "networkidle")
 
     def test_compare_disabled_returns_503(self):
         os.environ["VISUAL_REGRESSION_ENABLED"] = "false"

@@ -126,7 +126,7 @@ export function AxisDetailSheet({ axis, open, onClose }: AxisDetailSheetProps) {
                           return (
                             <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded border flex-shrink-0 mt-0.5 text-emerald-300 bg-emerald-500/20 border-emerald-500/40 font-semibold">
                               <CheckCircle className="w-3 h-3" />
-                              <span>KPI validé</span>
+                              <span>Validé</span>
                             </span>
                           );
                         }
@@ -142,7 +142,7 @@ export function AxisDetailSheet({ axis, open, onClose }: AxisDetailSheetProps) {
                           return (
                             <span className="inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded border flex-shrink-0 mt-0.5 text-orange-400 bg-orange-500/10 border-orange-500/20">
                               <ShieldAlert className="w-3 h-3" />
-                              <span>RGPD</span>
+                              <span>Protection des données</span>
                             </span>
                           );
                         }
@@ -216,17 +216,26 @@ export function AxisDetailSheet({ axis, open, onClose }: AxisDetailSheetProps) {
                           (f.evidence?.length ?? 0) > 0 ||
                           (f.annexes?.length ?? 0) > 0 ||
                           (f.exampleUrls?.length ?? 0) > 0;
-                        const uniqueAnnexes = f.annexes?.filter(a => !(f.exampleUrls || []).includes(a)) || [];
-                        if (uniqueAnnexes.length === 0 && !hasEvidenceDetails) return null;
+                        if (!hasEvidenceDetails) return null;
                         
                         return (
-                          <div className="p-3 rounded-md bg-muted/20 border border-border/20 mt-3">
+                          <div className="flex justify-end mt-3">
+                            <EvidenceDetailsDialog finding={f} triggerLabel="Voir les preuves" />
+                          </div>
+                        );
+                      })()}
+
+                      {/*
+                        const uniqueAnnexes: string[] = [];
+                        const hasEvidenceDetails = false;
+                        return (
+                          <div>
                             <div className="flex items-center justify-between gap-3 mb-2">
                               <p className="text-xs font-semibold flex items-center gap-1">
-                                Détails et occurrences ({uniqueAnnexes.length})
+                                Preuves et contexte ({uniqueAnnexes.length})
                               </p>
                               {hasEvidenceDetails && (
-                                <EvidenceDetailsDialog finding={f} triggerLabel="Preuves detaillees" />
+                                <EvidenceDetailsDialog finding={f} triggerLabel="Voir les preuves" />
                               )}
                             </div>
                             {uniqueAnnexes.length > 0 && (
@@ -249,27 +258,20 @@ export function AxisDetailSheet({ axis, open, onClose }: AxisDetailSheetProps) {
                             )}
                           </div>
                         );
-                      })()}
+                      */}
 
-                      {(f.sourceKpi || (f.affectedCount != null && f.affectedCount > 0)) && (
+                      {f.affectedCount != null && f.affectedCount > 0 && (
                         <div className="flex items-center gap-2 flex-wrap mt-2">
-                          {f.sourceKpi && (
-                            <span className="text-xs font-mono px-2 py-0.5 rounded border border-border/40 bg-muted/30 text-muted-foreground">
-                              {f.sourceKpi}
-                            </span>
-                          )}
-                          {f.affectedCount != null && f.affectedCount > 0 && (
-                            <span className="text-xs px-2 py-0.5 rounded-full border border-amber-500/20 bg-amber-500/10 text-amber-400">
-                              {f.affectedCount} élément{f.affectedCount > 1 ? 's' : ''} concerné{f.affectedCount > 1 ? 's' : ''}
-                            </span>
-                          )}
+                          <span className="text-xs px-2 py-0.5 rounded-full border border-amber-500/20 bg-amber-500/10 text-amber-400">
+                            {f.affectedCount} page{f.affectedCount > 1 ? 's' : ''} ou élément{f.affectedCount > 1 ? 's' : ''} à vérifier
+                          </span>
                         </div>
                       )}
 
                       {f.exampleUrls && f.exampleUrls.length > 0 && (
                         <div className="p-3 rounded-md bg-muted/20 border border-border/20 mt-2">
                           <p className="text-xs font-semibold mb-1.5 flex items-center gap-1.5">
-                            <ExternalLink className="w-3.5 h-3.5 text-muted-foreground" /> Exemples d'URLs ({f.exampleUrls.length})
+                            <ExternalLink className="w-3.5 h-3.5 text-muted-foreground" /> Exemples de pages ({f.exampleUrls.length})
                           </p>
                           <ul className="space-y-1">
                             {f.exampleUrls.map((url, i) => (

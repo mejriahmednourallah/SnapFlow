@@ -20,7 +20,7 @@ export function TableOfContentsPage({ report, theme, clientLogoSrc }: TableOfCon
     '01 Couverture',
     '02 Table des matières',
     '03 Résumé exécutif',
-    '04 Grille des KPI',
+    '04 Grille des contrôles',
   ];
   const axisEntries = report.axes.map((axis, idx) => `${String(idx + 5).padStart(2, '0')} ${axis.name}`);
   const endEntries = [

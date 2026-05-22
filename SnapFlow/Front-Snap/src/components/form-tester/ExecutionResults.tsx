@@ -39,6 +39,20 @@ export function ExecutionResults({ results, isLoading = false }: ExecutionResult
             </div>
           ) : null}
 
+          <div className="grid gap-2 text-xs text-muted-foreground sm:grid-cols-3">
+            <div className="rounded-md bg-muted/40 px-3 py-2">
+              Source: <span className="font-medium text-foreground">{result.execution_source ?? 'chromium'}</span>
+            </div>
+            <div className="rounded-md bg-muted/40 px-3 py-2 truncate">
+              URL finale: <span className="font-medium text-foreground">{result.final_url ?? '-'}</span>
+            </div>
+            <div className="rounded-md bg-muted/40 px-3 py-2">
+              Reseau: <span className="font-medium text-foreground">
+                {typeof result.network_summary?.requests === 'number' ? `${result.network_summary.requests} req.` : 'non mesure'}
+              </span>
+            </div>
+          </div>
+
           <div className="space-y-2">
             <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Assertions</p>
             {result.assertions.length === 0 ? (
@@ -69,6 +83,21 @@ export function ExecutionResults({ results, isLoading = false }: ExecutionResult
               <ImageIcon className="h-4 w-4" />
               Voir la capture d écran
             </a>
+          ) : null}
+
+          {Array.isArray(result.step_trace) && result.step_trace.length > 0 ? (
+            <div className="space-y-2">
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Trace</p>
+              <div className="space-y-1.5">
+                {result.step_trace.slice(0, 10).map((step, index) => (
+                  <div key={`${result.id}-trace-${index}`} className="rounded-md border border-border p-2 text-xs text-muted-foreground">
+                    <span className="font-medium text-foreground">{String(step.type ?? 'step')}</span>
+                    {step.selector ? <span className="ml-2">{String(step.selector)}</span> : null}
+                    {step.status ? <span className="ml-2">({String(step.status)})</span> : null}
+                  </div>
+                ))}
+              </div>
+            </div>
           ) : null}
         </article>
       ))}

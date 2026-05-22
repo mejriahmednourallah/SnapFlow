@@ -244,7 +244,7 @@ export function TabDetails({ audit, selectedAxisId, isEditMode = false, onUpdate
                     <h4 className="font-semibold text-sm flex items-center gap-2"><AlertCircle className="w-4 h-4 text-warning" /> Pages sans Meta Description ({pagesWithoutMeta.length})</h4>
                     <div className="overflow-x-auto">
                       <table className="w-full text-sm">
-                        <thead><tr className="border-b border-border/50 text-muted-foreground"><th className="text-left p-2">Page</th><th className="text-left p-2">URL</th><th className="text-center p-2">Statut</th></tr></thead>
+                        <thead><tr className="border-b border-border/50 text-muted-foreground"><th className="text-left p-2">Page</th><th className="text-left p-2">Adresse</th><th className="text-center p-2">Statut</th></tr></thead>
                         <tbody>
                           {pagesWithoutMeta.map(p => (
                             <tr key={p.url} className="border-b border-border/30">
@@ -271,7 +271,7 @@ export function TabDetails({ audit, selectedAxisId, isEditMode = false, onUpdate
                     <h4 className="font-semibold text-sm flex items-center gap-2"><Image className="w-4 h-4 text-orange-400" /> Images à Optimiser ({audit.imagesToOptimize.length})</h4>
                     <div className="overflow-x-auto">
                       <table className="w-full text-sm">
-                        <thead><tr className="border-b border-border/50 text-muted-foreground"><th className="text-left p-2">Page</th><th className="text-left p-2">URL Image</th><th className="text-center p-2">Taille</th><th className="text-center p-2">Format</th><th className="text-center p-2">Recommandé</th><th className="text-center p-2">Gain</th></tr></thead>
+                        <thead><tr className="border-b border-border/50 text-muted-foreground"><th className="text-left p-2">Page</th><th className="text-left p-2">Adresse image</th><th className="text-center p-2">Taille</th><th className="text-center p-2">Format</th><th className="text-center p-2">Recommandé</th><th className="text-center p-2">Gain</th></tr></thead>
                         <tbody>
                           {audit.imagesToOptimize.map((img, i) => (
                             <tr key={i} className="border-b border-border/30">
@@ -364,7 +364,7 @@ export function TabDetails({ audit, selectedAxisId, isEditMode = false, onUpdate
                               return (
                                 <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border text-emerald-400 bg-emerald-500/10 border-emerald-500/20">
                                   <CheckCircle className="w-3 h-3" />
-                                  <span>KPI validé</span>
+                                  <span>Validé</span>
                                 </span>
                               );
                             }
@@ -380,7 +380,7 @@ export function TabDetails({ audit, selectedAxisId, isEditMode = false, onUpdate
                               return (
                                 <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border text-orange-400 bg-orange-500/10 border-orange-500/20">
                                   <ShieldAlert className="w-3 h-3" />
-                                  <span>RGPD</span>
+                                  <span>Protection des données</span>
                                 </span>
                               );
                             }
@@ -429,7 +429,7 @@ export function TabDetails({ audit, selectedAxisId, isEditMode = false, onUpdate
 
                       {(f.status !== 'pass' && f.risk) && (
                         <div className="p-3 rounded-md bg-destructive/5 border border-destructive/10">
-                          <p className="text-sm"><ShieldAlert className="w-3.5 h-3.5 inline mr-1.5 text-destructive" /><span className="font-medium">Risque / Manque à gagner :</span> {f.risk}</p>
+                            <p className="text-sm"><ShieldAlert className="w-3.5 h-3.5 inline mr-1.5 text-destructive" /><span className="font-medium">Risque :</span> {f.risk}</p>
                         </div>
                       )}
 
@@ -439,18 +439,18 @@ export function TabDetails({ audit, selectedAxisId, isEditMode = false, onUpdate
                             ? <CheckCircle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0 text-emerald-400" />
                             : <Lightbulb className="w-3.5 h-3.5 mt-0.5 flex-shrink-0 text-primary" />}
                           <span>
-                            <span className="font-medium">{f.status === 'pass' ? 'Statut :' : 'Recommandation :'}</span> {f.recommendation}
+                             <span className="font-medium">{f.status === 'pass' ? 'Statut :' : 'Recommandation :'}</span> {f.recommendation}
                           </span>
                         </p>
                       </div>
 
-                      {((f.annexes && f.annexes.length > 0) || hasEvidenceDetails) && (
-                        <div className={`p-3 rounded-md border ${f.status === 'pass' ? 'bg-emerald-500/5 border-emerald-500/20' : 'bg-muted/30 border-border/20'}`}>
-                          <div className="flex items-center justify-between gap-2 mb-1.5">
-                            <p className="text-xs font-semibold flex items-center gap-1.5"><Paperclip className="w-3.5 h-3.5 text-muted-foreground" /> Annexes</p>
-                            {hasEvidenceDetails && <EvidenceDetailsDialog finding={f} triggerLabel="Preuves detaillees" />}
+                      {hasEvidenceDetails && (
+                        <div className="flex justify-end">
+                          <div className="sr-only">
+                            <Paperclip className="w-3.5 h-3.5 text-muted-foreground" /> Preuves et contexte
                           </div>
-                          {f.annexes && f.annexes.length > 0 && (
+                          <EvidenceDetailsDialog finding={f} triggerLabel="Voir les preuves" />
+                          {/*
                             <ul className="space-y-1">
                               {f.annexes.map((a, i) => (
                                 <li key={i} className="text-xs text-muted-foreground flex items-start gap-1.5">
@@ -459,29 +459,22 @@ export function TabDetails({ audit, selectedAxisId, isEditMode = false, onUpdate
                                 </li>
                               ))}
                             </ul>
-                          )}
+                          */}
                         </div>
                       )}
 
-                      {(f.sourceKpi || (f.affectedCount != null && f.affectedCount > 0)) && (
+                      {f.affectedCount != null && f.affectedCount > 0 && (
                         <div className="flex items-center gap-2 flex-wrap">
-                          {f.sourceKpi && (
-                            <span className="text-xs font-mono px-2 py-0.5 rounded border border-border/40 bg-muted/30 text-muted-foreground">
-                              {f.sourceKpi}
-                            </span>
-                          )}
-                          {f.affectedCount != null && f.affectedCount > 0 && (
-                            <span className="text-xs px-2 py-0.5 rounded-full border border-amber-500/20 bg-amber-500/10 text-amber-400">
-                              {f.affectedCount} élément{f.affectedCount > 1 ? 's' : ''} concerné{f.affectedCount > 1 ? 's' : ''}
-                            </span>
-                          )}
+                          <span className="text-xs px-2 py-0.5 rounded-full border border-amber-500/20 bg-amber-500/10 text-amber-400">
+                            {f.affectedCount} page{f.affectedCount > 1 ? 's' : ''} ou élément{f.affectedCount > 1 ? 's' : ''} à vérifier
+                          </span>
                         </div>
                       )}
 
                       {f.exampleUrls && f.exampleUrls.length > 0 && (
                         <div className="p-3 rounded-md bg-muted/20 border border-border/20">
                           <p className="text-xs font-semibold mb-1.5 flex items-center gap-1.5">
-                            <ExternalLink className="w-3.5 h-3.5 text-muted-foreground" /> Exemples d'URLs ({f.exampleUrls.length})
+                            <ExternalLink className="w-3.5 h-3.5 text-muted-foreground" /> Exemples de pages ({f.exampleUrls.length})
                           </p>
                           <ul className="space-y-1">
                             {f.exampleUrls.map((url, i) => (

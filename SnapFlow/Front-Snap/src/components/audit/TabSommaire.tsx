@@ -122,24 +122,24 @@ export function TabSommaire({ audit, selectedAxisId, onSelectAxis }: TabSommaire
               <button
                 key={ax.id}
                 onClick={() => handleAxisClick(ax)}
-                className="glass-card-hover p-4 text-left flex flex-col gap-3"
+                className="glass-card-hover p-5 text-left flex flex-col gap-4 min-h-[178px]"
               >
                 {/* Card header */}
                 <div className="flex items-start gap-3">
                   <ScoreGauge
                     score={gaugeScore}
-                    size={66}
-                    strokeWidth={4}
+                    size={82}
+                    strokeWidth={5}
                     valueText={allNonTeste ? 'N/T' : `${gaugeScore}%`}
-                    centerScale={1.2}
+                    centerScale={1.28}
                   />
                   <div className="flex-1 flex items-start justify-between gap-2">
                     <div className="flex flex-col items-end text-right leading-tight">
-                      <p className="font-semibold text-sm">{ax.name}</p>
+                      <p className="font-semibold text-base md:text-lg leading-tight">{ax.name}</p>
                       {allNonTeste ? (
-                        <p className="text-xs text-yellow-400 font-mono">Non testé</p>
+                        <p className="text-sm text-yellow-400 font-mono">Non testé</p>
                       ) : (
-                        <p className="text-xs text-muted-foreground font-mono">{passed}/{total}</p>
+                        <p className="text-sm text-muted-foreground font-mono">{passed}/{total}</p>
                       )}
                     </div>
                     <div className="p-1.5 rounded-lg bg-muted/40">
@@ -149,15 +149,15 @@ export function TabSommaire({ audit, selectedAxisId, onSelectAxis }: TabSommaire
                 </div>
 
                 {/* Stats grid */}
-                <div className="grid grid-cols-2 gap-2 text-xs">
-                  <div className="flex items-center gap-1.5 p-2 rounded-md bg-muted/30">
-                    <Bug className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
+                <div className="grid grid-cols-2 gap-2 text-sm">
+                  <div className="flex items-center gap-2 p-2.5 rounded-md bg-muted/30 min-w-0">
+                    <Bug className="w-4 h-4 text-muted-foreground flex-shrink-0" />
                     <span className="text-muted-foreground">Bugs</span>
                     <span className="font-semibold ml-auto">{bugCount}</span>
                   </div>
-                  <div className="flex items-center gap-1.5 p-2 rounded-md bg-muted/30">
-                    <Lightbulb className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
-                    <span className="text-muted-foreground">Recommandations</span>
+                  <div className="flex items-center gap-2 p-2.5 rounded-md bg-muted/30 min-w-0">
+                    <Lightbulb className="w-4 h-4 text-muted-foreground flex-shrink-0" />
+                    <span className="text-muted-foreground truncate">Recommandations</span>
                     <span className="font-semibold ml-auto">{recoCount}</span>
                   </div>
                 </div>

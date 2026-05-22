@@ -26,6 +26,8 @@ export function DetectionPanel({
 }: DetectionPanelProps) {
   const formFillNodes = nodes.filter((node) => node.type === 'form_fill');
   const hasDetectedFields = formFillNodes.length > 0;
+  const detectionSources = Array.isArray(workflow.detection_sources) ? workflow.detection_sources : [];
+  const riskFlags = Array.isArray(workflow.risk_flags) ? workflow.risk_flags : [];
 
   return (
     <aside className="w-80 border-r border-border bg-background/95 flex flex-col h-full">
@@ -43,6 +45,36 @@ export function DetectionPanel({
         ) : null}
 
         {errorMessage ? <p className="text-xs text-destructive">{errorMessage}</p> : null}
+
+        {detectionSources.length > 0 || workflow.confidence ? (
+          <div className="rounded-lg border border-border bg-muted/25 p-3 space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs font-semibold text-foreground">Detection</span>
+              <span className="text-[11px] rounded-full bg-background px-2 py-0.5 text-muted-foreground">
+                {workflow.confidence ?? 'low'}
+              </span>
+            </div>
+            {detectionSources.length > 0 ? (
+              <div className="flex flex-wrap gap-1">
+                {detectionSources.map((source) => (
+                  <span key={source} className="rounded-full bg-background px-2 py-0.5 text-[10px] text-muted-foreground">
+                    {source}
+                  </span>
+                ))}
+              </div>
+            ) : null}
+            {riskFlags.length > 0 ? (
+              <div className="flex flex-wrap gap-1">
+                {riskFlags.map((flag) => (
+                  <span key={flag} className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] text-amber-800 dark:bg-amber-900/40 dark:text-amber-300">
+                    {flag}
+                  </span>
+                ))}
+              </div>
+            ) : null}
+            {workflow.blocked_reason ? <p className="text-[11px] text-muted-foreground">{workflow.blocked_reason}</p> : null}
+          </div>
+        ) : null}
       </div>
 
       <div className="flex-1 overflow-y-auto p-4 space-y-2">

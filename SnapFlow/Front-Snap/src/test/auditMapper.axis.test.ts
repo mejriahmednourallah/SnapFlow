@@ -111,7 +111,7 @@ describe('Axis Mapping', () => {
 
       expect(perfAxis).toBeDefined();
       expect(finding).toBeDefined();
-      expect(finding?.description).toContain('Largest Contentful Paint');
+      expect(finding?.description).toContain("temps d'affichage principal");
       expect(finding?.impact).toContain('conversion');
       expect(finding?.affectedCount).toBe(2);
       expect(finding?.exampleUrls).toContain('https://example.com/');
@@ -206,12 +206,12 @@ describe('Axis Mapping', () => {
 
       expect(securityAxis).toBeDefined();
       expect(finding).toBeDefined();
-      expect(finding?.description).toContain('Content-Security-Policy');
-      expect(finding?.impact).toContain('XSS');
+      expect(finding?.description).toContain('regle de securite du contenu');
+      expect(finding?.impact).toContain('injection de script');
       expect(finding?.origin).toBe('bug');
       expect(finding?.affectedCount).toBe(1);
       expect(finding?.exampleUrls).toContain('https://example.com/login');
-      expect(finding?.evidence?.some((line) => line.includes('Content-Security-Policy'))).toBe(true);
+      expect(finding?.evidence?.some((line) => line.includes('regle de securite du contenu'))).toBe(true);
       expect((finding?.evidence ?? []).some((line) => /metrics\.|data quality|VALID/i.test(line))).toBe(false);
     });
 
@@ -398,7 +398,7 @@ describe('Axis Mapping', () => {
 
       const securityFindings = report.axes.find((axis) => axis.id === 'security')?.findings ?? [];
 
-      expect(securityFindings.filter((finding) => finding.title === 'SSL')).toHaveLength(1);
+      expect(securityFindings.filter((finding) => finding.title === 'Certificat de securite')).toHaveLength(1);
     });
   });
 
@@ -442,7 +442,7 @@ describe('Axis Mapping', () => {
       const finding = securityAxis?.findings.find((item) => item.id === 'sec_ssl');
 
       expect(finding).toBeDefined();
-      expect(finding?.recommendation).toBe('Renouveler le certificat SSL avant expiration.');
+      expect(finding?.recommendation).toBe('Renouveler le certificat de securite avant expiration.');
       expect(finding?.recommendationSource).toBe('fix');
     });
 
@@ -508,8 +508,8 @@ describe('Axis Mapping', () => {
       expect(finding).toBeDefined();
       expect(finding?.exampleUrls).toEqual(['https://example.com/a', 'https://example.com/b', 'https://example.com/c'].slice(0, 10));
       expect(finding?.evidence).toEqual([
-        '2 pages sans meta description sur 12 pages testees.',
-        'URLs concernees: https://example.com/a, https://example.com/b',
+        '2 pages sans description de page sur 12 pages testees.',
+        'Pages concernees: https://example.com/a, https://example.com/b',
         'Titre present sur toutes les pages testees.',
       ]);
       expect(finding?.evidenceRows).toHaveLength(2);
@@ -615,12 +615,170 @@ describe('Axis Mapping', () => {
       expect(finding?.evidence).toEqual([
         '2 formulaires avec signaux anormaux sur 4 tests executes.',
         'Formulaire concerne: https://example.com/contact',
-        'Payloads dangereux masques dans les preuves client.',
+        'contenus de test dangereux masques dans les preuves client.',
       ]);
       expect(finding?.evidenceRows?.[0]?.payload).toBe('[masque]');
       expect((finding?.evidenceRaw as any)?.digest?.quality).toBe('PARTIAL');
       expect((finding?.evidenceRaw as any)?.evidence?.anomalous_tests_all).toBeUndefined();
       expect((finding?.evidence ?? []).some((line) => /<script>|data_quality|PARTIAL/i.test(line))).toBe(false);
+    });
+
+    it('cleans server version wording for nontechnical readers', () => {
+      const api: ApiResponse = {
+        scan_id: 'test-scan-server-version-copy',
+        domain: 'https://example.com',
+        report_version: 'v2',
+        axes: {
+          'Audit Technique': {
+            server: {
+              kpi_id: 'tech_server_version',
+              type: 'recommendation',
+              status: 'warning',
+              severity: 'medium',
+              name: 'Version Langage de Programmation',
+              constat: 'Le serveur Apache a ete partiellement detecte, mais la version exploitable manque pour conclure son niveau de risque.',
+              impact: 'Versions obsoletes exposent a des vulnerabilites connues',
+              evidence_digest: {
+                quality: 'PARTIAL',
+                proof_lines: [
+                  'Technologie detectee: Apache',
+                  'Source de detection: scanner_aggregation, stack_fingerprint',
+                  'Pages verifiees: 1',
+                ],
+              },
+              recommended_action: 'Donnees insuffisantes pour conclure. Relancer le scan avec un contexte plus complet.',
+            },
+          },
+        },
+      };
+
+      const report = mapApiResponseToReport(api, 'audit-server-version-copy', {
+        url: 'https://example.com',
+        site_name: 'Test Site',
+      });
+
+      const finding = report.axes.find((axis) => axis.id === 'technique')?.findings[0];
+
+      expect(finding?.title).toBe('Version serveur et langage');
+      expect(finding?.description).toContain('serveur Apache');
+      expect(finding?.recommendation).toContain('Verifier la configuration du serveur');
+      expect(finding?.impact).not.toBe(finding?.risk);
+      expect(finding?.evidenceSummary).toContain('Serveur detecte : Apache');
+      expect(finding?.evidenceSummary).toContain('Version serveur : non detectee');
+      expect((finding?.evidenceSummary ?? []).some((line) => /Source de detection|scanner_aggregation|stack_fingerprint/i.test(line))).toBe(false);
+    });
+
+    it('uses server context when programming language is not directly exposed', () => {
+      const api: ApiResponse = {
+        scan_id: 'test-scan-language-context-copy',
+        domain: 'https://example.com',
+        report_version: 'v2',
+        axes: {
+          'Audit Technique': {
+            language: {
+              kpi_id: 'tech_programming_language',
+              type: 'recommendation',
+              status: 'not_evaluated',
+              severity: 'medium',
+              name: 'Langage de Programmation',
+              constat: 'Langage de Programmation: donnees insuffisantes pour conclure de facon fiable sur ce critere.',
+              impact: 'Identifier le langage/runtime aide a cibler les correctifs de securite et les upgrades de maintenance.',
+              evidence_digest: {
+                quality: 'PARTIAL',
+                proof_lines: [
+                  'Serveur detecte: Apache',
+                  'Version serveur: 2.4',
+                  'Source de detection: scanner_aggregation, stack_fingerprint',
+                  'Pages verifiees: 1',
+                ],
+              },
+            },
+          },
+        },
+      };
+
+      const report = mapApiResponseToReport(api, 'audit-language-context-copy', {
+        url: 'https://example.com',
+        site_name: 'Test Site',
+      });
+
+      const finding = report.axes.find((axis) => axis.id === 'technique')?.findings[0];
+
+      expect(finding?.title).toBe('Langage de programmation');
+      expect(finding?.description).toContain('serveur Apache');
+      expect(finding?.description).toContain('2.4');
+      expect(finding?.evidenceSummary).toContain('Serveur detecte : Apache');
+      expect(finding?.evidenceSummary).toContain('Version serveur : 2.4');
+      expect((finding?.evidenceSummary ?? []).some((line) => /Source de detection|scanner_aggregation|stack_fingerprint/i.test(line))).toBe(false);
+    });
+
+    it('shows module version count as readable main text', () => {
+      const api: ApiResponse = {
+        scan_id: 'test-scan-module-version-copy',
+        domain: 'https://example.com',
+        report_version: 'v2',
+        axes: {
+          'Audit Technique': {
+            modules: {
+              kpi_id: 'tech_modules_versions',
+              type: 'recommendation',
+              status: 'passing',
+              severity: null,
+              name: 'Version Modules Installes',
+              constat: 'Version Modules Installes: 3 modules detectes avec versions',
+              evidence_digest: {
+                quality: 'VALID',
+                proof_lines: [
+                  'Modules avec version detectee: 3',
+                  'Table des modules: nom, version et source disponibles.',
+                ],
+              },
+            },
+          },
+        },
+      };
+
+      const report = mapApiResponseToReport(api, 'audit-module-version-copy', {
+        url: 'https://example.com',
+        site_name: 'Test Site',
+      });
+
+      const finding = report.axes.find((axis) => axis.id === 'technique')?.findings[0];
+
+      expect(finding?.title).toBe('Version des modules');
+      expect(finding?.description).toContain('3 modules');
+      expect(finding?.description).toContain('version exploitable');
+      expect(finding?.evidenceSummary).toContain('Modules avec version detectee : 3');
+    });
+
+    it('renders legacy desktop performance as a plain percentage with readable metrics', () => {
+      const api: ApiResponse = {
+        scan_id: 'test-scan-desktop-perf-copy',
+        domain: 'https://example.com',
+        domain_analysis: {},
+        site_metrics: {
+          performance: {
+            avg_lcp_ms: 4200,
+            avg_fcp_ms: 2100,
+            avg_cls: 0.18,
+            total_resource_size_kb: 2400,
+          },
+        },
+      };
+
+      const report = mapApiResponseToReport(api, 'audit-desktop-perf-copy', {
+        url: 'https://example.com',
+        site_name: 'Test Site',
+      });
+
+      const finding = report.axes.find((axis) => axis.id === 'performance')?.findings.find((item) => item.id === 'perf-desktop');
+
+      expect(finding?.title).toBe('Temps de chargement desktop');
+      expect(finding?.description).toMatch(/Score desktop estime : \d+ %/);
+      expect(finding?.description).toContain('contenu visible');
+      expect(finding?.evidenceSummary?.join(' ')).toContain("Temps d'affichage principal");
+      expect(finding?.evidenceSummary?.join(' ')).toContain('Stabilite visuelle');
+      expect(finding?.description).not.toMatch(/\bLCP\b|\bCLS\b|\bKPI\b/i);
     });
   });
 });

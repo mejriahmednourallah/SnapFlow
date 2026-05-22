@@ -79,7 +79,7 @@ serve(async (req) => {
         if (status) {
           query = query.eq('status', status);
         } else {
-          query = query.eq('status', 'pending');
+          query = query.in('status', ['pending', 'needs_review']);
         }
       } else {
         query = query.or(`created_by.eq.${userId},org_id.eq.${userId}`);
@@ -232,8 +232,8 @@ serve(async (req) => {
 
       const isOwner = workflow.created_by === userId;
       if (!isOwner && !isAdmin) throw new HttpError(403, 'Accès refusé');
-      if (workflow.status !== 'draft' && !isAdmin) {
-        throw new HttpError(400, 'Seuls les workflows en brouillon peuvent être modifiés');
+      if (!['draft', 'needs_review'].includes(workflow.status) && !isAdmin) {
+        throw new HttpError(400, 'Seuls les workflows en brouillon ou a valider peuvent etre modifies');
       }
 
       const updates: Record<string, unknown> = {};

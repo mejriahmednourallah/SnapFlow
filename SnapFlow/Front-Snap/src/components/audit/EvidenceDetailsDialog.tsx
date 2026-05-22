@@ -24,8 +24,30 @@ function cleanLine(value: string): string {
   return normalized
     .replace(/\bevidence\./gi, '')
     .replace(/\bmetrics\./gi, '')
+    .replace(/\bKPI\b/gi, 'indicateur')
+    .replace(/Largest Contentful Paint/gi, "temps d'affichage principal")
+    .replace(/\bLCP\b/g, "temps d'affichage principal")
+    .replace(/\bFCP\b/g, 'premier affichage visible')
+    .replace(/\bCLS\b/g, 'stabilite visuelle')
+    .replace(/\bCVE\b/gi, 'vulnerabilite connue')
+    .replace(/\bCMS\b/g, 'systeme de gestion du site')
+    .replace(/\bSSL\b/g, 'certificat de securite')
+    .replace(/\bRGPD\b/gi, 'protection des donnees')
+    .replace(/\bSEO\b/gi, 'referencement')
+    .replace(/\bJS\b/g, 'JavaScript')
     .replace(/\banomalie\b/gi, 'signal')
     .replace(/\banomalies\b/gi, 'signaux');
+}
+
+function cleanColumnLabel(value: string): string {
+  return cleanLine(value)
+    .replace(/_/g, ' ')
+    .replace(/\burl\b/gi, 'adresse de page')
+    .replace(/\bstatus code\b/gi, 'code de reponse')
+    .replace(/\blcp ms\b/gi, "temps d'affichage principal")
+    .replace(/\bfcp ms\b/gi, 'premier affichage visible')
+    .replace(/\bcls\b/gi, 'stabilite visuelle')
+    .replace(/\bthreshold ms\b/gi, 'seuil attendu');
 }
 
 function csvEscape(value: unknown): string {
@@ -53,7 +75,7 @@ function downloadCsv(filename: string, columns: string[], rows: Record<string, u
 
 export function EvidenceDetailsDialog({
   finding,
-  triggerLabel = 'Voir les preuves detaillees',
+  triggerLabel = 'Voir les preuves',
 }: EvidenceDetailsDialogProps) {
   const summaryLines = useMemo(() => {
     const source = finding.evidenceSummary ?? finding.evidence ?? finding.annexes ?? [];
@@ -103,7 +125,7 @@ export function EvidenceDetailsDialog({
           <DialogDescription>
             {finding.kpiLabels
               ? `Statut : ${finding.kpiLabels.statut} - Type : ${finding.kpiLabels.typeLabel} - Priorite : ${finding.kpiLabels.priorite}`
-              : 'Vue structuree des preuves associees au KPI.'}
+              : 'Vue structuree des preuves associees au controle.'}
           </DialogDescription>
         </DialogHeader>
 
@@ -128,7 +150,7 @@ export function EvidenceDetailsDialog({
           )}
 
           <section>
-            <p className="text-sm font-semibold mb-2">Preuves structurees</p>
+            <p className="text-sm font-semibold mb-2">Preuves et contexte</p>
             {summaryLines.length === 0 ? (
               <p className="text-sm text-muted-foreground">
                 {finding.evidenceMissingReason ?? 'Aucune preuve textuelle resumee.'}
@@ -165,7 +187,7 @@ export function EvidenceDetailsDialog({
                     <tr>
                       {csvColumns.map((column) => (
                         <th key={column} className="text-left font-semibold px-2 py-1.5 whitespace-nowrap">
-                          {column.replace(/_/g, ' ')}
+                          {cleanColumnLabel(column)}
                         </th>
                       ))}
                     </tr>
@@ -193,7 +215,7 @@ export function EvidenceDetailsDialog({
 
           {uniqueUrls.length > 0 && (
             <section>
-              <p className="text-sm font-semibold mb-2">URLs concernees ({uniqueUrls.length})</p>
+              <p className="text-sm font-semibold mb-2">Pages concernees ({uniqueUrls.length})</p>
               <ul className="space-y-1">
                 {uniqueUrls.map((url) => (
                   <li key={url}>

@@ -96,7 +96,7 @@ export function AxisPage({ report, axis, index, theme, clientLogoSrc }: AxisPage
                 </View>
 
                 <View style={{ ...s.card, marginBottom: 8, paddingVertical: 10 }}>
-                  <Text style={s.h3}>Sous-KPI</Text>
+                  <Text style={s.h3}>Sous-controles</Text>
                   {(() => {
                     const rows: AuditAxisItem['findings'][][] = [];
                     for (let i = 0; i < subKpis.length; i += 2) {

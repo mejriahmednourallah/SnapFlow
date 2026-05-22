@@ -5,6 +5,7 @@ Endpoints
 ---------
 GET  /health               Pool liveness and metrics.
 POST /render               Render a page and return HTML + metadata.
+POST /discover-rendered    Discovery-only rendered text/link/form extraction.
 POST /screenshot           Capture a single-page screenshot (PNG, base64).
 POST /batch-screenshot     Capture screenshots for a list of URLs in parallel.
 """
@@ -53,6 +54,8 @@ class ScreenshotRequest(BaseModel):
     height:     Optional[int]  = 800
     full_page:  Optional[bool] = True
     timeout_ms: Optional[int]  = 30000
+    # "load" | "domcontentloaded" | "networkidle" | "commit"
+    wait_until: Optional[str]  = "domcontentloaded"
 
 
 class BatchScreenshotRequest(BaseModel):
@@ -61,7 +64,18 @@ class BatchScreenshotRequest(BaseModel):
     height:     Optional[int]  = 800
     full_page:  Optional[bool] = True
     timeout_ms: Optional[int]  = 30000
+    # "load" | "domcontentloaded" | "networkidle" | "commit"
+    wait_until: Optional[str]  = "domcontentloaded"
     max_pages:  Optional[int]  = 10
+
+
+class DiscoverRenderedRequest(BaseModel):
+    url: str
+    allowed_domains: Optional[List[str]] = None
+    max_links: Optional[int] = 30
+    extract_forms: Optional[bool] = True
+    wait_ms: Optional[int] = 30000
+    force_chromium: Optional[bool] = False
 
 
 # ── Endpoints ──────────────────────────────────────────────────────────────────
@@ -105,6 +119,37 @@ async def render(req: RenderRequest):
     }
 
 
+@app.post("/discover-rendered")
+async def discover_rendered(req: DiscoverRenderedRequest):
+    result = await _pool.discover_rendered(
+        req.url,
+        allowed_domains=req.allowed_domains or [],
+        max_links=req.max_links or 30,
+        extract_forms=req.extract_forms if req.extract_forms is not None else True,
+        wait_ms=req.wait_ms or 30000,
+        force_chromium=bool(req.force_chromium),
+    )
+    return {
+        "status": result.status,
+        "url": result.url,
+        "engine": result.engine,
+        "final_url": result.final_url,
+        "rendered_html": result.rendered_html,
+        "visible_text": result.visible_text,
+        "title": result.title,
+        "headings": result.headings or [],
+        "internal_links": result.internal_links or [],
+        "external_links": result.external_links or [],
+        "forms": result.forms or [],
+        "buttons": result.buttons or [],
+        "risk_flags": result.risk_flags or [],
+        "candidate_messages": result.candidate_messages or [],
+        "detection_sources": result.detection_sources or [],
+        "confidence": result.confidence,
+        "error": result.error,
+    }
+
+
 @app.post("/screenshot")
 async def screenshot(req: ScreenshotRequest):
     result = await _pool.screenshot(
@@ -113,6 +158,7 @@ async def screenshot(req: ScreenshotRequest):
         height=req.height or 800,
         full_page=req.full_page if req.full_page is not None else True,
         timeout_ms=req.timeout_ms or 30000,
+        wait_until=req.wait_until or "domcontentloaded",
     )
     image_b64 = (
         base64.b64encode(result.image_bytes).decode("utf-8")
@@ -126,6 +172,9 @@ async def screenshot(req: ScreenshotRequest):
         "width":         result.width,
         "height":        result.height,
         "coverage_mode": result.coverage_mode,
+        "final_url":     result.final_url,
+        "wait_until":    result.wait_until,
+        "load_state_timeout_ignored": result.load_state_timeout_ignored,
         "error":         result.error,
     }
 
@@ -140,6 +189,7 @@ async def batch_screenshot(req: BatchScreenshotRequest):
             height=req.height or 800,
             full_page=req.full_page if req.full_page is not None else True,
             timeout_ms=req.timeout_ms or 30000,
+            wait_until=req.wait_until or "domcontentloaded",
         )
         for url in urls
     ]
@@ -157,6 +207,9 @@ async def batch_screenshot(req: BatchScreenshotRequest):
                 "width":         r.width,
                 "height":        r.height,
                 "coverage_mode": r.coverage_mode,
+                "final_url":     r.final_url,
+                "wait_until":    r.wait_until,
+                "load_state_timeout_ignored": r.load_state_timeout_ignored,
                 "error":         r.error,
             }
         )

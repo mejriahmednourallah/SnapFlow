@@ -47,11 +47,15 @@ interface AssertionResult {
 }
 
 interface ExecutionResultPayload {
-  status: 'pass' | 'fail' | 'error';
+  status: 'pass' | 'fail' | 'error' | 'blocked' | 'needs_review';
   duration_ms: number;
   assertions: AssertionResult[];
   screenshot_url: string | null;
   error_message: string | null;
+  step_trace: Record<string, unknown>[];
+  final_url: string | null;
+  network_summary: Record<string, unknown>;
+  execution_source: 'chromium';
 }
 
 function canAccessWorkflow(workflow: WorkflowRow, userId: string, isAdmin: boolean): boolean {
@@ -79,18 +83,37 @@ function resolveFieldValue(field: WorkflowFieldRow): string {
   return '';
 }
 
+function maskFieldValue(field: WorkflowFieldRow, value: string): string {
+  if (!value) return '';
+  if (field.is_sensitive || ['password', 'tel', 'email'].includes(field.field_type)) return '***';
+  return value.length > 80 ? `${value.slice(0, 77)}...` : value;
+}
+
 function simulateExecution(nodes: WorkflowNodeRow[], fields: WorkflowFieldRow[]): ExecutionResultPayload {
   const startedAt = Date.now();
   const assertions: AssertionResult[] = [];
+  const stepTrace: Record<string, unknown>[] = [];
 
   const orderedNodes = [...nodes].sort((a, b) => a.order_index - b.order_index);
 
   for (const node of orderedNodes) {
+    if (node.type === 'trigger') {
+      stepTrace.push({ step: node.order_index, type: 'trigger', status: 'pass', source: 'simulated' });
+    }
+
     if (node.type === 'form_fill') {
       const field = fields.find((item) => item.node_id === node.id);
       if (!field) continue;
 
       const value = resolveFieldValue(field);
+      stepTrace.push({
+        step: node.order_index,
+        type: 'form_fill',
+        selector: field.field_selector,
+        value: maskFieldValue(field, value),
+        status: field.required && !value ? 'fail' : 'pass',
+        source: 'simulated',
+      });
       if (field.required && !value) {
         assertions.push({
           label: `Champ requis: ${field.field_selector}`,
@@ -107,6 +130,7 @@ function simulateExecution(nodes: WorkflowNodeRow[], fields: WorkflowFieldRow[])
       const assertType = typeof node.config.type === 'string' ? node.config.type : 'text_present';
 
       if (!value) {
+        stepTrace.push({ step: node.order_index, type: 'assert', label, status: 'fail', source: 'simulated' });
         assertions.push({
           label,
           expected: 'Valeur d assertion configurée',
@@ -114,6 +138,7 @@ function simulateExecution(nodes: WorkflowNodeRow[], fields: WorkflowFieldRow[])
           passed: false,
         });
       } else {
+        stepTrace.push({ step: node.order_index, type: 'assert', label, status: 'pass', source: 'simulated' });
         assertions.push({
           label,
           expected: `${assertType} = ${value}`,
@@ -143,6 +168,10 @@ function simulateExecution(nodes: WorkflowNodeRow[], fields: WorkflowFieldRow[])
     assertions,
     screenshot_url: null,
     error_message: null,
+    step_trace: stepTrace,
+    final_url: null,
+    network_summary: { mode: 'simulated', requests: 0, failures: 0 },
+    execution_source: 'chromium',
   };
 }
 
@@ -188,13 +217,20 @@ async function executeLiveIfEnabled(workflow: WorkflowRow, nodes: WorkflowNodeRo
 
   return {
     status:
-      payload.status === 'pass' || payload.status === 'fail' || payload.status === 'error'
+      payload.status === 'pass' || payload.status === 'fail' || payload.status === 'error' || payload.status === 'blocked'
         ? payload.status
         : 'error',
     duration_ms: typeof payload.duration_ms === 'number' ? payload.duration_ms : 0,
     assertions: Array.isArray(payload.assertions) ? (payload.assertions as AssertionResult[]) : [],
     screenshot_url: typeof payload.screenshot_url === 'string' ? payload.screenshot_url : null,
     error_message: typeof payload.error === 'string' ? payload.error : null,
+    step_trace: Array.isArray(payload.step_trace) ? (payload.step_trace as Record<string, unknown>[]) : [],
+    final_url: typeof payload.final_url === 'string' ? payload.final_url : null,
+    network_summary:
+      payload.network_summary && typeof payload.network_summary === 'object'
+        ? (payload.network_summary as Record<string, unknown>)
+        : {},
+    execution_source: 'chromium',
   };
 }
 
@@ -256,6 +292,10 @@ serve(async (req) => {
         assertions: [],
         screenshot_url: null,
         error_message: `Moteur indisponible: ${message}`,
+        step_trace: [],
+        final_url: null,
+        network_summary: { mode: 'unavailable', error: message },
+        execution_source: 'chromium',
       };
     }
 
@@ -269,6 +309,10 @@ serve(async (req) => {
         assertions: executionPayload.assertions,
         screenshot_url: executionPayload.screenshot_url,
         error_message: executionPayload.error_message,
+        step_trace: executionPayload.step_trace,
+        final_url: executionPayload.final_url,
+        network_summary: executionPayload.network_summary,
+        execution_source: executionPayload.execution_source,
         audit_run_id: body.audit_run_id ?? null,
       })
       .select('*')
@@ -283,6 +327,16 @@ serve(async (req) => {
 
     if (updateWorkflowError) throw new HttpError(500, updateWorkflowError.message);
 
+    await serviceClient.from('notifications').insert({
+      user_id: workflowRow.created_by,
+      title: executionPayload.status === 'pass' ? 'Workflow reussi' : 'Workflow termine',
+      message: `Execution Form Tester terminee avec le statut ${executionPayload.status}.`,
+      type: executionPayload.status === 'pass' ? 'success' : executionPayload.status === 'fail' ? 'warning' : 'error',
+      category: 'system',
+      reference_id: workflowId,
+      reference_type: 'form_workflow',
+    });
+
     return toJson({
       success: executionPayload.status !== 'error',
       result_id: savedResult.id,
@@ -290,6 +344,10 @@ serve(async (req) => {
       duration_ms: executionPayload.duration_ms,
       assertions: executionPayload.assertions,
       screenshot_url: executionPayload.screenshot_url,
+      step_trace: executionPayload.step_trace,
+      final_url: executionPayload.final_url,
+      network_summary: executionPayload.network_summary,
+      execution_source: executionPayload.execution_source,
       error: executionPayload.error_message,
     });
   } catch (error) {

@@ -1,6 +1,6 @@
-export type WorkflowStatus = 'draft' | 'pending' | 'approved' | 'executed';
+export type WorkflowStatus = 'draft' | 'needs_review' | 'pending' | 'approved' | 'executed' | 'blocked';
 export type NodeType = 'trigger' | 'form_fill' | 'submit' | 'assert';
-export type ExecutionStatus = 'pass' | 'fail' | 'error';
+export type ExecutionStatus = 'pass' | 'fail' | 'error' | 'blocked' | 'needs_review';
 export type FieldType =
   | 'text'
   | 'email'
@@ -26,6 +26,11 @@ export interface FormWorkflow {
   detected_at: string | null;
   approved_at: string | null;
   executed_at: string | null;
+  detection_sources: string[];
+  confidence: 'high' | 'medium' | 'low';
+  risk_flags: string[];
+  blocked_reason: string | null;
+  detection_evidence: Record<string, unknown>;
   created_at: string;
   updated_at: string;
 }
@@ -96,6 +101,10 @@ export interface WorkflowResult {
   screenshot_url: string | null;
   error_message: string | null;
   audit_run_id: string | null;
+  step_trace: Array<Record<string, unknown>>;
+  final_url: string | null;
+  network_summary: Record<string, unknown>;
+  execution_source: 'chromium';
 }
 
 export interface WorkflowNodeWithFields extends WorkflowNode {
@@ -132,6 +141,10 @@ export interface DetectedField {
 export interface DetectionResponse {
   success: boolean;
   detection_method?: string;
+  detection_sources?: string[];
+  confidence?: 'high' | 'medium' | 'low';
+  risk_flags?: string[];
+  blocked_reason?: string | null;
   forms_found?: number;
   fields_count?: number;
   fields?: WorkflowFormField[];
@@ -163,6 +176,10 @@ export interface ExecutionResponse {
   duration_ms: number;
   assertions: AssertionResult[];
   screenshot_url: string | null;
+  step_trace: Array<Record<string, unknown>>;
+  final_url: string | null;
+  network_summary: Record<string, unknown>;
+  execution_source: 'chromium';
   error?: string | null;
 }
 

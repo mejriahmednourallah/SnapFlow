@@ -47,7 +47,7 @@ export function KpiGridPage({ report, theme, clientLogoSrc }: KpiGridPageProps) 
     <>
       {rowPages.map((pageRows, pageIndex) => (
         <Page key={`kpi-grid-${pageIndex}`} size="A4" style={s.page}>
-          <PageHeader title="Grille KPI" siteName={report.siteName} theme={theme} siteLogoSrc={clientLogoSrc} />
+          <PageHeader title="Grille des contrôles" siteName={report.siteName} theme={theme} siteLogoSrc={clientLogoSrc} />
 
           <View style={s.body}>
             <SectionTitle title="Tableau de score par axe" theme={theme} />

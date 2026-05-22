@@ -113,12 +113,12 @@ export function TabSimulateur({ audit }: TabSimulateurProps) {
           </div>
           <h3 className="text-xl font-bold mb-2">Simulateur IA</h3>
           <p className="text-muted-foreground max-w-md mx-auto mb-6">
-            Ce module utilise l'IA pour proposer des refontes UX, optimiser le SEO et simuler l'impact des améliorations recommandées pour <strong>{audit.siteName}</strong>.
+            Ce module utilise l'IA pour proposer des refontes d'expérience utilisateur, optimiser le référencement et simuler l'impact des améliorations recommandées pour <strong>{audit.siteName}</strong>.
           </p>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 max-w-2xl mx-auto mb-8">
             {[
-              { title: 'Refonte UX', desc: 'Proposition de nouvelle structure et navigation' },
-              { title: 'Optimisation SEO', desc: 'Structure de contenu et mots-clés optimisés' },
+              { title: 'Refonte expérience utilisateur', desc: 'Proposition de nouvelle structure et navigation' },
+              { title: 'Optimisation du référencement', desc: 'Structure de contenu et mots-clés optimisés' },
               { title: 'Impact estimé', desc: 'Projection des gains en performance et trafic' },
             ].map(item => (
               <div key={item.title} className="p-4 rounded-lg bg-muted/30 border border-border/30">
@@ -268,9 +268,9 @@ export function TabSimulateur({ audit }: TabSimulateurProps) {
         </div>
       </div>
 
-      {/* SEO Improvements */}
+      {/* Referencement improvements */}
       <div className="glass-card p-5">
-        <h4 className="font-semibold text-sm mb-4">Améliorations SEO</h4>
+        <h4 className="font-semibold text-sm mb-4">Améliorations du référencement</h4>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>

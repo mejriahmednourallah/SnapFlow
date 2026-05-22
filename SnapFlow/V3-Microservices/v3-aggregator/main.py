@@ -47,6 +47,7 @@ DB_USER = os.getenv("DB_USER", "snapflow")
 DB_PASS = os.getenv("DB_PASS", "snapflow")
 SCANNER_API_URL = os.getenv("SCANNER_API_URL", "http://scanner:8081")
 VISUAL_REGRESSION_API_URL = os.getenv("VISUAL_REGRESSION_API_URL", "http://v3-visual-regression:8083")
+BROWSER_POOL_URL = os.getenv("BROWSER_POOL_URL", "http://v3-browser-pool:8084")
 MULTI_BROWSER_FALLBACK_TIMEOUT = int(os.getenv("MULTI_BROWSER_FALLBACK_TIMEOUT", "20"))
 
 
@@ -262,7 +263,7 @@ def _load_previous_quality_drift_artifact(scan_url: str, exclude_scan_id: str) -
         cur = conn.cursor(psycopg2.extras.RealDictCursor)
         cur.execute(
             """
-            SELECT scan_id, quality_drift_artifact
+            SELECT scan_id, quality_drift_artifact::text AS quality_drift_artifact
             FROM scan_kpi_outputs
             WHERE scan_url = %s AND scan_id <> %s
             ORDER BY updated_at DESC
@@ -352,15 +353,14 @@ def _load_scan_state_from_db(scan_id: str) -> Optional[dict]:
         conn = get_db()
         cur = conn.cursor(psycopg2.extras.RealDictCursor)
         cur.execute(
-            "SELECT state_json FROM scan_state WHERE scan_id = %s",
+            "SELECT state_json::text AS state_json FROM scan_state WHERE scan_id = %s",
             (scan_id,),
         )
         row = cur.fetchone()
         cur.close()
         conn.close()
         if row:
-            raw = row["state_json"]
-            return raw if isinstance(raw, dict) else json.loads(raw)
+            return _jsonb_object(row.get("state_json"))
     except Exception as exc:
         logger.warning("[A-1] Could not reload scan state for %s: %s", scan_id, exc)
     return None
@@ -403,7 +403,14 @@ def _load_persisted_kpi_payload(scan_id: str) -> Optional[dict]:
         conn = get_db()
         cur = conn.cursor(psycopg2.extras.RealDictCursor)
         cur.execute(
-            "SELECT kpi_json, top_level_kpis, quality_drift_artifact FROM scan_kpi_outputs WHERE scan_id = %s",
+            """
+            SELECT
+                kpi_json::text AS kpi_json,
+                top_level_kpis::text AS top_level_kpis,
+                quality_drift_artifact::text AS quality_drift_artifact
+            FROM scan_kpi_outputs
+            WHERE scan_id = %s
+            """,
             (scan_id,),
         )
         row = cur.fetchone()
@@ -620,6 +627,15 @@ class ScanRequest(BaseModel):
     headless_concurrency: Optional[int] = 3
     enable_visual_regression: Optional[bool] = False
     visual_baseline_scan_id: Optional[str] = None
+
+
+class DiscoverRenderedRequest(BaseModel):
+    url: str
+    allowed_domains: list[str] = []
+    max_links: int = 30
+    extract_forms: bool = True
+    wait_ms: int = 30000
+    force_chromium: bool = False
 
 
 def get_db():
@@ -3654,9 +3670,48 @@ def run_scanner(scan_id: str, url: str, max_pages: int, headless_concurrency: in
 
 # ─── Endpoints ────────────────────────────────────────────────────────────────
 
+def _proxy_rendered_discovery(req: DiscoverRenderedRequest) -> dict:
+    parsed = urlparse(req.url)
+    allowed_domains = [d for d in (req.allowed_domains or []) if str(d).strip()]
+    if not allowed_domains and parsed.hostname:
+        allowed_domains = [parsed.hostname]
+    payload = {
+        "url": req.url,
+        "allowed_domains": allowed_domains,
+        "max_links": max(1, min(int(req.max_links or 30), 200)),
+        "extract_forms": bool(req.extract_forms),
+        "wait_ms": max(3000, min(int(req.wait_ms or 30000), 60000)),
+        "force_chromium": bool(req.force_chromium),
+    }
+    try:
+        response = requests.post(
+            f"{BROWSER_POOL_URL.rstrip('/')}/discover-rendered",
+            json=payload,
+            timeout=(payload["wait_ms"] / 1000.0) + 8,
+        )
+    except requests.RequestException as exc:
+        raise HTTPException(status_code=502, detail=f"browser_pool_unreachable: {exc}") from exc
+    if response.status_code >= 400:
+        raise HTTPException(status_code=response.status_code, detail=response.text[:500])
+    try:
+        return response.json()
+    except ValueError as exc:
+        raise HTTPException(status_code=502, detail="browser_pool_invalid_json") from exc
+
+
 @app.get("/health")
 def health():
     return {"status": "ok", "service": "v3-aggregator"}
+
+
+@app.post("/discover-rendered")
+async def discover_rendered(req: DiscoverRenderedRequest):
+    return await asyncio.to_thread(_proxy_rendered_discovery, req)
+
+
+@app.post("/api/discover-rendered")
+async def discover_rendered_api(req: DiscoverRenderedRequest):
+    return await asyncio.to_thread(_proxy_rendered_discovery, req)
 
 
 @app.post("/scan")

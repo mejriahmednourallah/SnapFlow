@@ -54,7 +54,7 @@ export function ExecutiveSummaryPage({ report, theme, clientLogoSrc }: Executive
             />
           </View>
           <View style={{ ...s.card, flex: 1 }}>
-            <Text style={s.h3}>Répartition des KPI</Text>
+            <Text style={s.h3}>Répartition des contrôles</Text>
             <View
               style={{
                 flexDirection: 'row',

@@ -54,9 +54,11 @@ export function WorkflowList({ isOperator }: WorkflowListProps) {
           >
             <option value="all">Tous les statuts</option>
             <option value="draft">Brouillon</option>
+            <option value="needs_review">A valider</option>
             <option value="pending">En attente</option>
             <option value="approved">Approuvé</option>
             <option value="executed">Exécuté</option>
+            <option value="blocked">Bloque</option>
           </select>
           <Button variant="outline" onClick={() => void handleRefresh()} size="sm">
             Actualiser
@@ -97,6 +99,16 @@ export function WorkflowList({ isOperator }: WorkflowListProps) {
                 <p className="text-xs text-muted-foreground truncate mt-1">{workflow.target_url}</p>
                 <div className="mt-2 flex items-center gap-2">
                   <StatusBadge status={workflow.status} size="sm" />
+                  {workflow.confidence ? (
+                    <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground">
+                      {workflow.confidence}
+                    </span>
+                  ) : null}
+                  {Array.isArray(workflow.risk_flags) && workflow.risk_flags.length > 0 ? (
+                    <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] text-amber-800 dark:bg-amber-900/40 dark:text-amber-300">
+                      {workflow.risk_flags.length} risque{workflow.risk_flags.length > 1 ? 's' : ''}
+                    </span>
+                  ) : null}
                   <span className="text-xs text-muted-foreground">
                     Modifié le {new Date(workflow.updated_at).toLocaleDateString('fr-FR')}
                   </span>

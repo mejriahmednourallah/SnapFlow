@@ -815,6 +815,11 @@ func startScan(ctx context.Context, config ScannerConfig) {
 		colly.AllowedDomains(config.AllowedDomains...),
 		colly.UserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"),
 	)
+	requestTimeoutSec := envInt("SCANNER_REQUEST_TIMEOUT_SEC", 30)
+	if requestTimeoutSec < 10 {
+		requestTimeoutSec = 10
+	}
+	c.SetRequestTimeout(time.Duration(requestTimeoutSec) * time.Second)
 
 	c.Limit(&colly.LimitRule{
 		DomainGlob:  "*",
@@ -1315,6 +1320,117 @@ func startScan(ctx context.Context, config ScannerConfig) {
 			log.Printf("⚠ CF fallback: homepage DB insert failed: %v", err)
 		}
 	}
+	if cfFallbackMode && browserpool.IsEnabled() {
+		maxRenderedPages := envInt("RENDERED_DISCOVERY_MAX_PAGES", 8)
+		maxRenderedLinks := envInt("RENDERED_DISCOVERY_MAX_LINKS", 30)
+		renderedWaitMS := envInt("RENDERED_DISCOVERY_TIMEOUT_MS", 20000)
+		if maxRenderedPages < 1 {
+			maxRenderedPages = 1
+		}
+		log.Printf("Rendered discovery fallback enabled after 0-page crawl (max_pages=%d max_links=%d)", maxRenderedPages, maxRenderedLinks)
+		discovery, err := browserpool.DiscoverRendered(ctx, config.StartURL, config.AllowedDomains, maxRenderedLinks, true, renderedWaitMS)
+		if err != nil {
+			log.Printf("rendered discovery fallback failed: %v", err)
+		} else if discovery.Error != "" {
+			log.Printf("rendered discovery fallback returned error: %s", discovery.Error)
+		} else {
+			renderedHTML := strings.TrimSpace(discovery.RenderedHTML)
+			finalURL := strings.TrimSpace(discovery.FinalURL)
+			if finalURL == "" {
+				finalURL = config.StartURL
+			}
+			if renderedHTML != "" {
+				renderedSEO := seo.Analyze(finalURL, renderedHTML, hasSitemap, hasRobots)
+				renderedUX := ux.Analyze(finalURL, renderedHTML, baseURL)
+				mu.Lock()
+				if len(allSEOResults) == 0 {
+					allSEOResults = append(allSEOResults, renderedSEO)
+				} else {
+					allSEOResults[0] = renderedSEO
+				}
+				if len(allUXResults) == 0 {
+					allUXResults = append(allUXResults, renderedUX)
+				} else {
+					allUXResults[0] = renderedUX
+				}
+				for _, f := range formfuzzer.ExtractForms(finalURL, renderedHTML) {
+					formKey := f.PageURL + "|" + f.FormID + "|" + f.ActionURL
+					if seenDiscoveredForms[formKey] {
+						continue
+					}
+					seenDiscoveredForms[formKey] = true
+					discoveredForms = append(discoveredForms, f)
+				}
+				mu.Unlock()
+				_ = db.UpdatePageHTML(scanID, finalURL, renderedHTML)
+				_ = db.MergePageMetrics(scanID, finalURL, map[string]interface{}{
+					"seo":                 renderedSEO,
+					"ux":                  renderedUX,
+					"rendered_discovery":  discovery,
+					"evidence_provenance": "rendered_discovery",
+					"html_source":         "rendered_discovery",
+				})
+			}
+
+			seenRendered := map[string]bool{
+				strings.TrimRight(config.StartURL, "/"): true,
+				strings.TrimRight(finalURL, "/"):        true,
+			}
+			recoveredPages := 1
+			for _, link := range discovery.InternalLinks {
+				if recoveredPages >= maxRenderedPages {
+					break
+				}
+				link = strings.TrimSpace(link)
+				if link == "" || seenRendered[strings.TrimRight(link, "/")] {
+					continue
+				}
+				seenRendered[strings.TrimRight(link, "/")] = true
+				linkDiscovery, linkErr := browserpool.DiscoverRendered(ctx, link, config.AllowedDomains, 8, true, renderedWaitMS)
+				if linkErr != nil || linkDiscovery == nil || linkDiscovery.Error != "" || strings.TrimSpace(linkDiscovery.RenderedHTML) == "" {
+					if linkErr != nil {
+						log.Printf("rendered discovery skipped %s: %v", link, linkErr)
+					}
+					continue
+				}
+				linkFinalURL := strings.TrimSpace(linkDiscovery.FinalURL)
+				if linkFinalURL == "" {
+					linkFinalURL = link
+				}
+				linkSEO := seo.Analyze(linkFinalURL, linkDiscovery.RenderedHTML, hasSitemap, hasRobots)
+				linkUX := ux.Analyze(linkFinalURL, linkDiscovery.RenderedHTML, baseURL)
+				mu.Lock()
+				allSEOResults = append(allSEOResults, linkSEO)
+				allUXResults = append(allUXResults, linkUX)
+				for _, f := range formfuzzer.ExtractForms(linkFinalURL, linkDiscovery.RenderedHTML) {
+					formKey := f.PageURL + "|" + f.FormID + "|" + f.ActionURL
+					if seenDiscoveredForms[formKey] {
+						continue
+					}
+					seenDiscoveredForms[formKey] = true
+					discoveredForms = append(discoveredForms, f)
+				}
+				mu.Unlock()
+				if err := db.InsertPage(scanID, baseURL, linkFinalURL, linkDiscovery.RenderedHTML, map[string]interface{}{
+					"seo":                 linkSEO,
+					"ux":                  linkUX,
+					"rendered_discovery":  linkDiscovery,
+					"evidence_provenance": "rendered_discovery",
+					"html_source":         "rendered_discovery",
+				}); err != nil {
+					log.Printf("rendered discovery DB insert failed for %s: %v", linkFinalURL, err)
+				}
+				recoveredPages++
+			}
+			atomic.StoreInt32(&pageCount, int32(len(allSEOResults)))
+			log.Printf("Rendered discovery fallback recovered %d page(s), %d link(s), %d form(s)",
+				len(allSEOResults), len(discovery.InternalLinks), len(discoveredForms))
+		}
+	}
+	if cfFallbackMode && atomic.LoadInt32(&pageCount) == 0 && len(allSEOResults) > 0 {
+		atomic.StoreInt32(&pageCount, int32(len(allSEOResults)))
+	}
+
 	formFuzzerSummary := formfuzzer.Summary{
 		Enabled:         formFuzzerCfg.Enabled,
 		FormsDiscovered: len(discoveredForms),

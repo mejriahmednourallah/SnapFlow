@@ -7,22 +7,43 @@ fleet instead of each launching its own.
 """
 
 import asyncio
+import ipaddress
 import io
 import logging
 import os
+import socket
 from dataclasses import dataclass
 from enum import Enum
 from typing import Optional
+from urllib.parse import urlparse
 
 from PIL import Image
 from playwright.async_api import async_playwright, Browser, Playwright
+from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
 logger = logging.getLogger("browser-pool")
+
+_VALID_WAIT_UNTIL = {"commit", "domcontentloaded", "load", "networkidle"}
+
+
+def _normalize_wait_until(value: Optional[str], default: str = "domcontentloaded") -> str:
+    wait_until = (value or default or "domcontentloaded").strip().lower()
+    if wait_until not in _VALID_WAIT_UNTIL:
+        return default if default in _VALID_WAIT_UNTIL else "domcontentloaded"
+    return wait_until
+
 
 POOL_CONCURRENCY = int(os.getenv("BROWSER_POOL_CONCURRENCY", "15"))
 RECYCLE_AFTER    = int(os.getenv("BROWSER_POOL_RECYCLE_AFTER", "50"))
 DEFAULT_TIMEOUT  = int(os.getenv("BROWSER_POOL_DEFAULT_TIMEOUT_MS", "30000"))
+DEFAULT_SCREENSHOT_WAIT_UNTIL = _normalize_wait_until(
+    os.getenv("BROWSER_POOL_SCREENSHOT_WAIT_UNTIL", "domcontentloaded"),
+)
+BROWSER_POOL_SCREENSHOT_SETTLE_MS = max(0, int(os.getenv("BROWSER_POOL_SCREENSHOT_SETTLE_MS", "1000")))
+BROWSER_POOL_SCREENSHOT_LOAD_STATE_TIMEOUT_MS = max(0, int(os.getenv("BROWSER_POOL_SCREENSHOT_LOAD_STATE_TIMEOUT_MS", "8000")))
 _CHROME_NO_SANDBOX = os.getenv("CHROME_NO_SANDBOX", "").strip().lower() in ("1", "true", "yes", "on")
+_ENABLE_OBSCURA_DISCOVERY = os.getenv("ENABLE_OBSCURA_DISCOVERY", "").strip().lower() in ("1", "true", "yes", "on")
+_OBSCURA_CDP_URL = os.getenv("OBSCURA_CDP_URL", "").strip()
 
 # Seconds to wait when all slots are busy before giving up.
 _ACQUIRE_TIMEOUT = float(os.getenv("BROWSER_POOL_ACQUIRE_TIMEOUT_S", "8"))
@@ -76,10 +97,95 @@ class ScreenshotResult:
     width:         Optional[int]   = None
     height:        Optional[int]   = None
     coverage_mode: str             = "viewport_only"
+    final_url:     Optional[str]   = None
+    wait_until:    str             = DEFAULT_SCREENSHOT_WAIT_UNTIL
+    load_state_timeout_ignored: bool = False
     error:         Optional[str]   = None
 
 
 # ── Browser pool ───────────────────────────────────────────────────────────────
+
+@dataclass
+class DiscoveryResult:
+    status: PageStatus
+    url: str
+    engine: str = "chromium"
+    final_url: Optional[str] = None
+    rendered_html: Optional[str] = None
+    visible_text: Optional[str] = None
+    title: Optional[str] = None
+    headings: Optional[list[dict]] = None
+    internal_links: Optional[list[str]] = None
+    external_links: Optional[list[str]] = None
+    forms: Optional[list[dict]] = None
+    buttons: Optional[list[dict]] = None
+    risk_flags: Optional[list[str]] = None
+    candidate_messages: Optional[list[str]] = None
+    detection_sources: Optional[list[str]] = None
+    confidence: str = "low"
+    error: Optional[str] = None
+
+
+def _normalise_allowed_domains(domains: list[str]) -> set[str]:
+    clean: set[str] = set()
+    for domain in domains or []:
+        host = urlparse(domain).hostname if "://" in domain else domain
+        host = (host or "").strip().lower().strip(".")
+        if host:
+            clean.add(host)
+    return clean
+
+
+def _host_matches_allowed(host: str, allowed_domains: list[str]) -> bool:
+    host = (host or "").strip().lower().strip(".")
+    allowed = _normalise_allowed_domains(allowed_domains)
+    if not host or not allowed:
+        return False
+    return any(host == domain or host.endswith("." + domain) for domain in allowed)
+
+
+def _is_private_host(host: str) -> tuple[bool, str]:
+    host = (host or "").strip().lower()
+    if host in {"localhost", "localhost.localdomain"} or host.endswith(".local"):
+        return True, "internal_hostname"
+    try:
+        ip = ipaddress.ip_address(host)
+        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast:
+            return True, "private_ip"
+        return False, ""
+    except ValueError:
+        pass
+
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except socket.gaierror:
+        return False, ""
+    for info in infos:
+        address = info[4][0]
+        try:
+            ip = ipaddress.ip_address(address)
+        except ValueError:
+            continue
+        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast:
+            return True, "private_dns"
+    return False, ""
+
+
+def _validate_discovery_target(url: str, allowed_domains: list[str]) -> tuple[bool, str]:
+    try:
+        parsed = urlparse(url)
+    except Exception:
+        return False, "invalid_url"
+    if parsed.scheme not in {"http", "https"}:
+        return False, "unsupported_scheme"
+    host = (parsed.hostname or "").lower()
+    if not _host_matches_allowed(host, allowed_domains):
+        return False, "outside_allowed_domains"
+    private, reason = _is_private_host(host)
+    if private:
+        return False, reason
+    return True, ""
+
 
 class BrowserPool:
     def __init__(self) -> None:
@@ -463,6 +569,245 @@ class BrowserPool:
             self._active_sessions -= 1
             self._semaphore.release()
 
+    async def discover_rendered(
+        self,
+        url: str,
+        allowed_domains: Optional[list[str]] = None,
+        max_links: int = 30,
+        extract_forms: bool = True,
+        wait_ms: int = DEFAULT_TIMEOUT,
+        force_chromium: bool = False,
+    ) -> DiscoveryResult:
+        """Discovery-only rendered extraction for routes, text, buttons and forms."""
+        allowed_domains = allowed_domains or []
+        ok, reason = _validate_discovery_target(url, allowed_domains)
+        if not ok:
+            return DiscoveryResult(status=PageStatus.BLOCKED, url=url, error=reason, risk_flags=[reason])
+        if not self._started:
+            return DiscoveryResult(status=PageStatus.POOL_EXHAUSTED, url=url, error="Pool not started")
+        if not await self._acquire():
+            return DiscoveryResult(status=PageStatus.POOL_EXHAUSTED, url=url, error="All browser slots busy - queue timeout")
+
+        self._active_sessions += 1
+        context = None
+        page = None
+        engine = "chromium"
+        try:
+            async with self._recycle_lock:
+                await self._maybe_recycle()
+                browser = self._browser
+
+            use_obscura = _ENABLE_OBSCURA_DISCOVERY and bool(_OBSCURA_CDP_URL) and not force_chromium
+            try:
+                if use_obscura:
+                    remote_browser = await self._playwright.chromium.connect_over_cdp(_OBSCURA_CDP_URL)
+                    context = await remote_browser.new_context(viewport={"width": 1366, "height": 768})
+                    engine = "obscura"
+                else:
+                    context = await browser.new_context(viewport={"width": 1366, "height": 768})
+            except Exception as exc:
+                logger.warning("Obscura discovery unavailable, falling back to Chromium: %s", exc)
+                context = await browser.new_context(viewport={"width": 1366, "height": 768})
+                engine = "chromium"
+
+            page = await context.new_page()
+            timeout_ms = max(3000, min(wait_ms or DEFAULT_TIMEOUT, 60000))
+            await page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
+            await page.wait_for_timeout(min(max(timeout_ms // 8, 300), 2500))
+
+            final_url = page.url
+            final_host = urlparse(final_url).hostname or ""
+            if not _host_matches_allowed(final_host, allowed_domains):
+                return DiscoveryResult(
+                    status=PageStatus.BLOCKED,
+                    url=url,
+                    engine=engine,
+                    final_url=final_url,
+                    error="redirected_outside_allowed_domains",
+                    risk_flags=["redirected_outside_allowed_domains"],
+                )
+
+            payload = await page.evaluate(
+                """({ allowedDomains, maxLinks, extractForms }) => {
+                    const esc = (value) => {
+                      if (!value) return "";
+                      if (window.CSS && CSS.escape) return CSS.escape(String(value));
+                      return String(value).replace(/["\\\\]/g, "\\\\$&");
+                    };
+                    const clean = (value) => String(value || "").replace(/\\s+/g, " ").trim();
+                    const short = (value, limit = 240) => {
+                      const text = clean(value);
+                      return text.length > limit ? text.slice(0, limit - 3) + "..." : text;
+                    };
+                    const allowed = (allowedDomains || [])
+                      .map((d) => String(d || "").toLowerCase().replace(/^https?:\\/\\//, "").replace(/\\/$/, ""));
+                    const isAllowed = (href) => {
+                      try {
+                        const host = new URL(href, location.href).hostname.toLowerCase();
+                        return allowed.some((domain) => host === domain || host.endsWith("." + domain));
+                      } catch {
+                        return false;
+                      }
+                    };
+                    const selectorFor = (el) => {
+                      if (!el || !el.tagName) return "";
+                      const tag = el.tagName.toLowerCase();
+                      if (el.id) return `${tag}#${esc(el.id)}`;
+                      const name = el.getAttribute("name");
+                      if (name) return `${tag}[name="${esc(name)}"]`;
+                      const type = el.getAttribute("type");
+                      if (type) return `${tag}[type="${esc(type)}"]`;
+                      const parent = el.parentElement;
+                      if (!parent) return tag;
+                      const siblings = Array.from(parent.children).filter((node) => node.tagName === el.tagName);
+                      const idx = Math.max(1, siblings.indexOf(el) + 1);
+                      return `${tag}:nth-of-type(${idx})`;
+                    };
+                    const labelFor = (field) => {
+                      const id = field.id;
+                      if (id) {
+                        const label = document.querySelector(`label[for="${esc(id)}"]`);
+                        if (label) return short(label.innerText, 120);
+                      }
+                      const wrapping = field.closest("label");
+                      if (wrapping) return short(wrapping.innerText, 120);
+                      const aria = field.getAttribute("aria-label") || field.getAttribute("aria-labelledby");
+                      return aria ? short(aria, 120) : "";
+                    };
+                    const riskSet = new Set();
+                    const classifyFieldRisk = (field) => {
+                      const type = String(field.getAttribute("type") || field.tagName || "").toLowerCase();
+                      const name = String(field.getAttribute("name") || field.id || "").toLowerCase();
+                      const text = `${type} ${name} ${field.placeholder || ""}`.toLowerCase();
+                      if (type === "password" || /login|signin|account|compte|connexion/.test(text)) riskSet.add("login");
+                      if (type === "file" || /upload|fichier|piece|document/.test(text)) riskSet.add("upload");
+                      if (/card|payment|paiement|stripe|checkout/.test(text)) riskSet.add("payment");
+                    };
+
+                    const bodyTextRaw = document.body ? document.body.innerText : "";
+                    const bodyTextLower = bodyTextRaw.toLowerCase();
+                    if (/captcha|recaptcha|hcaptcha/.test(bodyTextLower)) riskSet.add("captcha");
+                    if (/rdv|rendez-vous|appointment|booking|reservation/.test(bodyTextLower)) riskSet.add("appointment");
+
+                    const links = Array.from(document.querySelectorAll("a[href], [data-href], [data-url], [data-route]"))
+                      .map((el) => el.getAttribute("href") || el.getAttribute("data-href") || el.getAttribute("data-url") || el.getAttribute("data-route"))
+                      .filter(Boolean)
+                      .map((href) => {
+                        try { return new URL(href, location.href).href; } catch { return ""; }
+                      })
+                      .filter(Boolean);
+                    const internalLinks = Array.from(new Set(links.filter(isAllowed))).slice(0, maxLinks || 30);
+                    const externalLinks = Array.from(new Set(links.filter((href) => !isAllowed(href)))).slice(0, 20);
+
+                    const forms = extractForms ? Array.from(document.querySelectorAll("form")).map((form, formIndex) => {
+                      const fields = Array.from(form.querySelectorAll("input, textarea, select"))
+                        .filter((field) => !["hidden", "submit", "button", "reset", "image"].includes(String(field.getAttribute("type") || "").toLowerCase()))
+                        .map((field) => {
+                          classifyFieldRisk(field);
+                          return {
+                            name: field.getAttribute("name") || field.id || field.tagName.toLowerCase(),
+                            type: String(field.getAttribute("type") || field.tagName || "text").toLowerCase(),
+                            label: labelFor(field),
+                            selector: selectorFor(field),
+                            placeholder: field.getAttribute("placeholder") || "",
+                            required: field.hasAttribute("required") || field.getAttribute("aria-required") === "true",
+                            visible: !!(field.offsetWidth || field.offsetHeight || field.getClientRects().length),
+                            enabled: !field.disabled,
+                          };
+                        });
+                      return {
+                        selector: form.id ? `form#${esc(form.id)}` : `form:nth-of-type(${formIndex + 1})`,
+                        action: form.getAttribute("action") || "",
+                        method: String(form.getAttribute("method") || "get").toUpperCase(),
+                        text: short(form.innerText, 320),
+                        fields,
+                        submit_selector: selectorFor(form.querySelector('button[type="submit"], input[type="submit"], button:not([type])')),
+                      };
+                    }) : [];
+
+                    const buttons = Array.from(document.querySelectorAll("button, input[type='submit'], [role='button'], a"))
+                      .map((button) => ({
+                        text: short(button.innerText || button.getAttribute("value") || button.getAttribute("aria-label") || "", 100),
+                        selector: selectorFor(button),
+                        href: button.getAttribute("href") || button.getAttribute("data-href") || "",
+                        type: button.getAttribute("type") || button.getAttribute("role") || button.tagName.toLowerCase(),
+                      }))
+                      .filter((button) => button.text || button.href)
+                      .slice(0, 80);
+                    buttons.forEach((button) => {
+                      const text = `${button.text} ${button.href}`.toLowerCase();
+                      if (/login|connexion|compte/.test(text)) riskSet.add("login");
+                      if (/rdv|rendez-vous|appointment|booking|reservation/.test(text)) riskSet.add("appointment");
+                      if (/delete|supprimer|remove/.test(text)) riskSet.add("delete");
+                    });
+
+                    const bodyText = clean(bodyTextRaw);
+                    const messageCandidates = bodyText
+                      .split(/[\\n.?!]/)
+                      .map((line) => short(line, 160))
+                      .filter((line) => /merci|envoy|success|erreur|obligatoire|required|invalid|captcha|validation|rdv|rendez-vous/i.test(line))
+                      .slice(0, 20);
+
+                    return {
+                      rendered_html: document.documentElement.outerHTML,
+                      visible_text: short(bodyText, 12000),
+                      title: document.title || "",
+                      headings: Array.from(document.querySelectorAll("h1,h2,h3"))
+                        .map((h) => ({ level: h.tagName.toLowerCase(), text: short(h.innerText, 180) }))
+                        .slice(0, 80),
+                      internal_links: internalLinks,
+                      external_links: externalLinks,
+                      forms,
+                      buttons,
+                      risk_flags: Array.from(riskSet),
+                      candidate_messages: messageCandidates,
+                    };
+                }""",
+                {
+                    "allowedDomains": allowed_domains,
+                    "maxLinks": max(1, min(max_links or 30, 200)),
+                    "extractForms": extract_forms,
+                },
+            )
+
+            payload = payload if isinstance(payload, dict) else {}
+            forms = payload.get("forms") or []
+            links = payload.get("internal_links") or []
+            confidence = "high" if forms else ("medium" if links else "low")
+            self._pages_served += 1
+            self._success_count += 1
+            return DiscoveryResult(
+                status=PageStatus.SUCCESS,
+                url=url,
+                engine=engine,
+                final_url=final_url,
+                rendered_html=payload.get("rendered_html"),
+                visible_text=payload.get("visible_text"),
+                title=payload.get("title"),
+                headings=payload.get("headings") or [],
+                internal_links=links or [],
+                external_links=payload.get("external_links") or [],
+                forms=forms or [],
+                buttons=payload.get("buttons") or [],
+                risk_flags=payload.get("risk_flags") or [],
+                candidate_messages=payload.get("candidate_messages") or [],
+                detection_sources=["obscura_rendered" if engine == "obscura" else "chromium_rendered"],
+                confidence=confidence,
+            )
+        except asyncio.TimeoutError:
+            self._timeout_count += 1
+            return DiscoveryResult(status=PageStatus.TIMEOUT, url=url, engine=engine, error=f"Navigation timeout after {wait_ms} ms")
+        except Exception as exc:
+            st = self._classify_error(exc)
+            if st == PageStatus.TIMEOUT:
+                self._timeout_count += 1
+            return DiscoveryResult(status=st, url=url, engine=engine, error=str(exc))
+        finally:
+            await self._safe_close_page(page)
+            await self._safe_close_context(context)
+            self._active_sessions -= 1
+            self._semaphore.release()
+
     async def screenshot(
         self,
         url:        str,
@@ -470,8 +815,10 @@ class BrowserPool:
         height:     int  = 800,
         full_page:  bool = True,
         timeout_ms: int  = DEFAULT_TIMEOUT,
+        wait_until: Optional[str] = DEFAULT_SCREENSHOT_WAIT_UNTIL,
     ) -> ScreenshotResult:
         """Capture a screenshot of *url* and return raw PNG bytes."""
+        wait_until = _normalize_wait_until(wait_until, DEFAULT_SCREENSHOT_WAIT_UNTIL)
         if not self._started:
             return ScreenshotResult(status=PageStatus.POOL_EXHAUSTED, url=url, error="Pool not started")
 
@@ -489,7 +836,50 @@ class BrowserPool:
             try:
                 context = await browser.new_context(viewport={"width": width, "height": height})
                 page    = await context.new_page()
-                await page.goto(url, wait_until="networkidle", timeout=timeout_ms)
+                logger.info(
+                    "screenshot navigation url=%s wait_until=%s timeout_ms=%d settle_ms=%d",
+                    url,
+                    wait_until,
+                    timeout_ms,
+                    BROWSER_POOL_SCREENSHOT_SETTLE_MS,
+                )
+                try:
+                    await page.goto(url, wait_until=wait_until, timeout=timeout_ms)
+                except (asyncio.TimeoutError, PlaywrightTimeoutError):
+                    self._timeout_count += 1
+                    return ScreenshotResult(
+                        status=PageStatus.TIMEOUT,
+                        url=url,
+                        wait_until=wait_until,
+                        error=f"{wait_until}_timeout after {timeout_ms} ms",
+                    )
+
+                load_state_timeout_ignored = False
+                if wait_until != "load" and BROWSER_POOL_SCREENSHOT_LOAD_STATE_TIMEOUT_MS > 0:
+                    try:
+                        await page.wait_for_load_state(
+                            "load",
+                            timeout=BROWSER_POOL_SCREENSHOT_LOAD_STATE_TIMEOUT_MS,
+                        )
+                    except (asyncio.TimeoutError, PlaywrightTimeoutError):
+                        load_state_timeout_ignored = True
+                        logger.info(
+                            "screenshot load-state timeout ignored url=%s final_url=%s timeout_ms=%d",
+                            url,
+                            page.url,
+                            BROWSER_POOL_SCREENSHOT_LOAD_STATE_TIMEOUT_MS,
+                        )
+
+                if BROWSER_POOL_SCREENSHOT_SETTLE_MS > 0:
+                    await page.wait_for_timeout(BROWSER_POOL_SCREENSHOT_SETTLE_MS)
+
+                logger.info(
+                    "screenshot visual-ready url=%s final_url=%s wait_until=%s load_state_timeout_ignored=%s",
+                    url,
+                    page.url,
+                    wait_until,
+                    load_state_timeout_ignored,
+                )
 
                 coverage_mode = "viewport_only"
                 image_bytes: Optional[bytes] = None
@@ -536,11 +926,15 @@ class BrowserPool:
                     width=width,
                     height=actual_height,
                     coverage_mode=coverage_mode,
+                    final_url=page.url,
+                    wait_until=wait_until,
+                    load_state_timeout_ignored=load_state_timeout_ignored,
                 )
             except asyncio.TimeoutError:
                 self._timeout_count += 1
                 return ScreenshotResult(status=PageStatus.TIMEOUT, url=url,
-                                        error=f"Navigation timeout after {timeout_ms} ms")
+                                        wait_until=wait_until,
+                                        error=f"navigation_timeout after {timeout_ms} ms")
             except Exception as exc:
                 st = self._classify_error(exc)
                 if st == PageStatus.TIMEOUT:

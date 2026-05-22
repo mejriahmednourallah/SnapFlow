@@ -19,7 +19,7 @@ export function KpiUrlIndex({ urls, affectedCount }: KpiUrlIndexProps) {
       >
         <ChevronDown className={`w-4 h-4 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
         <AlertCircle className="w-4 h-4" />
-        Index des {affectedCount} URLs affectées
+        Index des {affectedCount} pages à vérifier
       </button>
 
       {isExpanded && (
@@ -44,7 +44,7 @@ export function KpiUrlIndex({ urls, affectedCount }: KpiUrlIndexProps) {
             ))}
           </div>
           <p className="text-xs text-muted-foreground mt-2 pt-2 border-t border-border/20">
-            Total : {affectedCount} URL{affectedCount > 1 ? 's' : ''}
+            Total : {affectedCount} page{affectedCount > 1 ? 's' : ''}
           </p>
         </div>
       )}

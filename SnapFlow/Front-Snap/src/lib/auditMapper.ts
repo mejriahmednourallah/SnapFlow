@@ -626,12 +626,12 @@ const AXIS_META: Record<string, { id: string; name: string; description: string 
   TECHNIQUE: {
     id: 'technique',
     name: 'Technique',
-    description: 'Version CMS, modules, erreurs JS.',
+    description: 'Versions serveur, technologies du site et erreurs de scripts.',
   },
   SECURITY: {
     id: 'security',
     name: 'Sécurité',
-    description: 'SSL, En-têtes HTTP, Flags cookies, Cache.',
+    description: 'Certificat de securite, protections du navigateur, cookies et cache.',
   },
   FUNCTIONAL: {
     id: 'functional',
@@ -641,12 +641,12 @@ const AXIS_META: Record<string, { id: string; name: string; description: string 
   PERFORMANCE: {
     id: 'performance',
     name: 'Performance',
-    description: 'FCP, LCP, CLS, Speed Index, optimisation images.',
+    description: 'Temps d affichage, stabilite visuelle, poids des ressources et images.',
   },
   SEO: {
     id: 'seo',
-    name: 'SEO',
-    description: 'Balises META, maillage, sitemap, duplicate content.',
+    name: 'Referencement',
+    description: 'Descriptions de pages, liens internes, plan du site et contenu duplique.',
   },
   CONTENT: {
     id: 'content',
@@ -655,17 +655,17 @@ const AXIS_META: Record<string, { id: string; name: string; description: string 
   },
   UX_UI: {
     id: 'ux-ui',
-    name: 'UX/UI',
+    name: 'Experience utilisateur',
     description: 'Menu structuré, liens invisibles, ratios de densité de texte.',
   },
   ECO_INDEX: {
     id: 'eco-index',
-    name: 'Eco Index',
+    name: 'Impact ecologique',
     description: 'Impact environnemental global du site web.',
   },
   RGPD: {
     id: 'rgpd',
-    name: 'RGPD & Conformité',
+    name: 'Protection des donnees',
     description: 'Bannière de consentement, politique de confidentialité visée.',
   },
 };
@@ -746,6 +746,590 @@ function sanitizeEvidenceLine(line: string): string {
     .replace(/\banomalies\b/gi, 'signaux');
 }
 
+function normalizeForComparison(value: string | undefined): string {
+  return String(value ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+function expandKnownAbbreviations(text: string | undefined): string {
+  if (!text) return '';
+  return String(text)
+    .replace(/\bKPIs\b/gi, 'indicateurs')
+    .replace(/\bKPI\b/gi, 'indicateur')
+    .replace(/certificat SSL/gi, 'certificat de securite')
+    .replace(/Largest Contentful Paint/gi, "temps d'affichage principal")
+    .replace(/First Contentful Paint/gi, 'premier affichage visible')
+    .replace(/\bCore Web Vitals\b/gi, 'indicateurs de chargement')
+    .replace(/\bSpeed Index\b/gi, 'indice de vitesse')
+    .replace(/\bLCP\b/g, "temps d'affichage principal")
+    .replace(/\bFCP\b/g, 'premier affichage visible')
+    .replace(/\bCLS\b/g, 'stabilite visuelle')
+    .replace(/\bCVE\b/gi, 'vulnerabilite connue')
+    .replace(/\bCMS\b/g, 'systeme de gestion du site')
+    .replace(/\bSSL\b/g, 'certificat de securite')
+    .replace(/\bSEO\b/gi, 'referencement')
+    .replace(/\bRGPD\b/gi, 'protection des donnees')
+    .replace(/\bGDPR\b/gi, 'protection des donnees')
+    .replace(/\bJS\b/g, 'JavaScript')
+    .replace(/\bSQLi\b/gi, 'injection dans la base de donnees')
+    .replace(/\bXSS\b/gi, 'injection de script')
+    .replace(/\bDDoS\b/gi, 'saturation du service')
+    .replace(/Content-Security-Policy/g, 'regle de securite du contenu')
+    .replace(/\bHTTP\b/g, 'reponse du serveur')
+    .replace(/\bHTML\b/g, 'page web');
+}
+
+function removeAffectedLead(text: string): string {
+  return text
+    .replace(/\s*Affecte\s+\d+\s+page\(s\)\.?/gi, '')
+    .replace(/\s*Affecte\s+\d+\s+element\(s\)\.?/gi, '')
+    .replace(/\s*Affected\s+\d+\s+page\(s\)\.?/gi, '')
+    .replace(/\s*Pages?\s+concernees?\s*:\s*\d+\.?/gi, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function toPlainDisplayText(text: string | undefined): string {
+  const expanded = expandKnownAbbreviations(text)
+    .replace(/\bMETA\b/g, 'metadonnees')
+    .replace(/\bURLs? concernees/gi, 'Pages concernees')
+    .replace(/\bURLs?\b/g, 'pages')
+    .replace(/\bmeta descriptions?\b/gi, 'description de page')
+    .replace(/\bduplicate content\b/gi, 'contenu duplique')
+    .replace(/\bFlags cookies\b/gi, 'protections des cookies')
+    .replace(/\bGoogle Dorks\b/gi, 'chemins publics sensibles')
+    .replace(/\bpayloads?\b/gi, 'contenus de test')
+    .replace(/\bscanner_aggregation\b/gi, 'scan automatique')
+    .replace(/\bstack_fingerprint\b/gi, 'empreinte technique')
+    .replace(/\bN\/A\b/g, 'non disponible');
+  return removeAffectedLead(expanded).replace(/\s+/g, ' ').trim();
+}
+
+function isGenericRecommendation(text: string | undefined): boolean {
+  const normalized = normalizeForComparison(text);
+  if (!normalized) return true;
+  return [
+    'indicateur valide maintenir ce niveau de conformite',
+    'controle valide maintenir ce niveau de conformite',
+    'indicateur non mesure relancer le scan avec les prerequis complets',
+    'indicateur non disponible dans ce contexte de scan',
+    'prioriser la correction en s appuyant sur les preuves techniques',
+    'corriger selon les details techniques remontes par ce indicateur',
+    'corriger selon les details techniques remontes par cet indicateur',
+    'veuillez corriger ou ajuster ce point selon les regles metier',
+    'resoudre les problemes detectes listes en annexe',
+    'donnees insuffisantes pour conclure relancer le scan avec un contexte plus complet',
+  ].some((pattern) => normalized.includes(pattern));
+}
+
+function findingFamily(finding: AuditFinding): string {
+  const source = `${finding.id} ${finding.sourceKpi ?? ''} ${finding.title}`.toLowerCase();
+  if (/tech|cms|server|serveur|language|langage|module|version|cve/.test(source)) return 'technique';
+  if (/sec_|security|ssl|header|cookie|admin|sensitive|brute|upload|vulnerab|robots_disclosure/.test(source)) return 'security';
+  if (/perf|lcp|fcp|cls|speed|cache|compression|image|console/.test(source)) return 'performance';
+  if (/seo|meta|sitemap|robots|heading|alt|linking|duplicate|ai_readiness/.test(source)) return 'seo';
+  if (/rgpd|privacy|legal|consent|rights|tracker|cookie_policy/.test(source)) return 'rgpd';
+  if (/content|thin|freshness|cta|lexical|cannibal|structure/.test(source)) return 'content';
+  if (/ux|design|navigation|mobile|social|ergonom/.test(source)) return 'ux';
+  if (/func|form|button|search|feature|broken_link|email/.test(source)) return 'functional';
+  if (/eco/.test(source)) return 'eco';
+  return 'general';
+}
+
+function isServerVersionFinding(finding: AuditFinding): boolean {
+  const source = normalizeForComparison(`${finding.id} ${finding.sourceKpi ?? ''} ${finding.title}`);
+  return source.includes('tech server version') ||
+    source.includes('server version') ||
+    source.includes('serveur web') ||
+    source.includes('version serveur') ||
+    source.includes('version langage');
+}
+
+function isProgrammingLanguageFinding(finding: AuditFinding): boolean {
+  const source = normalizeForComparison(`${finding.id} ${finding.sourceKpi ?? ''} ${finding.title}`);
+  return source.includes('tech programming language') ||
+    source.includes('langage de programmation') ||
+    source.includes('programming language');
+}
+
+function isModuleVersionFinding(finding: AuditFinding): boolean {
+  const source = normalizeForComparison(`${finding.id} ${finding.sourceKpi ?? ''} ${finding.title}`);
+  return source.includes('tech modules versions') ||
+    source.includes('version modules') ||
+    source.includes('version des modules') ||
+    source.includes('modules installes');
+}
+
+function isDesktopPerformanceFinding(finding: AuditFinding): boolean {
+  const source = normalizeForComparison(`${finding.id} ${finding.sourceKpi ?? ''} ${finding.title}`);
+  return source.includes('perf desktop speed') ||
+    source.includes('temps de chargement desktop') ||
+    source.includes('desktop load time') ||
+    source.includes('desktop speed');
+}
+
+function cleanFindingTitle(finding: AuditFinding): string {
+  if (isServerVersionFinding(finding)) return 'Version serveur et langage';
+  if (isProgrammingLanguageFinding(finding)) return 'Langage de programmation';
+  if (isModuleVersionFinding(finding)) return 'Version des modules';
+  const source = `${finding.id} ${finding.sourceKpi ?? ''} ${finding.title}`.toLowerCase();
+  if (/^ssl$/i.test(finding.title.trim())) return 'Certificat de securite';
+  if (/tech_cms_version/.test(source)) return 'Systeme de gestion du site';
+  if (/tech_cve_check/.test(source)) return 'Verification des vulnerabilites connues';
+  if (/perf_desktop_speed|desktop|core vitals/.test(source)) return 'Temps de chargement desktop';
+  if (/sec_ssl|certificat/.test(source)) return 'Certificat de securite';
+  if (/sec_js_deps|javascript/.test(source)) return 'Fichiers JavaScript vulnerables';
+  if (/seo_meta|meta/.test(source)) return 'Descriptions de pages pour le referencement';
+  if (/seo_sitemap|sitemap/.test(source)) return 'Plan du site';
+  if (/seo_robots|robots/.test(source)) return 'Instructions pour les moteurs de recherche';
+  if (/rgpd|privacy|consent/.test(source)) return 'Protection des donnees';
+  if (/eco_index/.test(source)) return 'Impact ecologique';
+  return toPlainDisplayText(finding.title);
+}
+
+function fallbackImpactByFamily(finding: AuditFinding): string {
+  switch (findingFamily(finding)) {
+    case 'technique':
+      return 'Une information technique incomplete rend le diagnostic moins fiable et peut masquer une mise a jour importante.';
+    case 'security':
+      return 'Ce point peut reduire la confiance des visiteurs et augmenter le risque d incident de securite.';
+    case 'performance':
+      return 'Un chargement lent peut faire partir des visiteurs avant que le contenu principal soit visible.';
+    case 'seo':
+      return 'Le site peut etre moins bien compris par les moteurs de recherche et donc moins visible.';
+    case 'rgpd':
+      return 'Les visiteurs peuvent manquer d informations claires sur l utilisation de leurs donnees.';
+    case 'content':
+      return 'Le message peut etre moins clair pour les visiteurs et moins convaincant pour passer a l action.';
+    case 'ux':
+      return 'La navigation peut devenir moins fluide, surtout sur mobile ou lors d une premiere visite.';
+    case 'functional':
+      return 'Un parcours utilisateur peut echouer et empecher une demande, un contact ou une conversion.';
+    case 'eco':
+      return 'Des pages trop lourdes consomment plus de ressources et degradent l experience de navigation.';
+    default:
+      return 'Ce point peut reduire la qualite globale de l experience utilisateur.';
+  }
+}
+
+function fallbackRiskByFamily(finding: AuditFinding): string {
+  switch (findingFamily(finding)) {
+    case 'technique':
+      return 'Le risque est de conserver une information technique incomplete ou une version a verifier.';
+    case 'security':
+      return 'Le risque est de laisser une protection importante absente ou insuffisante.';
+    case 'performance':
+      return 'Le risque est de perdre des visiteurs avant que la page soit totalement utilisable.';
+    case 'seo':
+      return 'Le risque est de rendre certaines pages moins visibles dans les resultats de recherche.';
+    case 'rgpd':
+      return 'Le risque est de manquer de clarte sur l usage des donnees personnelles.';
+    case 'content':
+      return 'Le risque est de proposer un contenu moins convaincant ou incomplet.';
+    case 'ux':
+      return 'Le risque est de rendre le parcours moins evident pour les visiteurs.';
+    case 'functional':
+      return 'Le risque est de bloquer une action importante du visiteur.';
+    case 'eco':
+      return 'Le risque est de garder des pages trop lourdes pour leur usage.';
+    default:
+      return 'Le risque est de degrader la qualite globale de l experience.';
+  }
+}
+
+function fallbackRecommendationByFamily(finding: AuditFinding): string {
+  if (isServerVersionFinding(finding)) {
+    return 'Verifier la configuration du serveur et exposer une version exploitable uniquement dans un contexte de diagnostic securise.';
+  }
+  if (isProgrammingLanguageFinding(finding)) {
+    return 'Verifier le langage ou le runtime utilise par le site dans un contexte de diagnostic securise.';
+  }
+  if (isModuleVersionFinding(finding)) {
+    return 'Verifier la liste des modules installes et confirmer que leurs versions sont maintenues.';
+  }
+  switch (findingFamily(finding)) {
+    case 'technique':
+      return 'Completer les informations techniques detectees et verifier les versions utilisees.';
+    case 'security':
+      return 'Renforcer la configuration de securite et corriger les protections manquantes.';
+    case 'performance':
+      return 'Alleger les ressources, reduire les fichiers bloquants et ameliorer l affichage initial.';
+    case 'seo':
+      return 'Clarifier les balises, les titres et la structure afin d aider le referencement.';
+    case 'rgpd':
+      return 'Rendre les informations de protection des donnees plus visibles et plus completes.';
+    case 'content':
+      return 'Completer le contenu, clarifier les appels a l action et supprimer les zones trop faibles.';
+    case 'ux':
+      return 'Simplifier le parcours et rendre les actions principales plus visibles.';
+    case 'functional':
+      return 'Tester le parcours concerne et corriger les elements qui bloquent l utilisateur.';
+    case 'eco':
+      return 'Reduire le poids des pages et optimiser les ressources chargees.';
+    default:
+      return 'Corriger ce point en s appuyant sur les preuves du controle.';
+  }
+}
+
+function fallbackIssueByFamily(finding: AuditFinding): string {
+  if (isServerVersionFinding(finding)) {
+    const product = extractEvidenceValue(finding, /^(Serveur detecte|Serveur détecté|Technologie detectee|Technologie détectée|Produit detecte|Produit détecté)\s*:/i);
+    const version = extractEvidenceValue(finding, /^(Version serveur|Version detectee|Version détectée|Version)\s*:/i);
+    if (product && !version) {
+      return `Le serveur ${product} a ete detecte, mais sa version n est pas disponible. Le niveau de risque ne peut donc pas etre conclu avec certitude.`;
+    }
+    if (product && version) {
+      return `Le serveur ${product} a ete detecte avec la version ${version}. Cette information permet de verifier si la version est encore adaptee.`;
+    }
+    return 'Le serveur ou le langage technique a ete partiellement detecte, mais les informations de version ne sont pas suffisantes pour conclure.';
+  }
+  if (isProgrammingLanguageFinding(finding)) {
+    const language = extractEvidenceValueByLabels(finding, ['Langage detecte', 'Langage de programmation', 'Runtime detecte']);
+    const languageVersion = extractEvidenceValueByLabels(finding, ['Version du langage', 'Version runtime', 'Version detectee']);
+    const server = extractEvidenceValueByLabels(finding, ['Serveur detecte', 'Technologie detectee', 'Produit detecte']);
+    const serverVersion = extractEvidenceValueByLabels(finding, ['Version serveur']);
+    if (language) {
+      return languageVersion
+        ? `Le langage ${language} a ete detecte avec la version ${languageVersion}. Cette information permet de verifier les mises a jour de securite.`
+        : `Le langage ${language} a ete detecte, mais sa version n est pas disponible. Le niveau de risque doit etre confirme.`;
+    }
+    if (server) {
+      const versionText = serverVersion ? ` avec la version ${serverVersion}` : '';
+      return `Le langage utilise par le site n est pas expose directement. Le scan a cependant detecte le serveur ${server}${versionText}, ce qui donne un contexte technique partiel.`;
+    }
+    return 'Le langage utilise par le site n est pas expose directement par les pages analysees. Le niveau de risque ne peut donc pas etre conclu avec certitude.';
+  }
+  if (isModuleVersionFinding(finding)) {
+    const count = extractEvidenceValueByLabels(finding, ['Modules avec version detectee', 'Modules detectes avec version', 'Modules detectes']);
+    const parsedCount = Number(String(count).replace(/[^0-9]/g, ''));
+    if (Number.isFinite(parsedCount) && parsedCount > 0) {
+      return `Le scan a detecte ${parsedCount} module${parsedCount > 1 ? 's' : ''} avec une version exploitable. Ces versions doivent etre verifiees pour confirmer leur niveau de maintenance.`;
+    }
+    if (Number.isFinite(parsedCount) && parsedCount === 0) {
+      return 'Aucun module avec version exploitable n a ete detecte pendant ce scan. Cela ne signifie pas necessairement qu aucun module n existe, seulement qu ils ne sont pas exposes clairement.';
+    }
+    return 'Les modules installes ne sont pas assez documentes dans les resultats du scan pour conclure sur leur niveau de maintenance.';
+  }
+  switch (findingFamily(finding)) {
+    case 'performance':
+      return 'Un point de chargement ralentit l affichage du contenu principal pour les visiteurs.';
+    case 'security':
+      return 'Une protection de securite attendue est absente ou incomplete.';
+    case 'seo':
+      return 'Un element de referencement manque ou n est pas assez clair pour les moteurs de recherche.';
+    case 'rgpd':
+      return 'Une information attendue sur la protection des donnees est absente ou incomplete.';
+    case 'content':
+      return 'Une partie du contenu manque de clarte, de profondeur ou d action proposee.';
+    case 'ux':
+      return 'Un element d interface peut rendre le parcours moins clair pour les visiteurs.';
+    case 'functional':
+      return 'Un element fonctionnel peut empecher l utilisateur de terminer son action.';
+    case 'eco':
+      return 'La page semble plus lourde que necessaire pour l usage attendu.';
+    default:
+      return 'Un point d amelioration a ete detecte sur ce controle.';
+  }
+}
+
+function cleanEvidenceLines(lines: string[] | undefined, finding: AuditFinding): string[] {
+  const base = (lines ?? [])
+    .map((line) => toPlainDisplayText(sanitizeEvidenceLine(line)))
+    .filter(Boolean)
+    .filter((line) => {
+      const label = normalizeForComparison(String(line).split(':')[0] || line);
+      const whole = normalizeForComparison(line);
+      return !label.startsWith('source') &&
+        !whole.includes('scanner aggregation') &&
+        !whole.includes('stack fingerprint') &&
+        whole !== 'scan automatique' &&
+        whole !== 'empreinte technique';
+    });
+
+  if (!isServerVersionFinding(finding)) {
+    if (isProgrammingLanguageFinding(finding)) {
+      const proxyFinding = { ...finding, evidence: base, evidenceSummary: base, annexes: base };
+      const language = extractEvidenceValueByLabels(proxyFinding, ['Langage detecte', 'Langage de programmation', 'Runtime detecte']);
+      const languageVersion = extractEvidenceValueByLabels(proxyFinding, ['Version du langage', 'Version runtime', 'Version detectee']);
+      const server = extractEvidenceValueByLabels(proxyFinding, ['Serveur detecte', 'Technologie detectee', 'Produit detecte']);
+      const serverVersion = extractEvidenceValueByLabels(proxyFinding, ['Version serveur']);
+      const rest = base.filter((line) => {
+        const label = normalizeForComparison(String(line).split(':')[0] || line);
+        return ![
+          'langage detecte',
+          'langage de programmation',
+          'runtime detecte',
+          'version du langage',
+          'version runtime',
+          'version detectee',
+          'serveur detecte',
+          'technologie detectee',
+          'produit detecte',
+          'version serveur',
+        ].includes(label);
+      });
+      const rewritten = [
+        language ? `Langage detecte : ${language}` : undefined,
+        language ? `Version du langage : ${languageVersion || 'non detectee'}` : undefined,
+        !language && server ? `Serveur detecte : ${server}` : undefined,
+        !language && server ? `Version serveur : ${serverVersion || 'non detectee'}` : undefined,
+        ...rest,
+      ].filter(Boolean) as string[];
+      return Array.from(new Set(rewritten));
+    }
+    if (isModuleVersionFinding(finding)) {
+      return Array.from(new Set(base.map((line) => {
+        const label = normalizeForComparison(String(line).split(':')[0] || line);
+        if (label === 'modules avec version detectee' || label === 'modules detectes avec version') {
+          const value = String(line).split(':').slice(1).join(':').trim();
+          return `Modules avec version detectee : ${value || '0'}`;
+        }
+        return line;
+      })));
+    }
+    return Array.from(new Set(base));
+  }
+
+  const product = extractEvidenceValue({ ...finding, evidence: base, evidenceSummary: base, annexes: base }, /^(Serveur detecte|Serveur détecté|Technologie detectee|Technologie détectée|Produit detecte|Produit détecté)\s*:/i);
+  const version = extractEvidenceValue({ ...finding, evidence: base, evidenceSummary: base, annexes: base }, /^(Version serveur|Version detectee|Version détectée|Version)\s*:/i);
+  const rest = base.filter((line) => !/^(Serveur detecte|Serveur détecté|Technologie detectee|Technologie détectée|Produit detecte|Produit détecté|Version serveur|Version detectee|Version détectée|Version)\s*:/i.test(line));
+  const readableProduct = product || extractEvidenceValueByLabels({ ...finding, evidence: base, evidenceSummary: base, annexes: base }, ['Serveur detecte', 'Technologie detectee', 'Produit detecte']);
+  const readableVersion = version || extractEvidenceValueByLabels({ ...finding, evidence: base, evidenceSummary: base, annexes: base }, ['Version serveur', 'Version detectee', 'Version']);
+  const rewritten = [
+    readableProduct ? `Serveur detecte : ${readableProduct}` : undefined,
+    `Version serveur : ${readableVersion || 'non detectee'}`,
+    ...rest,
+  ].filter(Boolean) as string[];
+  return Array.from(new Set(rewritten));
+}
+
+function extractEvidenceValueByLabels(finding: AuditFinding, labels: string[]): string {
+  const normalizedLabels = labels.map(normalizeForComparison);
+  const lines = [
+    finding.description,
+    finding.recommendation,
+    finding.risk,
+    finding.impact,
+    ...(finding.evidenceSummary ?? []),
+    ...(finding.evidence ?? []),
+    ...(finding.annexes ?? []),
+  ].filter(Boolean) as string[];
+
+  for (const line of lines) {
+    const cleaned = toPlainDisplayText(line);
+    const splitIdx = cleaned.indexOf(':');
+    if (splitIdx <= 0) continue;
+    const label = normalizeForComparison(cleaned.slice(0, splitIdx));
+    if (normalizedLabels.some((expected) => label === expected || label.includes(expected))) {
+      const value = cleaned.slice(splitIdx + 1).trim().replace(/[.;]$/, '');
+      const normalizedValue = normalizeForComparison(value);
+      if (
+        value &&
+        normalizedValue !== 'non detectee' &&
+        normalizedValue !== 'non detecte' &&
+        !normalizedValue.includes('donnees insuffisantes')
+      ) {
+        return value;
+      }
+    }
+  }
+  return '';
+}
+
+function extractEvidenceValue(finding: AuditFinding, pattern: RegExp): string {
+  const lines = [
+    finding.description,
+    finding.recommendation,
+    finding.risk,
+    finding.impact,
+    ...(finding.evidenceSummary ?? []),
+    ...(finding.evidence ?? []),
+    ...(finding.annexes ?? []),
+  ].filter(Boolean) as string[];
+  for (const line of lines) {
+    const cleaned = toPlainDisplayText(line);
+    const match = cleaned.match(pattern);
+    if (match?.[2]) return match[2].trim().replace(/[.;]$/, '');
+    if (match?.[1] && cleaned.includes(':')) return cleaned.split(':').slice(1).join(':').trim().replace(/[.;]$/, '');
+  }
+  return '';
+}
+
+function extractDesktopScoreLine(finding: AuditFinding): string {
+  const lines = [
+    finding.description,
+    ...(finding.evidenceSummary ?? []),
+    ...(finding.evidence ?? []),
+    ...(finding.annexes ?? []),
+  ].filter(Boolean) as string[];
+  for (const line of lines) {
+    const cleaned = toPlainDisplayText(line);
+    const match = cleaned.match(/Score desktop estime\s*:\s*\d+\s*%\.?/i);
+    if (match?.[0]) return match[0].trim().replace(/\.$/, '');
+  }
+  return '';
+}
+
+function ensureDesktopScoreInDescription(description: string, finding: AuditFinding): string {
+  if (!isDesktopPerformanceFinding(finding)) return description;
+  if (normalizeForComparison(description).includes('score desktop estime')) return description;
+  const scoreLine = extractDesktopScoreLine(finding);
+  if (!scoreLine) return description;
+  return `${scoreLine}. ${description}`.trim();
+}
+
+function polishAuditFinding(finding: AuditFinding): AuditFinding {
+  const isPass = finding.status === 'pass' || finding.type === 'pass' || finding.origin === 'passing_kpi';
+  const isNonTested = finding.status ? isNonTestedStatus(finding.status) : false;
+  const evidenceSummary = cleanEvidenceLines(finding.evidenceSummary ?? finding.evidence ?? finding.annexes, finding);
+  const evidence = cleanEvidenceLines(finding.evidence ?? finding.annexes, finding);
+  const annexes = cleanEvidenceLines(finding.annexes, finding);
+  const title = cleanFindingTitle(finding);
+  const rawDescription = toPlainDisplayText(finding.description);
+  let description = rawDescription;
+
+  if (!description || /^indicateur (non )?(concluant|teste|valide)/i.test(description)) {
+    description = isPass
+      ? `Controle conforme : ${evidenceSummary[0] || evidence[0] || 'aucun probleme detecte.'}`
+      : fallbackIssueByFamily({ ...finding, evidenceSummary, evidence, annexes, title });
+  }
+  const normalizedDescription = normalizeForComparison(description);
+  if (
+    isServerVersionFinding({ ...finding, title }) &&
+    (
+      normalizedDescription.startsWith('serveur') ||
+      normalizedDescription.includes('donnees insuffisantes') ||
+      normalizedDescription.includes('versions obsoletes') ||
+      normalizedDescription.includes('version exploitable manque')
+    )
+  ) {
+    description = fallbackIssueByFamily({ ...finding, evidenceSummary, evidence, annexes, title });
+  }
+  if (
+    isProgrammingLanguageFinding({ ...finding, title }) &&
+    (
+      normalizedDescription.includes('donnees insuffisantes') ||
+      normalizedDescription.includes('non detecte') ||
+      normalizedDescription.startsWith('langage de programmation')
+    )
+  ) {
+    description = fallbackIssueByFamily({ ...finding, evidenceSummary, evidence, annexes, title });
+  }
+  if (
+    isModuleVersionFinding({ ...finding, title }) &&
+    (
+      normalizedDescription.startsWith('version modules') ||
+      normalizedDescription.includes('modules detectes avec versions') ||
+      normalizedDescription.includes('donnees insuffisantes')
+    )
+  ) {
+    description = fallbackIssueByFamily({ ...finding, evidenceSummary, evidence, annexes, title });
+  }
+  if (!isPass && !isNonTested && /point d.optimisation identifie/i.test(normalizeForComparison(description))) {
+    description = fallbackIssueByFamily({ ...finding, evidenceSummary, evidence, annexes, title });
+  }
+  if (isNonTested && /^indicateur non teste/i.test(description)) {
+    description = description.replace(/^indicateur non teste\s*:\s*/i, 'Controle non teste : ');
+  }
+  description = ensureDesktopScoreInDescription(description, { ...finding, evidenceSummary, evidence, annexes, title });
+
+  let recommendation = toPlainDisplayText(finding.recommendation);
+  if (isPass) {
+    recommendation = 'Controle conforme.';
+  } else if (isGenericRecommendation(recommendation)) {
+    recommendation = isNonTested
+      ? 'Relancer le scan avec un contexte plus complet pour obtenir une mesure exploitable.'
+      : fallbackRecommendationByFamily({ ...finding, evidenceSummary, evidence, annexes, title });
+  }
+
+  let risk = toPlainDisplayText(finding.risk);
+  let impact = toPlainDisplayText(finding.impact);
+  if (!isPass && risk && impact && normalizeForComparison(risk) === normalizeForComparison(impact)) {
+    risk = fallbackRiskByFamily({ ...finding, evidenceSummary, evidence, annexes, title });
+  }
+  if (!isPass && !impact && risk) {
+    impact = fallbackImpactByFamily({ ...finding, evidenceSummary, evidence, annexes, title });
+  }
+  if (!isPass && !risk && impact) {
+    risk = impact;
+    impact = fallbackImpactByFamily({ ...finding, evidenceSummary, evidence, annexes, title });
+  }
+
+  return {
+    ...finding,
+    title,
+    description,
+    recommendation,
+    risk: isPass ? undefined : risk || undefined,
+    impact: isPass ? undefined : impact || undefined,
+    fix: finding.fix ? toPlainDisplayText(finding.fix) : undefined,
+    evidenceSummary,
+    evidence,
+    annexes,
+  };
+}
+
+function readNumericMetric(source: any, keys: string[]): number | undefined {
+  for (const key of keys) {
+    const value = source?.[key];
+    const parsed = typeof value === 'number' ? value : Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return undefined;
+}
+
+function scoreLowerIsBetter(value: number | undefined, good: number, poor: number): number | undefined {
+  if (value === undefined) return undefined;
+  if (value <= good) return 100;
+  if (value >= poor) return 0;
+  return Math.round(100 - ((value - good) / (poor - good)) * 100);
+}
+
+function computeDesktopPerformanceScore(perf: any): number {
+  const metrics = [
+    { score: scoreLowerIsBetter(readNumericMetric(perf, ['avg_lcp_ms', 'lcp_ms', 'desktop_lcp_ms']), 2500, 6000), weight: 0.42 },
+    { score: scoreLowerIsBetter(readNumericMetric(perf, ['avg_fcp_ms', 'fcp_ms', 'desktop_fcp_ms']), 1800, 4500), weight: 0.23 },
+    { score: scoreLowerIsBetter(readNumericMetric(perf, ['avg_cls', 'cls', 'desktop_cls']), 0.1, 0.35), weight: 0.2 },
+    { score: scoreLowerIsBetter(readNumericMetric(perf, ['total_resource_size_kb', 'resource_size_kb', 'total_kb']), 1000, 5000), weight: 0.15 },
+  ].filter((item): item is { score: number; weight: number } => typeof item.score === 'number');
+
+  if (metrics.length === 0) return 0;
+  const totalWeight = metrics.reduce((sum, item) => sum + item.weight, 0);
+  return Math.max(0, Math.min(100, Math.round(metrics.reduce((sum, item) => sum + item.score * item.weight, 0) / totalWeight)));
+}
+
+function formatSeconds(ms: number | undefined): string | undefined {
+  if (ms === undefined) return undefined;
+  return `${(ms / 1000).toFixed(1).replace('.', ',')} s`;
+}
+
+function buildDesktopPerformanceCopy(perf: any): { description: string; evidence: string[]; score: number } {
+  const score = computeDesktopPerformanceScore(perf);
+  const lcp = readNumericMetric(perf, ['avg_lcp_ms', 'lcp_ms', 'desktop_lcp_ms']);
+  const fcp = readNumericMetric(perf, ['avg_fcp_ms', 'fcp_ms', 'desktop_fcp_ms']);
+  const cls = readNumericMetric(perf, ['avg_cls', 'cls', 'desktop_cls']);
+  const weight = readNumericMetric(perf, ['total_resource_size_kb', 'resource_size_kb', 'total_kb']);
+  const problem = score >= 75
+    ? 'Le chargement desktop est globalement satisfaisant.'
+    : 'La page principale met trop de temps a afficher son contenu visible.';
+  const evidence = [
+    `Score desktop estime : ${score} %.`,
+    lcp !== undefined ? `Temps d'affichage principal : ${formatSeconds(lcp)}` : undefined,
+    fcp !== undefined ? `Premier affichage visible : ${formatSeconds(fcp)}` : undefined,
+    cls !== undefined ? `Stabilite visuelle : ${cls.toFixed(2).replace('.', ',')}` : undefined,
+    weight !== undefined ? `Poids total des ressources : ${Math.round(weight).toLocaleString('fr-FR')} KB` : undefined,
+  ].filter(Boolean) as string[];
+  return {
+    score,
+    description: `${evidence[0]} ${problem}`,
+    evidence,
+  };
+}
+
 function humanizeEvidenceLabel(label: string): string {
   const normalized = String(label ?? '')
     .replace(/^(evidence|metrics)\.?/i, '')
@@ -754,21 +1338,27 @@ function humanizeEvidenceLabel(label: string): string {
     .trim();
 
   const known: Record<string, string> = {
-    url: 'URL',
-    urls: 'URLs',
+    url: 'Adresse de page',
+    urls: 'Adresses de pages',
     page_url: 'Page',
     source_page: 'Page source',
-    target_url: 'URL cible',
-    status_code: 'Code HTTP',
-    content_encoding: 'Content-Encoding',
-    cache_control: 'Cache-Control',
-    detected_version: 'Version detectee',
-    detected_product: 'Produit detecte',
+    target_url: 'Adresse cible',
+    status_code: 'Code de reponse',
+    content_encoding: 'Mode de compression',
+    cache_control: 'Regle de cache',
+    detected_version: 'Version serveur',
+    detected_product: 'Technologie detectee',
     support_status: 'Statut de support',
     measurement_status: 'Statut de mesure',
     affected_pages: 'Pages concernees',
-    affected_page_urls_all: 'URLs concernees',
+    affected_page_urls_all: 'Pages concernees',
+    pages_checked: 'Pages verifiees',
+    pages_verified: 'Pages verifiees',
     observed_metrics: 'Mesures observees',
+    lcp_ms: "Temps d'affichage principal",
+    fcp_ms: 'Premier affichage visible',
+    cls: 'Stabilite visuelle',
+    total_resource_size_kb: 'Poids total des ressources',
     anomalies_count: 'Signaux detectes',
     anomalies_by_type: 'Signaux par type',
     suppressed_low_confidence_anomalies: 'Signaux faibles ignores',
@@ -940,22 +1530,22 @@ function extractScannerRecommendation(kpiNode: any, status: FindingStatus): { te
   }
 
   if (status === 'pass') {
-    return { text: 'KPI valide. Maintenir ce niveau de conformite.', source: 'generated' };
+    return { text: 'Controle conforme.', source: 'generated' };
   }
   if (status === 'not_available') {
     return {
-      text: 'KPI non disponible dans ce contexte de scan. Verifier les prerequis techniques.',
+      text: 'Controle non disponible dans ce contexte de scan. Verifier les prerequis techniques.',
       source: 'generated',
     };
   }
   if (status === 'not_measured' || status === 'not_evaluated') {
     return {
-      text: 'KPI non mesure. Relancer le scan avec un contexte plus complet.',
+      text: 'Controle non mesure. Relancer le scan avec un contexte plus complet.',
       source: 'generated',
     };
   }
   return {
-    text: 'Prioriser la correction en s appuyant sur les preuves techniques de ce KPI.',
+    text: 'Prioriser la correction en s appuyant sur les preuves du controle.',
     source: 'generated',
   };
 }
@@ -993,7 +1583,7 @@ function extractDigestSummary(kpiNode: any): string[] {
       .filter(Boolean)
       .slice(0, 3);
     if (urls.length > 0) {
-      lines.push(`URLs: ${urls.join(', ')}`);
+      lines.push(`Pages concernees: ${urls.join(', ')}`);
     }
   }
 
@@ -1286,7 +1876,7 @@ function buildFindingFromScannerKpi(axisKey: AxisBucketKey, kpiName: string, kpi
   const rawBackendStatus = String(kpiNode?.status ?? '').toLowerCase();
   const kpiLabels = resolveKpiLabels(kpiId, rawBackendStatus, kpiNode?.severity, kpiNode?.data ?? kpiNode?.metrics ?? {});
 
-  return {
+  return polishAuditFinding({
     id: kpiId,
     title,
     description: extractScannerKpiDescription(kpiNode, kpiName),
@@ -1321,7 +1911,7 @@ function buildFindingFromScannerKpi(axisKey: AxisBucketKey, kpiName: string, kpi
     pageUrl: typeof urls?.[0] === 'string' ? urls[0] : undefined,
     page: typeof urls?.[0] === 'string' ? urls[0] : undefined,
     kpiLabels, // ← new French display labels
-  };
+  });
 }
 
 function buildActionItemFromFinding(finding: AuditFinding): AuditActionItem {
@@ -1467,7 +2057,7 @@ function buildScannerAxesReport(
     maturityLevel: globalScore >= 75 ? 'Avancé' : globalScore >= 50 ? 'Intermédiaire' : 'En développement',
     riskLevel: getRiskLevelFromScore(globalScore),
     axes,
-    strategicSummary: backendHeadline || `Audit basé sur ${allFindings.length} KPI (${passFindings.length} validés, ${failFindings.length} en échec, ${coverageFindings.length} non mesurés ou non disponibles).`,
+    strategicSummary: backendHeadline || `Audit base sur ${allFindings.length} controles (${passFindings.length} conformes, ${failFindings.length} a corriger, ${coverageFindings.length} non mesures ou non disponibles).`,
     positivePoints: passFindings.slice(0, 6).map((f) => f.title),
     negativePoints: failFindings
       .filter((f) => f.criticality !== 'critical' && f.criticality !== 'high')
@@ -1513,12 +2103,12 @@ function createFinding(
   const isNotAvailable = status === 'not_available';
 
   const description = isPass
-    ? `Objectif réussi : ${descriptionStr}`
+    ? `Controle conforme : ${descriptionStr}`
     : isFail
-      ? `Bug ou recommandation détecté : ${descriptionStr}`
+      ? `Point a corriger : ${descriptionStr}`
       : isNotAvailable
-        ? `KPI non testé : ${descriptionStr}`
-        : `KPI non testé : ${descriptionStr}`;
+        ? `Controle non teste : ${descriptionStr}`
+        : `Controle non teste : ${descriptionStr}`;
 
   const inferPriority = (): Priority => {
     const normalized = `${title} ${descriptionStr}`.toLowerCase();
@@ -1538,16 +2128,16 @@ function createFinding(
   };
 
   const recommendation = isPass
-    ? 'KPI validé. Maintenir ce niveau de conformité dans la durée.'
+    ? 'Controle conforme.'
     : isFail
       ? (issuesList && issuesList.length > 0
-        ? 'Résoudre les problèmes détectés listés en annexe.'
-        : 'Veuillez corriger ou ajuster ce point selon les règles métier.')
+        ? 'Corriger les problemes detectes dans les preuves du controle.'
+        : 'Corriger ce point selon les observations du controle.')
       : isNotAvailable
-        ? 'KPI non testé : relancer le scan avec les prérequis complets pour obtenir une mesure exploitable.'
-        : 'KPI non testé : relancer le scan avec les prérequis complets pour obtenir une mesure exploitable.';
+        ? 'Controle non teste : relancer le scan avec les prerequis complets pour obtenir une mesure exploitable.'
+        : 'Controle non teste : relancer le scan avec les prerequis complets pour obtenir une mesure exploitable.';
 
-  return {
+  return polishAuditFinding({
     id: `${axisId}-${idSuffix}`,
     title,
     description,
@@ -1558,7 +2148,7 @@ function createFinding(
     recommendation,
     annexes: issuesList,
     origin: isNotTested ? 'coverage' : undefined,
-  };
+  });
 }
 
 function hasStructuredPayload(api: ApiResponse): boolean {
@@ -1614,7 +2204,7 @@ function inferAxisMetaKey(input: { sourceKpi?: string; title?: string; label?: s
 function buildStructuredFindingFromAction(item: AuditActionItem, origin: Exclude<FindingOrigin, 'coverage' | 'passing_kpi' | 'legacy'>): AuditFinding {
   const criticality = severityToCriticality(item.severity);
   const normalizedEvidence = (item.evidence ?? []).map((line) => sanitizeEvidenceLine(line)).filter(Boolean);
-  return {
+  return polishAuditFinding({
     id: item.id,
     title: item.title,
     description: item.description,
@@ -1642,18 +2232,18 @@ function buildStructuredFindingFromAction(item: AuditActionItem, origin: Exclude
     },
     page: item.example_urls?.[0],
     pageUrl: item.example_urls?.[0],
-  };
+  });
 }
 
 function buildStructuredFindingFromPassing(item: AuditPassingKpi): AuditFinding {
   const normalizedEvidence = (item.evidence ?? []).map((line) => sanitizeEvidenceLine(line)).filter(Boolean);
-  return {
+  return polishAuditFinding({
     id: item.id,
     title: item.label,
-    description: `Contrôle validé : ${item.observed_value}`,
+    description: `Controle conforme : ${item.observed_value}`,
     criticality: 'low',
     priority: 'long-terme',
-    recommendation: 'KPI validé. Maintenir ce niveau de conformité.',
+    recommendation: 'Controle conforme.',
     type: 'pass',
     status: 'pass',
     annexes: normalizedEvidence,
@@ -1666,7 +2256,7 @@ function buildStructuredFindingFromPassing(item: AuditPassingKpi): AuditFinding 
       source_kpi: item.source_kpi,
     },
     recommendationSource: 'generated',
-  };
+  });
 }
 
 function normalizeStructuredPassingKpis(api: ApiResponse): AuditPassingKpi[] {
@@ -1710,7 +2300,7 @@ function normalizeStructuredPassingKpis(api: ApiResponse): AuditPassingKpi[] {
   if (!hasSslPassItem && rawSslValid === true) {
     normalized.push({
       id: 'ssl_valid',
-      label: 'SSL valide',
+      label: 'Certificat de securite valide',
       source_kpi: 'domain_analysis.security.ssl.valid',
       observed_value: 'true',
       status: 'pass',
@@ -1729,7 +2319,7 @@ function normalizeStructuredPassingKpis(api: ApiResponse): AuditPassingKpi[] {
 function buildStructuredFindingFromCoverage(item: AuditCoverageItem): AuditFinding | null {
   if (item.status === 'covered') return null;
   const normalizedEvidence = (item.evidence ?? []).map((line) => sanitizeEvidenceLine(line)).filter(Boolean);
-  return {
+  return polishAuditFinding({
     id: item.id,
     title: item.label,
     description: 'Contrôle non testé dans les données remontées par le scan.',
@@ -1747,7 +2337,7 @@ function buildStructuredFindingFromCoverage(item: AuditCoverageItem): AuditFindi
       coverage_status: item.status,
     },
     recommendationSource: 'generated',
-  };
+  });
 }
 
 function formatStructuredDetailLines(prefix: string, value: unknown): string[] {
@@ -1803,9 +2393,9 @@ function normalizeRecommendationFromStructuredKpi(kpi: KpiItem, isFailure: boole
   }
 
   if (isFailure) {
-    return { text: 'Corriger selon les details techniques remontes par ce KPI.', source: 'generated' };
+    return { text: 'Corriger ce point en s appuyant sur les preuves du controle.', source: 'generated' };
   }
-  return { text: 'KPI valide. Maintenir ce niveau de conformite.', source: 'generated' };
+  return { text: 'Controle conforme.', source: 'generated' };
 }
 
 function buildStructuredFindingFromKpi(kpi: KpiItem): AuditFinding {
@@ -1833,7 +2423,7 @@ function buildStructuredFindingFromKpi(kpi: KpiItem): AuditFinding {
   if (Array.isArray(digest.top_urls) && digest.top_urls.length > 0) {
     const topUrls = digest.top_urls.map((item) => String(item ?? '').trim()).filter(Boolean).slice(0, 3);
     if (topUrls.length > 0) {
-      evidenceList.push(`URLs: ${topUrls.join(', ')}`);
+      evidenceList.push(`Pages concernees: ${topUrls.join(', ')}`);
     }
   }
   if (kpi.evidence?.detail) {
@@ -1849,14 +2439,14 @@ function buildStructuredFindingFromKpi(kpi: KpiItem): AuditFinding {
     evidenceList.push(`${itemDesc} [${status}] - ${error}`);
   });
 
-  return {
+  return polishAuditFinding({
     id: `kpi-${kpi.kpi_name.toLowerCase().replace(/\s+/g, '-')}`,
     title: kpi.kpi_name,
     description: isFailure
-      ? `KPI non concluant : ${evidenceSummary}`
+      ? `Controle non concluant : ${evidenceSummary}`
       : isNotTested
-        ? `KPI non testé : ${evidenceSummary}`
-        : `KPI concluant : ${evidenceSummary}`,
+        ? `Controle non teste : ${evidenceSummary}`
+        : `Controle conforme : ${evidenceSummary}`,
     criticality: isFailure ? 'high' : 'low',
     priority: isFailure ? 'moyen-terme' : 'long-terme',
     recommendation: recommendationDetails.text,
@@ -1878,7 +2468,7 @@ function buildStructuredFindingFromKpi(kpi: KpiItem): AuditFinding {
     effort: affectedUrls.length > 10 ? 'high' : affectedUrls.length > 5 ? 'medium' : 'low',
     annexes: evidenceList.map((line) => sanitizeEvidenceLine(line)).filter(Boolean),
     kpiLabels: resolveKpiLabels(kpi.kpi_name, kpi.status, isFailure ? 'high' : null, kpi.evidence?.detail ?? {}),
-  };
+  });
 }
 
 function buildStructuredReport(
@@ -2014,7 +2604,7 @@ function buildStructuredReport(
     maturityLevel: globalScoreVal >= 75 ? 'Avancé' : globalScoreVal >= 50 ? 'Intermédiaire' : 'En développement',
     riskLevel: getRiskLevelFromScore(globalScoreVal),
     axes,
-    strategicSummary: `L'audit a identifié ${summary?.total ?? failCount} élément(s) d'action, dont ${summary?.critical ?? 0} critique(s), ${summary?.high ?? 0} élevé(s) et ${passCount} KPI validé(s).`,
+    strategicSummary: `L'audit a identifie ${summary?.total ?? failCount} element(s) d'action, dont ${summary?.critical ?? 0} critique(s), ${summary?.high ?? 0} eleve(s) et ${passCount} controle(s) conforme(s).`,
     positivePoints: passingKpis.slice(0, 6).map(item => item.label),
     negativePoints: bugs
       .filter(item => !/critical|high/i.test(item.severity))
@@ -2110,7 +2700,7 @@ export function mapApiResponseToReport(
   }
   if (dman.exposed_path_kpi) {
     const kpi = dman.exposed_path_kpi;
-    const f = createFinding('sec', 'dorks', 'Chemins et URLs exposés', kpi.passed, `Vulnérabilités de type Google Dorks répertoriées : ${kpi.google_dorks_vuln_count}`, resolveStatus(kpi));
+    const f = createFinding('sec', 'dorks', 'Chemins publics sensibles', kpi.passed, `Chemins publics sensibles repertories : ${kpi.google_dorks_vuln_count}`, resolveStatus(kpi));
     if (f) findingsSec.push(f);
   }
   if (dman.vulnerability_kpi) {
@@ -2132,7 +2722,7 @@ export function mapApiResponseToReport(
   }
   if (smet.seo?.broken_link_kpi) {
     const kpi = smet.seo.broken_link_kpi;
-    const links = (kpi.broken_links || []).map((l: any) => `Erreur ${l.status_code} sur l'URL: ${l.url} (trouvé sur ${l.found_on})`);
+    const links = (kpi.broken_links || []).map((l: any) => `Erreur ${l.status_code} sur la page: ${l.url} (trouvé sur ${l.found_on})`);
     const f = createFinding('func', 'broken-links', 'Liens morts/cassés', kpi.passed, `Total liens morts : ${kpi.broken_link_count}`, resolveStatus(kpi), links);
     if (f) findingsFunc.push(f);
   }
@@ -2150,8 +2740,12 @@ export function mapApiResponseToReport(
   // --- 4. Performance ---
   if (smet.performance) {
     const perf = smet.performance;
-    const isDesktopPassed = perf.avg_lcp_ms < 2500; // WCAG/Lighthouse best practices baseline
-    const fDp = createFinding('perf', 'desktop', 'Vitesse Web et Core Vitals (Desktop)', isDesktopPassed, `LCP moyen : ${(perf.avg_lcp_ms || 0).toFixed(0)} ms. Poids ressources : ${(perf.total_resource_size_kb || 0).toFixed(0)} kb.`, resolveStatus(perf));
+    const desktopCopy = buildDesktopPerformanceCopy(perf);
+    const isDesktopPassed = desktopCopy.score >= 75;
+    const explicitPerfStatus = perf.status || perf.state || perf.coverage || typeof perf.passed === 'boolean' || perf.available === false
+      ? resolveStatus(perf)
+      : undefined;
+    const fDp = createFinding('perf', 'desktop', 'Temps de chargement desktop', isDesktopPassed, desktopCopy.description, explicitPerfStatus, desktopCopy.evidence);
     if (fDp) findingsPerf.push(fDp);
 
     if (perf.mobile_kpi && perf.mobile_kpi.available !== false) {
@@ -2172,7 +2766,7 @@ export function mapApiResponseToReport(
   if (smet.seo) {
     const seo = smet.seo;
     const isMetaPassed = seo.pages_missing_meta_desc === 0;
-    const f1 = createFinding('seo', 'meta', 'Attributs META HTML', isMetaPassed, `Pages dépourvues de meta description valides : ${seo.pages_missing_meta_desc}`, resolveStatus(seo.meta_kpi ?? { passed: isMetaPassed }));
+    const f1 = createFinding('seo', 'meta', 'Descriptions de pages pour le referencement', isMetaPassed, `Pages depourvues de descriptions valides : ${seo.pages_missing_meta_desc}`, resolveStatus(seo.meta_kpi ?? { passed: isMetaPassed }));
     if (f1) findingsSeo.push(f1);
 
     const f2 = createFinding('seo', 'sitemap', 'Fichier Sitemap XML', seo.has_sitemap, `Sitemap ${seo.has_sitemap ? 'correctement référencé' : 'absent ou introuvable'}.`, resolveStatus(seo.sitemap_kpi ?? { passed: seo.has_sitemap }));
@@ -2286,7 +2880,7 @@ export function mapApiResponseToReport(
     maturityLevel: globalScoreVal > 75 ? 'Avancé' : 'En développement',
     riskLevel: globalScoreVal < 50 ? 'high' : 'low',
     axes,
-    strategicSummary: "La structure des KPI inclut dorénavant les 9 axes majeurs avec suivi du ratio de succès (KPIs validés / analysés).",
+    strategicSummary: "La structure des controles inclut les 9 axes majeurs avec suivi du ratio de succes entre controles conformes et controles analyses.",
     positivePoints: [],
     negativePoints: [],
     opportunities: [],

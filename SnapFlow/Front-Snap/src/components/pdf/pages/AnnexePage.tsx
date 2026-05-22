@@ -23,7 +23,7 @@ function findingStatus(status: string) {
 function findingBadgeLabel(finding: AuditFindingItem) {
   if (finding.status === 'pass') return 'OK';
   if (finding.status === 'not_available' || finding.status === 'not_measured' || finding.status === 'not_evaluated') return 'NON TESTÉ';
-  return finding.type === 'bug' ? 'ANOMALIE' : 'RECO';
+  return finding.type === 'bug' ? 'ANOMALIE' : 'ACTION';
 }
 
 function normalizeEvidenceEntry(value: string): string {
@@ -40,7 +40,18 @@ function normalizeEvidenceEntry(value: string): string {
     return 'Donnee structuree disponible dans la version interactive de l audit.';
   }
 
-  return normalized;
+  return normalized
+    .replace(/\bKPI\b/gi, 'indicateur')
+    .replace(/Largest Contentful Paint/gi, "temps d'affichage principal")
+    .replace(/\bLCP\b/g, "temps d'affichage principal")
+    .replace(/\bFCP\b/g, 'premier affichage visible')
+    .replace(/\bCLS\b/g, 'stabilite visuelle')
+    .replace(/\bCVE\b/gi, 'vulnerabilite connue')
+    .replace(/\bCMS\b/g, 'systeme de gestion du site')
+    .replace(/\bSSL\b/g, 'certificat de securite')
+    .replace(/\bRGPD\b/gi, 'protection des donnees')
+    .replace(/\bSEO\b/gi, 'referencement')
+    .replace(/\bJS\b/g, 'JavaScript');
 }
 
 function buildEvidenceList(finding: AuditFindingItem) {
@@ -51,10 +62,10 @@ function buildEvidenceList(finding: AuditFindingItem) {
   }
   if (!finding.page && finding.pageUrl) raw.push(`Page: ${finding.pageUrl}`);
   if (finding.impact) raw.push(`Impact: ${finding.impact}`);
-  if (typeof finding.affectedCount === 'number') raw.push(`Affecté: ${finding.affectedCount}`);
+  if (typeof finding.affectedCount === 'number') raw.push(`Pages ou elements a verifier: ${finding.affectedCount}`);
   if (Array.isArray(finding.evidence)) raw.push(...finding.evidence);
   if (Array.isArray(finding.annexes)) raw.push(...finding.annexes);
-  if (Array.isArray(finding.exampleUrls)) raw.push(...finding.exampleUrls.map((url) => `URL: ${url}`));
+  if (Array.isArray(finding.exampleUrls)) raw.push(...finding.exampleUrls.map((url) => `Page: ${url}`));
 
   const unique = Array.from(new Set(raw.map((item) => normalizeEvidenceEntry(item)).filter(Boolean)));
   return unique;
@@ -92,7 +103,7 @@ export function AnnexePage({ report, theme, clientLogoSrc }: AnnexePageProps) {
     <>
       {chunkPages.map((chunks, pageIndex) => (
         <Page key={`annexe-${pageIndex}`} size="A4" style={s.page}>
-          <PageHeader title="Annexes - preuves des KPI" siteName={report.siteName} theme={theme} siteLogoSrc={clientLogoSrc} />
+          <PageHeader title="Annexes - preuves des contrôles" siteName={report.siteName} theme={theme} siteLogoSrc={clientLogoSrc} />
 
           <View style={s.body}>
             {pageIndex === 0 ? <SectionTitle title="Preuves et localisation des anomalies" theme={theme} /> : null}

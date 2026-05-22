@@ -176,7 +176,7 @@ export function TabResume({ audit, isEditMode = false, onSelectAxis, onUpdateSum
                 <span className="font-mono font-bold text-primary">{recommendationCount}</span>
               </div>
               <div className="flex justify-between items-center text-sm">
-                <span className="text-muted-foreground">KPI validés</span>
+                <span className="text-muted-foreground">Contrôles conformes</span>
                 <span className="font-mono font-bold text-emerald-400">{passingCount}</span>
               </div>
               <div className="flex justify-between items-center text-sm">

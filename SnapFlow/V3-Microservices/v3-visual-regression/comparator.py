@@ -5,10 +5,20 @@ import base64
 import logging
 import httpx
 from playwright.async_api import async_playwright
+from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 from PIL import Image, ImageChops
 import psycopg2
 
 logger = logging.getLogger("visual-regression")
+
+_VALID_WAIT_UNTIL = {"commit", "domcontentloaded", "load", "networkidle"}
+
+
+def _normalize_wait_until(value: str | None, default: str = "domcontentloaded") -> str:
+    wait_until = (value or default or "domcontentloaded").strip().lower()
+    if wait_until not in _VALID_WAIT_UNTIL:
+        return default if default in _VALID_WAIT_UNTIL else "domcontentloaded"
+    return wait_until
 
 # ── Browser-pool integration ───────────────────────────────────────────────────
 # When BROWSER_POOL_URL is set, screenshot capture is delegated to the shared
@@ -29,6 +39,7 @@ async def _pool_screenshot(
     height: int,
     full_page: bool,
     timeout_ms: int,
+    wait_until: str,
 ) -> tuple[bytes, str] | None:
     """Call pool /screenshot and return (image_bytes, coverage_mode) or None on failure."""
     try:
@@ -41,6 +52,7 @@ async def _pool_screenshot(
                     "height":     height,
                     "full_page":  full_page,
                     "timeout_ms": timeout_ms,
+                    "wait_until": wait_until,
                 },
             )
         data = resp.json()
@@ -61,6 +73,7 @@ async def _pool_batch_screenshot(
     height: int,
     full_page: bool,
     timeout_ms: int,
+    wait_until: str,
 ) -> list[dict] | None:
     """Call pool /batch-screenshot and return list of result dicts, or None on failure."""
     try:
@@ -73,6 +86,7 @@ async def _pool_batch_screenshot(
                     "height":     height,
                     "full_page":  full_page,
                     "timeout_ms": timeout_ms,
+                    "wait_until": wait_until,
                     "max_pages":  len(urls),
                 },
             )
@@ -109,6 +123,9 @@ DB_URL = os.getenv(
 # [NEW] Page navigation timeout for screenshot capture.
 # Default 30s is hardcoded — now tunable via env var for slow-loading sites.
 SCREENSHOT_GOTO_TIMEOUT_MS = int(os.getenv("SCREENSHOT_GOTO_TIMEOUT_MS", "30000"))
+SCREENSHOT_WAIT_UNTIL = _normalize_wait_until(os.getenv("SCREENSHOT_WAIT_UNTIL", "domcontentloaded"))
+SCREENSHOT_SETTLE_MS = max(0, int(os.getenv("SCREENSHOT_SETTLE_MS", "1000")))
+SCREENSHOT_LOAD_STATE_TIMEOUT_MS = max(0, int(os.getenv("SCREENSHOT_LOAD_STATE_TIMEOUT_MS", "8000")))
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -131,6 +148,46 @@ def get_browser_args() -> list[str]:
     if chrome_no_sandbox_enabled():
         args.extend(["--no-sandbox", "--disable-gpu"])
     return args
+
+
+async def _wait_for_screenshot_ready(page, url: str, timeout_ms: int) -> bool:
+    """Navigate to a visually usable page state without requiring network quiet."""
+    logger.info(
+        "local screenshot navigation url=%s wait_until=%s timeout_ms=%d settle_ms=%d",
+        url,
+        SCREENSHOT_WAIT_UNTIL,
+        timeout_ms,
+        SCREENSHOT_SETTLE_MS,
+    )
+    try:
+        await page.goto(url, wait_until=SCREENSHOT_WAIT_UNTIL, timeout=timeout_ms)
+    except (asyncio.TimeoutError, PlaywrightTimeoutError) as exc:
+        raise TimeoutError(f"{SCREENSHOT_WAIT_UNTIL}_timeout after {timeout_ms} ms") from exc
+
+    load_state_timeout_ignored = False
+    if SCREENSHOT_WAIT_UNTIL != "load" and SCREENSHOT_LOAD_STATE_TIMEOUT_MS > 0:
+        try:
+            await page.wait_for_load_state("load", timeout=SCREENSHOT_LOAD_STATE_TIMEOUT_MS)
+        except (asyncio.TimeoutError, PlaywrightTimeoutError):
+            load_state_timeout_ignored = True
+            logger.info(
+                "local screenshot load-state timeout ignored url=%s final_url=%s timeout_ms=%d",
+                url,
+                page.url,
+                SCREENSHOT_LOAD_STATE_TIMEOUT_MS,
+            )
+
+    if SCREENSHOT_SETTLE_MS > 0:
+        await page.wait_for_timeout(SCREENSHOT_SETTLE_MS)
+
+    logger.info(
+        "local screenshot visual-ready url=%s final_url=%s wait_until=%s load_state_timeout_ignored=%s",
+        url,
+        page.url,
+        SCREENSHOT_WAIT_UNTIL,
+        load_state_timeout_ignored,
+    )
+    return load_state_timeout_ignored
 
 
 def get_db():
@@ -164,7 +221,8 @@ async def capture_screenshot(url: str, width: int = 1280, height: int = 800, bro
     # ── Pool fast-path ─────────────────────────────────────────────────────────
     if _pool_enabled():
         pool_result = await _pool_screenshot(url, width, height, full_page,
-                                             SCREENSHOT_GOTO_TIMEOUT_MS)
+                                             SCREENSHOT_GOTO_TIMEOUT_MS,
+                                             SCREENSHOT_WAIT_UNTIL)
         if pool_result is not None:
             img_bytes, _ = pool_result
             return img_bytes
@@ -175,37 +233,39 @@ async def capture_screenshot(url: str, width: int = 1280, height: int = 800, bro
         if launcher is None:
             raise ValueError(f"Unsupported browser engine: {browser_engine}")
         browser = await launcher.launch(args=get_browser_args())
-        page = await browser.new_page(viewport={"width": width, "height": height})
-        await page.goto(url, wait_until="networkidle", timeout=SCREENSHOT_GOTO_TIMEOUT_MS)
+        try:
+            page = await browser.new_page(viewport={"width": width, "height": height})
+            await _wait_for_screenshot_ready(page, url, SCREENSHOT_GOTO_TIMEOUT_MS)
 
-        if full_page:
-            # Probe the full scroll height before committing to a single capture.
-            scroll_height: int = await page.evaluate("document.documentElement.scrollHeight")
-            if scroll_height > 15000:
-                # Lazy / segmented capture: top, middle, bottom viewport bands.
-                segments: list[Image.Image] = []
-                positions = [0, max(0, scroll_height // 2 - height // 2), max(0, scroll_height - height)]
-                for y in positions:
-                    await page.evaluate(f"window.scrollTo(0, {y})")
-                    raw = await page.screenshot(full_page=False)
-                    segments.append(Image.open(io.BytesIO(raw)).convert("RGB"))
-                # Stack the three bands vertically into one image.
-                total_h = sum(s.height for s in segments)
-                stitched = Image.new("RGB", (segments[0].width, total_h))
-                cursor = 0
-                for seg in segments:
-                    stitched.paste(seg, (0, cursor))
-                    cursor += seg.height
-                buf = io.BytesIO()
-                stitched.save(buf, format="PNG")
-                screenshot = buf.getvalue()
+            if full_page:
+                # Probe the full scroll height before committing to a single capture.
+                scroll_height: int = await page.evaluate("document.documentElement.scrollHeight")
+                if scroll_height > 15000:
+                    # Lazy / segmented capture: top, middle, bottom viewport bands.
+                    segments: list[Image.Image] = []
+                    positions = [0, max(0, scroll_height // 2 - height // 2), max(0, scroll_height - height)]
+                    for y in positions:
+                        await page.evaluate(f"window.scrollTo(0, {y})")
+                        raw = await page.screenshot(full_page=False)
+                        segments.append(Image.open(io.BytesIO(raw)).convert("RGB"))
+                    # Stack the three bands vertically into one image.
+                    total_h = sum(s.height for s in segments)
+                    stitched = Image.new("RGB", (segments[0].width, total_h))
+                    cursor = 0
+                    for seg in segments:
+                        stitched.paste(seg, (0, cursor))
+                        cursor += seg.height
+                    buf = io.BytesIO()
+                    stitched.save(buf, format="PNG")
+                    screenshot = buf.getvalue()
+                else:
+                    screenshot = await page.screenshot(full_page=True)
             else:
-                screenshot = await page.screenshot(full_page=True)
-        else:
-            screenshot = await page.screenshot(full_page=False)
+                screenshot = await page.screenshot(full_page=False)
 
-        await browser.close()
-        return screenshot
+            return screenshot
+        finally:
+            await browser.close()
 
 
 async def capture_screenshots_batch(
@@ -228,7 +288,7 @@ async def capture_screenshots_batch(
     # ── Pool fast-path ─────────────────────────────────────────────────────────
     if _pool_enabled():
         pool_results = await _pool_batch_screenshot(
-            urls, width, height, full_page, SCREENSHOT_GOTO_TIMEOUT_MS
+            urls, width, height, full_page, SCREENSHOT_GOTO_TIMEOUT_MS, SCREENSHOT_WAIT_UNTIL
         )
         if pool_results is not None:
             return pool_results
@@ -249,7 +309,7 @@ async def capture_screenshots_batch(
                 async with semaphore:
                     page = await browser.new_page(viewport={"width": width, "height": height})
                     try:
-                        await page.goto(url, wait_until="networkidle", timeout=SCREENSHOT_GOTO_TIMEOUT_MS)
+                        await _wait_for_screenshot_ready(page, url, SCREENSHOT_GOTO_TIMEOUT_MS)
 
                         coverage_mode: str
                         if full_page:

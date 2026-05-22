@@ -119,7 +119,9 @@ export function WorkflowBuilder({ workflowId, isOperator }: WorkflowBuilderProps
   const formFillCount = workflow?.nodes.filter((node) => node.type === 'form_fill').length ?? 0;
 
   const isDraft = workflow?.status === 'draft';
-  const isPending = workflow?.status === 'pending';
+  const isNeedsReview = workflow?.status === 'needs_review';
+  const isEditable = isDraft || isNeedsReview;
+  const isPending = workflow?.status === 'pending' || isNeedsReview;
   const isApproved = workflow?.status === 'approved';
 
   if (isLoading || !workflow) {
@@ -137,7 +139,7 @@ export function WorkflowBuilder({ workflowId, isOperator }: WorkflowBuilderProps
         <div className="flex items-center gap-2 flex-wrap">
           <StatusBadge status={workflow.status} size="sm" />
 
-          {isDraft && formFillCount > 0 ? (
+          {isEditable && formFillCount > 0 ? (
             <Button variant="outline" size="sm" onClick={() => void suggestAll()} disabled={isSuggesting}>
               <Sparkles className="h-4 w-4 mr-1" />
               Suggérer tous les champs
@@ -183,6 +185,11 @@ export function WorkflowBuilder({ workflowId, isOperator }: WorkflowBuilderProps
       ) : null}
 
       {error ? <p className="px-5 py-2 text-xs text-destructive border-b border-border">{error}</p> : null}
+      {workflow.blocked_reason && workflow.status !== 'draft' ? (
+        <p className="px-5 py-2 text-xs text-amber-700 bg-amber-50 border-b border-amber-200 dark:bg-amber-950/20 dark:text-amber-300 dark:border-amber-900/40">
+          Verification requise: {workflow.blocked_reason}
+        </p>
+      ) : null}
 
       <div className="flex flex-1 min-h-0">
         <DetectionPanel
@@ -191,7 +198,7 @@ export function WorkflowBuilder({ workflowId, isOperator }: WorkflowBuilderProps
           selectedNodeId={selectedNodeId}
           onNodeSelect={setSelectedNodeId}
           onDetect={detect}
-          disabled={!isDraft}
+          disabled={!isEditable}
           isDetecting={isDetecting}
           errorMessage={error}
         />
@@ -214,13 +221,13 @@ export function WorkflowBuilder({ workflowId, isOperator }: WorkflowBuilderProps
           </ReactFlow>
         </div>
 
-        {selectedNode?.type === 'form_fill' && selectedNode.field && isDraft ? (
+        {selectedNode?.type === 'form_fill' && selectedNode.field && isEditable ? (
           <FieldConfigPanel
             field={selectedNode.field}
             onUpdate={updateFieldValue}
             onResuggest={suggestOne}
             isLoading={isSuggesting || isSaving}
-            isDisabled={!isDraft}
+            isDisabled={!isEditable}
           />
         ) : null}
       </div>

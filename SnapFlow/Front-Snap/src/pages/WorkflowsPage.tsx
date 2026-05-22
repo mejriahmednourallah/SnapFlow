@@ -55,7 +55,7 @@ const WorkflowsPage = () => {
           <p className="text-sm text-muted-foreground">Assistant IA + Flux de travail</p>
           <h2 className="text-lg font-semibold mt-1">Orchestrez vos actions en quelques clics</h2>
           <p className="text-sm text-muted-foreground mt-2 max-w-2xl">
-            Les workflows vous permettent d'enchaîner des actions automatiques: lancer un audit, suivre les KPI et notifier les équipes.
+            Les workflows enchainent des controles, validations et notifications internes sans canal mail pour cette phase.
           </p>
         </div>
         <Button onClick={() => navigate('/app/assistant')} className="w-full sm:w-auto">
@@ -78,6 +78,20 @@ const WorkflowsPage = () => {
             Ouvrir Form Tester
           </Button>
         </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-4 gap-3">
+        {[
+          ['Auto-detecter', 'Static HTML, rendu JS et confirmation Chromium recuperent les champs reels.'],
+          ['Valider', 'Captcha, login, paiement, upload ou booking passent en revue avant execution.'],
+          ['Executer', 'Les preuves finales viennent de Chromium: trace, URL finale, reseau et capture.'],
+          ['Notifier', 'Les alertes restent dans SnapFlow avec files de validation et resultats recents.'],
+        ].map(([title, text]) => (
+          <div key={title} className="rounded-lg border border-border bg-background/70 p-4">
+            <p className="text-sm font-semibold">{title}</p>
+            <p className="mt-2 text-xs text-muted-foreground leading-relaxed">{text}</p>
+          </div>
+        ))}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">

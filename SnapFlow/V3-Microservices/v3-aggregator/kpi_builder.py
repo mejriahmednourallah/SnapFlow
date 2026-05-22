@@ -1521,8 +1521,19 @@ def _build_curated_evidence_digest(kpi_id: str, kpi_name: str, status: str, evid
         product = _digest_str(evidence.get("detected_product"))
         version = _digest_str(evidence.get("detected_version"))
         support = _digest_str(evidence.get("support_status"))
+        detection_label = _digest_str(evidence.get("detection_label"))
+        if not detection_label:
+            if kpi_id == "tech_server_version":
+                detection_label = "Serveur détecté"
+            elif kpi_id == "tech_programming_language":
+                detection_label = "Langage détecté"
+            else:
+                detection_label = "Technologie détectée"
         source = ", ".join(_safe_list(evidence.get("detection_source")) or _contract_detection_sources(kpi_id))
-        _append_digest_line(lines, f"Technologie détectée: {product or 'non détectée'} {version or ''}".strip())
+        _append_digest_line(lines, f"{detection_label}: {product or 'non détecté'}".strip())
+        if version:
+            version_label = "Version serveur" if kpi_id == "tech_server_version" else "Version du langage" if kpi_id == "tech_programming_language" else "Version détectée"
+            _append_digest_line(lines, f"{version_label}: {version}")
         if support:
             _append_digest_line(lines, f"Statut de support: {support}")
         _append_digest_line(lines, f"Source de détection: {source}")
@@ -1530,7 +1541,8 @@ def _build_curated_evidence_digest(kpi_id: str, kpi_name: str, status: str, evid
     elif kpi_id == "tech_modules_versions":
         modules = _safe_list(data.get("modules") or data.get("module_versions"))
         rows = _unique_digest_rows([_safe_dict(row) for row in modules if isinstance(row, dict)])
-        _append_digest_line(lines, f"Modules avec version détectée: {len(rows)}")
+        module_count = max(len(rows), _safe_int(data.get("module_count")))
+        _append_digest_line(lines, f"Modules avec version détectée: {module_count}")
         if rows:
             _append_digest_line(lines, "Table des modules: nom, version et source disponibles.")
         elif status != "not_evaluated":
@@ -2620,19 +2632,30 @@ def _build_contract_evidence(kpi_id: str, kpi_obj: dict, pages_scanned: int, dom
         return evidence, data_quality, status_override, confidence_penalty
 
     if kpi_id == "tech_programming_language":
-        language = _clean_text(data.get("language"))
-        language_version = _clean_text(data.get("language_version"))
+        language = _clean_text(data.get("language") or data.get("programming_language"))
+        language_version = _clean_text(data.get("language_version") or data.get("programming_language_version"))
+        server_tech = _clean_text(data.get("server_tech"))
+        server_version = _clean_text(data.get("server_version"))
+        cms_name = _clean_text(data.get("cms_name"))
+        cms_version = _clean_text(data.get("cms_version"))
+        context_product = language or server_tech or cms_name
+        context_version = language_version if language else (server_version or cms_version)
         latest = _lookup_latest_version(language)
         evidence.update({
-            "detected_product": _value_or_missing(language, "Langage ou runtime non détecté"),
-            "detected_version": _value_or_missing(language_version, "Version du langage non détectée"),
+            "detected_product": _value_or_missing(context_product, "Langage ou runtime non détecté"),
+            "detected_version": _value_or_missing(context_version, "Version du langage non détectée"),
+            "detection_label": "Langage détecté" if language else "Serveur détecté" if server_tech else "Système de gestion détecté" if cms_name else "Langage détecté",
+            "detection_note": "Langage détecté directement par le scan" if language else "Langage non exposé directement; contexte technique partiel détecté",
             "support_status": _missing_field("Le statut de support du runtime n'est pas disponible dans cet agrégat"),
             "eol": _missing_field("La date de fin de support n'est pas disponible dans cet agrégat"),
             "latest_known_version": latest.get("latest_known_version") if latest else _missing_field("Aucune version de référence maintenue localement pour ce runtime"),
             "latest_version_source": latest.get("latest_version_source") if latest else _missing_field("Catalogue local absent pour ce runtime"),
             "comparison_result": _missing_field("Comparaison impossible sans version de référence fiable"),
         })
-        if not language:
+        if not language and context_product:
+            data_quality = "PARTIAL"
+            confidence_penalty = 1
+        elif not language:
             data_quality = "MISSING"
             confidence_penalty = 2
         elif not language_version:
@@ -3190,6 +3213,8 @@ def build_kpi_centric_report(report: dict) -> dict:
     tech_issues = _safe_list(cms_kpi.get("issues"))
     server_tech = str(cms_kpi.get("server_tech") or "").strip()
     server_version = str(cms_kpi.get("server_version") or "").strip()
+    cms_detected_name = str(cms_kpi.get("cms_detected") or "").strip()
+    cms_detected_version = str(cms_kpi.get("cms_version") or "").strip()
     programming_language = str(cms_kpi.get("language") or "").strip()
     programming_language_version = str(cms_kpi.get("language_version") or "").strip()
     cve_severity = _safe_dict(cms_kpi.get("cve_severity"))
@@ -3206,6 +3231,14 @@ def build_kpi_centric_report(report: dict) -> dict:
         else:
             programming_language_info = f"Langage détecté: {programming_language} (version non détectée)"
         programming_language_status = "passing"
+    elif server_tech:
+        version_text = f" {server_version}" if server_version else " (version serveur non détectée)"
+        programming_language_info = f"Langage non exposé directement; serveur détecté: {server_tech}{version_text}"
+        programming_language_status = "non_evalue"
+    elif cms_detected_name:
+        version_text = f" {cms_detected_version}" if cms_detected_version else " (version non détectée)"
+        programming_language_info = f"Langage non exposé directement; système de gestion détecté: {cms_detected_name}{version_text}"
+        programming_language_status = "non_evalue"
     else:
         programming_language_info = "Langage de programmation: Non détecté"
         programming_language_status = "non_evalue"
@@ -3277,14 +3310,18 @@ def build_kpi_centric_report(report: dict) -> dict:
         "Langage de Programmation": {
             "info": programming_language_info,
             "impact": "Identifier le langage/runtime aide a cibler les correctifs de securite et les upgrades de maintenance.",
-            "pages_affected": 1 if programming_language_status == "passing" else 0,
-            "pages_affected_urls": [report.get("domain", "")] if programming_language_status == "passing" else [],
+            "pages_affected": 1 if programming_language_status == "passing" or server_tech or cms_detected_name else 0,
+            "pages_affected_urls": [report.get("domain", "")] if programming_language_status == "passing" or server_tech or cms_detected_name else [],
             "status": programming_language_status,
             "type": None,
             "severity": None,
             "data": {
                 "language": cms_kpi.get("language"),
                 "language_version": cms_kpi.get("language_version"),
+                "server_tech": cms_kpi.get("server_tech"),
+                "server_version": cms_kpi.get("server_version"),
+                "cms_name": cms_kpi.get("cms_detected"),
+                "cms_version": cms_kpi.get("cms_version"),
             }
         },
         "Vérification du Code": {

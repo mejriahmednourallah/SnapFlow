@@ -1,5 +1,6 @@
 import logging
 import io
+import os
 from contextlib import asynccontextmanager
 from typing import Optional
 
@@ -30,6 +31,7 @@ logger = logging.getLogger("visual-regression")
 
 REGRESSION_THRESHOLD = 5.0  # percentage of changed pixels that signals a regression
 FUSED_REGRESSION_THRESHOLD = 0.22
+VISUAL_SCREENSHOT_MAX_CONCURRENCY = max(1, int(os.getenv("VISUAL_SCREENSHOT_MAX_CONCURRENCY", "10")))
 
 
 @asynccontextmanager
@@ -38,6 +40,7 @@ async def lifespan(app: FastAPI):
     logger.info("visual_screenshots table ready")
     logger.info("VISUAL_REGRESSION_ENABLED=%s", is_visual_regression_enabled())
     logger.info("CHROME_NO_SANDBOX=%s", chrome_no_sandbox_enabled())
+    logger.info("VISUAL_SCREENSHOT_MAX_CONCURRENCY=%s", VISUAL_SCREENSHOT_MAX_CONCURRENCY)
     yield
 
 
@@ -96,7 +99,11 @@ async def screenshot(req: ScreenshotRequest):
     full_page: bool = req.full_page if req.full_page is not None else True
     results = []
 
-    batch_results = await capture_screenshots_batch(urls, max_concurrency=3, full_page=full_page)
+    batch_results = await capture_screenshots_batch(
+        urls,
+        max_concurrency=VISUAL_SCREENSHOT_MAX_CONCURRENCY,
+        full_page=full_page,
+    )
     for item in batch_results:
         if item.get("status") == "ok":
             save_screenshot(req.scan_id, item["url"], item["screenshot"])

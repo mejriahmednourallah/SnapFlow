@@ -9,6 +9,8 @@
 //	                          Empty → pool disabled; all callers fall back to
 //	                          their local browser logic.
 //	BROWSER_POOL_TIMEOUT_MS   Per-request HTTP timeout (default 90 000 ms).
+//	ENABLE_OBSCURA_DISCOVERY Optional browser-pool setting; scanner consumes
+//	                          discovery data only, never execution proof.
 package browserpool
 
 import (
@@ -90,6 +92,47 @@ type ScreenshotResult struct {
 type BatchScreenshotResult struct {
 	Pages []ScreenshotResult `json:"pages"`
 	Total int                `json:"total"`
+}
+
+// DiscoverRenderedResult mirrors the /discover-rendered response body.
+type DiscoverRenderedField struct {
+	Name        string `json:"name"`
+	Type        string `json:"type"`
+	Label       string `json:"label"`
+	Selector    string `json:"selector"`
+	Placeholder string `json:"placeholder"`
+	Required    bool   `json:"required"`
+	Visible     bool   `json:"visible"`
+	Enabled     bool   `json:"enabled"`
+}
+
+type DiscoverRenderedForm struct {
+	Selector       string                  `json:"selector"`
+	Action         string                  `json:"action"`
+	Method         string                  `json:"method"`
+	Text           string                  `json:"text"`
+	Fields         []DiscoverRenderedField `json:"fields"`
+	SubmitSelector string                  `json:"submit_selector"`
+}
+
+type DiscoverRenderedResult struct {
+	Status            string                   `json:"status"`
+	URL               string                   `json:"url"`
+	Engine            string                   `json:"engine"`
+	FinalURL          string                   `json:"final_url"`
+	RenderedHTML      string                   `json:"rendered_html"`
+	VisibleText       string                   `json:"visible_text"`
+	Title             string                   `json:"title"`
+	Headings          []map[string]interface{} `json:"headings"`
+	InternalLinks     []string                 `json:"internal_links"`
+	ExternalLinks     []string                 `json:"external_links"`
+	Forms             []DiscoverRenderedForm   `json:"forms"`
+	Buttons           []map[string]interface{} `json:"buttons"`
+	RiskFlags         []string                 `json:"risk_flags"`
+	CandidateMessages []string                 `json:"candidate_messages"`
+	DetectionSources  []string                 `json:"detection_sources"`
+	Confidence        string                   `json:"confidence"`
+	Error             string                   `json:"error"`
 }
 
 // HealthResult mirrors the /health response body.
@@ -218,6 +261,25 @@ func BatchScreenshot(ctx context.Context, urls []string, width, height int, full
 		return nil, err
 	}
 	var r BatchScreenshotResult
+	return &r, json.Unmarshal(data, &r)
+}
+
+// DiscoverRendered extracts rendered text, forms, links and buttons without
+// submitting anything. Browser-pool may use Obscura for discovery behind a
+// feature flag, but this is not final runtime evidence.
+func DiscoverRendered(ctx context.Context, url string, allowedDomains []string, maxLinks int, extractForms bool, waitMS int) (*DiscoverRenderedResult, error) {
+	payload := map[string]interface{}{
+		"url":             url,
+		"allowed_domains": allowedDomains,
+		"max_links":       maxLinks,
+		"extract_forms":   extractForms,
+		"wait_ms":         waitMS,
+	}
+	data, err := post(ctx, "/discover-rendered", payload)
+	if err != nil {
+		return nil, err
+	}
+	var r DiscoverRenderedResult
 	return &r, json.Unmarshal(data, &r)
 }
 

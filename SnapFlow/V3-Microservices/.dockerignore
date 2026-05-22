@@ -1,0 +1,12 @@
+**/.pytest_cache/
+**/__pycache__/
+**/*.py[cod]
+**/.mypy_cache/
+**/.ruff_cache/
+**/.coverage
+**/htmlcov/
+**/.venv/
+**/venv/
+**/.gocache/
+**/node_modules/
+**/.docker-config/

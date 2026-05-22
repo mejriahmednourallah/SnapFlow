@@ -96,8 +96,15 @@ export function normalizeTargetUrl(raw: string): string {
   return `https://${value}`;
 }
 
-export type WorkflowStatus = 'draft' | 'pending' | 'approved' | 'executed';
+export type WorkflowStatus = 'draft' | 'needs_review' | 'pending' | 'approved' | 'executed' | 'blocked';
 
 export function isWorkflowStatus(value: string): value is WorkflowStatus {
-  return value === 'draft' || value === 'pending' || value === 'approved' || value === 'executed';
+  return (
+    value === 'draft' ||
+    value === 'needs_review' ||
+    value === 'pending' ||
+    value === 'approved' ||
+    value === 'executed' ||
+    value === 'blocked'
+  );
 }

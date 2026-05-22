@@ -46,7 +46,7 @@ export function KpiCard({ kpi }: KpiCardProps) {
         return (
           <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border text-emerald-400 bg-emerald-500/10 border-emerald-500/20">
             <CheckCircle className="w-3 h-3" />
-            <span>KPI validé</span>
+            <span>Validé</span>
           </span>
         );
       }
@@ -81,7 +81,7 @@ export function KpiCard({ kpi }: KpiCardProps) {
       return (
         <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border text-orange-400 bg-orange-500/10 border-orange-500/20">
           <ShieldAlert className="w-3 h-3" />
-          <span>RGPD</span>
+          <span>Protection des données</span>
         </span>
       );
     }
@@ -97,7 +97,7 @@ export function KpiCard({ kpi }: KpiCardProps) {
       return (
         <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border text-emerald-400 bg-emerald-500/10 border-emerald-500/20">
           <CheckCircle className="w-3 h-3" />
-          <span>KPI validé</span>
+          <span>Validé</span>
         </span>
       );
     }
@@ -139,12 +139,12 @@ export function KpiCard({ kpi }: KpiCardProps) {
         </div>
       )}
 
-      {proofLines.length > 0 && (
+      {/*
         <div className="p-3 rounded-md bg-muted/20 border border-border/20">
           <div className="flex items-center justify-between gap-2 mb-1.5">
-            <p className="text-xs font-semibold text-muted-foreground">Preuves cles</p>
+            <p className="text-xs font-semibold text-muted-foreground">Preuves clés</p>
             {hasEvidenceDetails && (
-              <EvidenceDetailsDialog finding={kpi} triggerLabel="Preuves detaillees" />
+              <EvidenceDetailsDialog finding={kpi} triggerLabel="Voir les preuves" />
             )}
           </div>
           <ul className="space-y-1">
@@ -155,6 +155,12 @@ export function KpiCard({ kpi }: KpiCardProps) {
               </li>
             ))}
           </ul>
+        </div>
+      */}
+
+      {hasEvidenceDetails && !isFailure && (
+        <div className="flex justify-end">
+          <EvidenceDetailsDialog finding={kpi} triggerLabel="Voir les preuves" />
         </div>
       )}
 
@@ -168,10 +174,10 @@ export function KpiCard({ kpi }: KpiCardProps) {
             >
               <ChevronDown className={`w-4 h-4 transition-transform ${showEvidence ? 'rotate-180' : ''}`} />
               <AlertCircle className="w-4 h-4" />
-              Preuves du contrôle ({kpi.evidence?.length ?? 0})
+              Preuves et contexte ({kpi.evidence?.length ?? 0})
             </button>
             {hasEvidenceDetails && (
-              <EvidenceDetailsDialog finding={kpi} triggerLabel="Preuves detaillees" />
+              <EvidenceDetailsDialog finding={kpi} triggerLabel="Voir les preuves" />
             )}
           </div>
 
@@ -205,7 +211,7 @@ export function KpiCard({ kpi }: KpiCardProps) {
 
               {hasEvidenceDetails && (
                 <p className="text-xs text-muted-foreground mt-3">
-                  Utilisez le bouton "Preuves detaillees" pour voir le resume, les URLs et les lignes structurees disponibles.
+                  Utilisez le bouton "Voir les preuves" pour consulter le résumé, les pages et les lignes structurées disponibles.
                 </p>
               )}
             </div>
@@ -245,11 +251,11 @@ export function KpiCard({ kpi }: KpiCardProps) {
         </div>
       )}
 
-      {/* Affected count badge */}
+      {/* Context count badge */}
       {hasUrls && (
         <div className="flex items-center gap-2">
           <span className="text-xs px-2 py-0.5 rounded-full border border-amber-500/20 bg-amber-500/10 text-amber-400">
-            {urlCount} élément{urlCount > 1 ? 's' : ''} concerné{urlCount > 1 ? 's' : ''}
+            {urlCount} page{urlCount > 1 ? 's' : ''} ou élément{urlCount > 1 ? 's' : ''} à vérifier
           </span>
         </div>
       )}

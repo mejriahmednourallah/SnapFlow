@@ -59,7 +59,7 @@ serve(async (req) => {
       .from('form_workflows')
       .update(updatePayload)
       .eq('id', workflowId)
-      .eq('status', 'pending')
+      .in('status', ['pending', 'needs_review'])
       .select('*')
       .maybeSingle();
 

@@ -87,17 +87,37 @@ function toSeverityStatus(score: number): SeverityStatus {
   return 'success';
 }
 
+function cleanPdfText(value: string | undefined): string {
+  return String(value ?? '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/\bKPIs\b/gi, 'indicateurs')
+    .replace(/\bKPI\b/gi, 'indicateur')
+    .replace(/Largest Contentful Paint/gi, "temps d'affichage principal")
+    .replace(/\bLCP\b/g, "temps d'affichage principal")
+    .replace(/\bFCP\b/g, 'premier affichage visible')
+    .replace(/\bCLS\b/g, 'stabilite visuelle')
+    .replace(/\bCVE\b/gi, 'vulnerabilite connue')
+    .replace(/\bCMS\b/g, 'systeme de gestion du site')
+    .replace(/\bSSL\b/g, 'certificat de securite')
+    .replace(/\bRGPD\b/gi, 'protection des donnees')
+    .replace(/\bSEO\b/gi, 'referencement')
+    .replace(/\bJS\b/g, 'JavaScript')
+    .replace(/KPI valide\.? Maintenir ce niveau de conformite\.?/gi, 'Controle conforme.')
+    .replace(/KPI validé\.? Maintenir ce niveau de conformité\.?/gi, 'Controle conforme.');
+}
+
 function toFindingItem(finding: SourceAuditFinding): AuditFindingItem {
-  const impact = finding.impact || finding.risk || finding.description;
-  const evidence = finding.evidenceSummary ?? finding.evidence ?? finding.annexes ?? [];
-  const annexes = finding.annexes ?? finding.evidenceSummary ?? [];
+  const impact = cleanPdfText(finding.impact || finding.risk || finding.description);
+  const evidence = (finding.evidenceSummary ?? finding.evidence ?? finding.annexes ?? []).map((line) => cleanPdfText(line)).filter(Boolean);
+  const annexes = (finding.annexes ?? finding.evidenceSummary ?? []).map((line) => cleanPdfText(line)).filter(Boolean);
   const page = finding.page || finding.pageUrl || '';
   const pageUrl = finding.pageUrl || finding.page || '';
   return {
     id: finding.id,
-    title: finding.title,
-    description: finding.description,
-    recommendation: finding.recommendation,
+    title: cleanPdfText(finding.title),
+    description: cleanPdfText(finding.description),
+    recommendation: cleanPdfText(finding.recommendation),
     impact,
     evidence,
     annexes,
