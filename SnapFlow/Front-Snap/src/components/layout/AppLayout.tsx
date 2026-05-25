@@ -11,7 +11,7 @@ import { LogOut } from 'lucide-react';
 import snapflowLogo from '@/assets/snapflow-logo.png';
 
 const AppLayout = () => {
-  const { user, loading, isAdmin, userRole, signOut } = useAuth();
+  const { user, loading, isAdmin, displayName, signOut } = useAuth();
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -37,7 +37,7 @@ const AppLayout = () => {
               <NotificationBell />
               <div className="h-5 w-px bg-border" />
               <span className="text-xs text-muted-foreground hidden sm:inline">
-                {user.email}
+                {displayName}
               </span>
               <span className="text-[10px] bg-primary/10 text-primary px-2 py-0.5 rounded-full font-medium hidden sm:inline">
                 {isAdmin ? 'Admin' : 'Chargé'}

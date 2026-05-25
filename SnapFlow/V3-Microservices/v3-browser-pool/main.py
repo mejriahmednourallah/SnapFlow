@@ -45,7 +45,11 @@ class RenderRequest(BaseModel):
     url:        str
     timeout_ms: Optional[int] = 30000
     # "load" | "domcontentloaded" | "networkidle" | "commit"
-    wait_until: Optional[str] = "networkidle"
+    wait_until: Optional[str] = "domcontentloaded"
+    # "chromium" | "obscura" | "auto"
+    engine: Optional[str] = "chromium"
+    allow_obscura_fallback: Optional[bool] = False
+    settle_ms: Optional[int] = 1000
 
 
 class ScreenshotRequest(BaseModel):
@@ -90,7 +94,10 @@ async def render(req: RenderRequest):
     result = await _pool.render(
         req.url,
         timeout_ms=req.timeout_ms,
-        wait_until=req.wait_until or "networkidle",
+        wait_until=req.wait_until or "domcontentloaded",
+        engine=req.engine or "chromium",
+        allow_obscura_fallback=bool(req.allow_obscura_fallback),
+        settle_ms=req.settle_ms if req.settle_ms is not None else 1000,
     )
     return {
         "status":        result.status,
@@ -115,6 +122,12 @@ async def render(req: RenderRequest):
         "console_error_count": result.console_error_count,
         "tracker_timeline": result.tracker_timeline or [],
         "cmp_banner": result.cmp_banner,
+        "render_engine": result.render_engine,
+        "fallback_engine": result.fallback_engine,
+        "estimated": result.estimated,
+        "confidence": result.confidence,
+        "wait_until": result.wait_until,
+        "attempts": result.attempts or [],
         "error":         result.error,
     }
 
@@ -145,6 +158,10 @@ async def discover_rendered(req: DiscoverRenderedRequest):
         "risk_flags": result.risk_flags or [],
         "candidate_messages": result.candidate_messages or [],
         "detection_sources": result.detection_sources or [],
+        "network_requests": result.network_requests or [],
+        "consent_banner": result.consent_banner,
+        "shadow_dom": result.shadow_dom,
+        "auth_wall": result.auth_wall,
         "confidence": result.confidence,
         "error": result.error,
     }

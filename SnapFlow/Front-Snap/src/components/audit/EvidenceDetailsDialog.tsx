@@ -32,8 +32,8 @@ function cleanLine(value: string): string {
     .replace(/\bCVE\b/gi, 'vulnerabilite connue')
     .replace(/\bCMS\b/g, 'systeme de gestion du site')
     .replace(/\bSSL\b/g, 'certificat de securite')
-    .replace(/\bRGPD\b/gi, 'protection des donnees')
-    .replace(/\bSEO\b/gi, 'referencement')
+    .replace(/\bRGPD\b/gi, 'protection des données')
+    .replace(/\bSEO\b/gi, 'SEO')
     .replace(/\bJS\b/g, 'JavaScript')
     .replace(/\banomalie\b/gi, 'signal')
     .replace(/\banomalies\b/gi, 'signaux');
@@ -44,6 +44,16 @@ function cleanColumnLabel(value: string): string {
     .replace(/_/g, ' ')
     .replace(/\burl\b/gi, 'adresse de page')
     .replace(/\bstatus code\b/gi, 'code de reponse')
+    .replace(/\bstatus\b/gi, 'statut')
+    .replace(/\bverification result\b/gi, 'resultat de verification')
+    .replace(/\bverification source\b/gi, 'source de verification')
+    .replace(/\blatest known version\b/gi, 'derniere version connue')
+    .replace(/\bminimum safe version\b/gi, 'version minimale securisee')
+    .replace(/\brisk\b/gi, 'risque')
+    .replace(/\brecommendation\b/gi, 'recommandation')
+    .replace(/\bmodule\b/gi, 'module')
+    .replace(/\bname\b/gi, 'nom')
+    .replace(/\bversion\b/gi, 'version')
     .replace(/\blcp ms\b/gi, "temps d'affichage principal")
     .replace(/\bfcp ms\b/gi, 'premier affichage visible')
     .replace(/\bcls\b/gi, 'stabilite visuelle')
@@ -51,11 +61,44 @@ function cleanColumnLabel(value: string): string {
 }
 
 function csvEscape(value: unknown): string {
-  const rendered = String(value ?? '').replace(/\r?\n/g, ' ').trim();
+  const rendered = renderEvidenceValue(value).replace(/\r?\n/g, ' ').trim();
   if (/[",;]/.test(rendered)) {
     return `"${rendered.replace(/"/g, '""')}"`;
   }
   return rendered;
+}
+
+function translateEvidenceValue(value: string): string {
+  return cleanLine(value)
+    .replace(/^missing$/i, 'manquant')
+    .replace(/^present$/i, 'present')
+    .replace(/^true$/i, 'oui')
+    .replace(/^false$/i, 'non')
+    .replace(/^non_verifie$/i, 'non verifie')
+    .replace(/^donnees_incompletes$/i, 'donnees incompletes')
+    .replace(/^a_verifier$/i, 'a verifier')
+    .replace(/^risque_confirme$/i, 'risque confirme')
+    .replace(/^verifie_conforme$/i, 'verifie conforme')
+    .replace(/^hybrid_offline_first$/i, 'hybride, catalogue local d abord')
+    .replace(/^non_configure$/i, 'non configure')
+    .replace(/^offline_module_catalog_2026_04$/i, 'catalogue local modules 2026-04');
+}
+
+function renderEvidenceValue(value: unknown): string {
+  if (value === null || value === undefined || value === '') return 'non renseigne';
+  if (typeof value === 'string') return translateEvidenceValue(value);
+  if (typeof value === 'number' || typeof value === 'boolean') return translateEvidenceValue(String(value));
+  if (Array.isArray(value)) {
+    const rendered = value.map(renderEvidenceValue).filter(Boolean);
+    return rendered.length ? rendered.join(', ') : 'non renseigne';
+  }
+  if (typeof value === 'object') {
+    const entries = Object.entries(value as Record<string, unknown>)
+      .filter(([, entryValue]) => entryValue !== null && entryValue !== undefined && entryValue !== '')
+      .map(([key, entryValue]) => `${cleanColumnLabel(key)}: ${renderEvidenceValue(entryValue)}`);
+    return entries.length ? entries.join(' | ') : 'non renseigne';
+  }
+  return translateEvidenceValue(String(value));
 }
 
 function downloadCsv(filename: string, columns: string[], rows: Record<string, unknown>[]) {
@@ -134,7 +177,7 @@ export function EvidenceDetailsDialog({
             <section className="grid grid-cols-3 gap-3">
               <div className="rounded-lg bg-muted/20 border border-border/30 p-3 text-center">
                 <p className="text-xs text-muted-foreground mb-1">Statut</p>
-                <span className={finding.kpiLabels.statut === 'Concluant' ? 'text-emerald-400 font-semibold' : finding.kpiLabels.statut === 'Non testé' ? 'text-yellow-400 font-semibold' : 'text-red-400 font-semibold'}>
+                <span className={finding.kpiLabels.statut === 'Concluant' ? 'text-emerald-400 font-semibold' : (finding.kpiLabels.statut === 'Non testé' || finding.kpiLabels.statut === 'À vérifier') ? 'text-yellow-400 font-semibold' : 'text-red-400 font-semibold'}>
                   {finding.kpiLabels.statut}
                 </span>
               </div>
@@ -197,7 +240,7 @@ export function EvidenceDetailsDialog({
                       <tr key={rowIndex} className="border-t border-border/30">
                         {csvColumns.map((column) => (
                           <td key={`${rowIndex}-${column}`} className="px-2 py-1.5 align-top break-words max-w-[260px]">
-                            {String(row[column] ?? '')}
+                            {renderEvidenceValue(row[column])}
                           </td>
                         ))}
                       </tr>

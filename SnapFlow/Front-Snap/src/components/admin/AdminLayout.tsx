@@ -16,7 +16,7 @@ const navItems = [
 ];
 
 const AdminLayout = () => {
-  const { user, loading, isAdmin, signOut } = useAuth();
+  const { user, loading, isAdmin, displayName, signOut } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -56,7 +56,7 @@ const AdminLayout = () => {
             </nav>
           </div>
           <div className="flex items-center gap-2">
-            <span className="text-xs text-muted-foreground mr-2">{user.email}</span>
+            <span className="text-xs text-muted-foreground mr-2">{displayName}</span>
             <Button variant="ghost" size="icon" onClick={() => { signOut(); navigate('/auth'); }} className="h-9 w-9">
               <LogOut className="w-4 h-4" />
             </Button>

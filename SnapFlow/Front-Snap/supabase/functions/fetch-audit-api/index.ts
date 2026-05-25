@@ -5,6 +5,24 @@ const corsHeaders = {
 
 const RETRYABLE_STATUS = new Set([408, 425, 429, 500, 502, 503, 504, 522, 524]);
 
+function isRedmineProjectUrl(value: string): boolean {
+  const raw = String(value || '').trim();
+  if (!raw) return false;
+  try {
+    const parsed = new URL(/^https?:\/\//i.test(raw) ? raw : `https://${raw}`);
+    const host = parsed.hostname.toLowerCase();
+    const path = parsed.pathname.toLowerCase();
+    const isKnownRedmineHost = host.includes('redmine') || host === 'maintenance.medianet.tn';
+    return isKnownRedmineHost && /^\/projects\/[^/]+(?:\/.*)?$/.test(path);
+  } catch {
+    const lowered = raw.toLowerCase();
+    return (
+      (lowered.includes('redmine') || lowered.includes('maintenance.medianet.tn')) &&
+      /\/projects\/[a-z0-9_-]+(?:\/.*)?$/.test(lowered)
+    );
+  }
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -48,6 +66,15 @@ Deno.serve(async (req) => {
 
     if (!url) {
       return new Response(JSON.stringify({ error: 'url is required' }), {
+        status: 400,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    if (isRedmineProjectUrl(String(url))) {
+      return new Response(JSON.stringify({
+        error: 'Refusing to audit a Redmine project URL. Use the client website URL instead.',
+      }), {
         status: 400,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });

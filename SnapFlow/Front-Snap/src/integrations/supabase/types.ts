@@ -155,21 +155,39 @@ export type Database = {
       }
       project_assignments: {
         Row: {
+          access_level: string
           assigned_at: string
           id: string
           project_id: string
+          redmine_group_ids: number[]
+          redmine_role_ids: number[]
+          redmine_role_names: string[]
+          redmine_synced_at: string | null
+          source: string
           user_id: string
         }
         Insert: {
+          access_level?: string
           assigned_at?: string
           id?: string
           project_id: string
+          redmine_group_ids?: number[]
+          redmine_role_ids?: number[]
+          redmine_role_names?: string[]
+          redmine_synced_at?: string | null
+          source?: string
           user_id: string
         }
         Update: {
+          access_level?: string
           assigned_at?: string
           id?: string
           project_id?: string
+          redmine_group_ids?: number[]
+          redmine_role_ids?: number[]
+          redmine_role_names?: string[]
+          redmine_synced_at?: string | null
+          source?: string
           user_id?: string
         }
         Relationships: [
@@ -184,28 +202,163 @@ export type Database = {
       }
       projects: {
         Row: {
+          audit_url_needs_review: boolean
           created_at: string
           id: string
           logo_url: string | null
+          redmine_identifier: string | null
           redmine_url: string | null
           site_name: string
           url: string
         }
         Insert: {
+          audit_url_needs_review?: boolean
           created_at?: string
           id?: string
           logo_url?: string | null
+          redmine_identifier?: string | null
           redmine_url?: string | null
           site_name: string
           url: string
         }
         Update: {
+          audit_url_needs_review?: boolean
           created_at?: string
           id?: string
           logo_url?: string | null
+          redmine_identifier?: string | null
           redmine_url?: string | null
           site_name?: string
           url?: string
+        }
+        Relationships: []
+      }
+      redmine_auth_events: {
+        Row: {
+          created_at: string
+          event_type: string
+          id: string
+          ip_hash: string
+          login_hash: string
+          reason: string | null
+          redmine_user_id: number | null
+          user_id: string | null
+        }
+        Insert: {
+          created_at?: string
+          event_type: string
+          id?: string
+          ip_hash: string
+          login_hash: string
+          reason?: string | null
+          redmine_user_id?: number | null
+          user_id?: string | null
+        }
+        Update: {
+          created_at?: string
+          event_type?: string
+          id?: string
+          ip_hash?: string
+          login_hash?: string
+          reason?: string | null
+          redmine_user_id?: number | null
+          user_id?: string | null
+        }
+        Relationships: []
+      }
+      redmine_login_attempts: {
+        Row: {
+          created_at: string
+          failure_reason: string | null
+          id: string
+          ip_hash: string
+          login_hash: string
+          success: boolean
+        }
+        Insert: {
+          created_at?: string
+          failure_reason?: string | null
+          id?: string
+          ip_hash: string
+          login_hash: string
+          success?: boolean
+        }
+        Update: {
+          created_at?: string
+          failure_reason?: string | null
+          id?: string
+          ip_hash?: string
+          login_hash?: string
+          success?: boolean
+        }
+        Relationships: []
+      }
+      redmine_role_mappings: {
+        Row: {
+          access_level: string
+          can_create_ticket: boolean
+          can_import: boolean
+          can_launch_audit: boolean
+          can_view_reports: boolean
+          created_at: string
+          redmine_role_id: number
+          redmine_role_name: string
+          updated_at: string
+        }
+        Insert: {
+          access_level?: string
+          can_create_ticket?: boolean
+          can_import?: boolean
+          can_launch_audit?: boolean
+          can_view_reports?: boolean
+          created_at?: string
+          redmine_role_id: number
+          redmine_role_name: string
+          updated_at?: string
+        }
+        Update: {
+          access_level?: string
+          can_create_ticket?: boolean
+          can_import?: boolean
+          can_launch_audit?: boolean
+          can_view_reports?: boolean
+          created_at?: string
+          redmine_role_id?: number
+          redmine_role_name?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      redmine_user_identities: {
+        Row: {
+          created_at: string
+          last_login_at: string | null
+          redmine_display_name: string | null
+          redmine_email: string | null
+          redmine_login: string
+          redmine_user_id: number
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          last_login_at?: string | null
+          redmine_display_name?: string | null
+          redmine_email?: string | null
+          redmine_login: string
+          redmine_user_id: number
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          last_login_at?: string | null
+          redmine_display_name?: string | null
+          redmine_email?: string | null
+          redmine_login?: string
+          redmine_user_id?: number
+          updated_at?: string
+          user_id?: string
         }
         Relationships: []
       }

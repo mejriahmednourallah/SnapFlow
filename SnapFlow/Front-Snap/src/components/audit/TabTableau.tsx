@@ -1,7 +1,7 @@
 import { getAxisScoreBreakdown, getRiskLevelFromScore, getScoreColor, getCriticalityLabel, getPriorityLabel, isNonTestedFinding, type Criticality, type FindingStatus, type FindingType, type FindingOrigin, type AuditReport } from '@/data/mockAuditData';
 import { useState } from 'react';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
-import { Bug, CheckCircle, FlaskConical, Lightbulb, ShieldAlert } from 'lucide-react';
+import { Bug, CheckCircle, FlaskConical, Lightbulb } from 'lucide-react';
 import { AxisIcon } from '@/components/audit/AxisIcon';
 
 interface TabTableauProps {
@@ -145,19 +145,21 @@ export function TabTableau({ audit }: TabTableauProps) {
                       <td className="p-3 text-center">
                         {(() => {
                           const origin: FindingOrigin | undefined = f.origin;
+                          if (f.kpiLabels?.statut === 'À vérifier')
+                            return <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border text-yellow-300 bg-yellow-500/10 border-yellow-500/20"><FlaskConical className="w-3 h-3" />À vérifier</span>;
                           if (isNonTestedFinding(f))
                             return <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border text-yellow-400 bg-yellow-500/10 border-yellow-500/20"><FlaskConical className="w-3 h-3" />Non testé</span>;
                           if (origin === 'passing_kpi' || f.status === 'pass')
                             return <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border text-emerald-400 bg-emerald-500/10 border-emerald-500/20"><CheckCircle className="w-3 h-3" />Validé</span>;
-                          if (origin === 'compliance' || origin === 'RGPD')
-                            return <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border text-orange-400 bg-orange-500/10 border-orange-500/20"><ShieldAlert className="w-3 h-3" />Protection des données</span>;
                           if (origin === 'bug' || f.type === 'bug')
                             return <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border text-red-400 bg-red-500/10 border-red-500/20"><Bug className="w-3 h-3" />Bug</span>;
                           return <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border text-blue-400 bg-blue-500/10 border-blue-500/20"><Lightbulb className="w-3 h-3" />Recommandation</span>;
                         })()}
                       </td>
                       <td className="p-3 text-center">
-                        <span className={`criticality-${f.criticality} px-2 py-0.5 rounded-full text-xs border`}>{getCriticalityLabel(f.criticality)}</span>
+                        {f.status === 'pass' || f.origin === 'passing_kpi'
+                          ? <span className="text-xs text-muted-foreground">—</span>
+                          : <span className={`criticality-${f.criticality} px-2 py-0.5 rounded-full text-xs border`}>{getCriticalityLabel(f.criticality)}</span>}
                       </td>
                       <td className="p-3 text-center">
                         <span className="text-xs">{f.status === 'pass' ? '—' : getPriorityLabel(f.priority)}</span>

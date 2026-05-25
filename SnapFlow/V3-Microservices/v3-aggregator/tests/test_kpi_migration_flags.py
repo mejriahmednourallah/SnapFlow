@@ -88,7 +88,7 @@ class TestKPINewModeEndpoints(unittest.TestCase):
                 },
             },
         }
-        main.build_report = lambda scan_id: report
+        main.build_report = lambda scan_id, **kwargs: report
         main.build_kpi_centric_report = lambda payload: dict(response)
         main._persist_kpi_payload = lambda scan_id, payload, scan_url=None: None
         main._load_persisted_kpi_payload = lambda scan_id: None
@@ -126,7 +126,7 @@ class TestKPINewModeEndpoints(unittest.TestCase):
         }
         main._load_persisted_kpi_payload = lambda scan_id: dict(cached)
 
-        def fail_build(_scan_id):
+        def fail_build(_scan_id, **kwargs):
             raise AssertionError("KPI endpoint should use persisted payload before rebuilding")
 
         main.build_report = fail_build

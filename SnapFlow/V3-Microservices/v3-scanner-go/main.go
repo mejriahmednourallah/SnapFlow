@@ -231,6 +231,79 @@ func sanitizeDomains(domains []string) []string {
 	return clean
 }
 
+func allowedDomainVariants(host string) []string {
+	host = sanitizeInputText(host)
+	if strings.Contains(host, "://") {
+		if parsed, err := url.Parse(host); err == nil {
+			host = parsed.Hostname()
+		}
+	} else if parsed, err := url.Parse("//" + host); err == nil && parsed.Hostname() != "" {
+		host = parsed.Hostname()
+	}
+	host = strings.ToLower(strings.Trim(host, " ."))
+	if host == "" {
+		return nil
+	}
+
+	base := strings.TrimPrefix(host, "www.")
+	variants := []string{base}
+	if host != base {
+		variants = append(variants, host)
+	} else if net.ParseIP(base) == nil && base != "localhost" {
+		variants = append(variants, "www."+base)
+	}
+	return variants
+}
+
+func isUnsafeRedirectScopeHost(host string) bool {
+	host = strings.ToLower(strings.Trim(host, " ."))
+	if host == "" || host == "localhost" || strings.HasSuffix(host, ".localhost") || strings.HasSuffix(host, ".local") {
+		return true
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.IsPrivate() || ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsMulticast() || ip.IsUnspecified()
+	}
+	return false
+}
+
+func expandAllowedDomainsForCanonicalRedirect(allowed []string, startURL string, finalURL string) ([]string, bool, string, string) {
+	if strings.TrimSpace(finalURL) == "" {
+		return allowed, false, "", ""
+	}
+	startParsed, startErr := url.Parse(startURL)
+	finalParsed, finalErr := url.Parse(finalURL)
+	if startErr != nil || finalErr != nil || finalParsed.Hostname() == "" {
+		return allowed, false, "", ""
+	}
+	if finalParsed.Scheme != "http" && finalParsed.Scheme != "https" {
+		return allowed, false, "", ""
+	}
+
+	startHost := strings.ToLower(startParsed.Hostname())
+	finalHost := strings.ToLower(finalParsed.Hostname())
+	if normalizeCrawlHost(startHost) == normalizeCrawlHost(finalHost) || isUnsafeRedirectScopeHost(finalHost) {
+		return allowed, false, startHost, finalHost
+	}
+
+	seen := map[string]bool{}
+	expanded := make([]string, 0, len(allowed)+2)
+	for _, domain := range allowed {
+		for _, variant := range allowedDomainVariants(domain) {
+			if !seen[variant] {
+				seen[variant] = true
+				expanded = append(expanded, variant)
+			}
+		}
+	}
+	for _, variant := range allowedDomainVariants(finalHost) {
+		if !seen[variant] {
+			seen[variant] = true
+			expanded = append(expanded, variant)
+		}
+	}
+	return expanded, len(expanded) != len(allowed), startHost, finalHost
+}
+
 func envBool(key string, defaultValue bool) bool {
 	v := strings.TrimSpace(strings.ToLower(os.Getenv(key)))
 	if v == "" {
@@ -397,6 +470,9 @@ const headlessPageCap = 100
 const minReliableContentHashConfidence = 0.45
 
 func evidenceProvenanceFromHeadless(hr performance.HeadlessResult) string {
+	if hr.FallbackEngine == "obscura" || hr.Estimated {
+		return "headless_fallback_obscura"
+	}
 	if strings.TrimSpace(hr.RenderedHTML) != "" {
 		return "mixed"
 	}
@@ -651,6 +727,7 @@ func startScan(ctx context.Context, config ScannerConfig) {
 	var sitemapProbe seo.HTTPProbeResult
 	var robotsTxtContent string
 	var htmlBody string
+	var prefetchFinalURL string
 	var domainHeaders *http.Header
 	var domainSecRes security.ScanResult
 	var domainTechRes tech.TechResult
@@ -687,6 +764,9 @@ func startScan(ctx context.Context, config ScannerConfig) {
 			return
 		}
 		defer resp.Body.Close()
+		if resp.Request != nil && resp.Request.URL != nil {
+			prefetchFinalURL = resp.Request.URL.String()
+		}
 		bodyBytes, _ := io.ReadAll(resp.Body)
 		htmlBody = string(bodyBytes)
 		domainHeaders = &resp.Header
@@ -709,6 +789,9 @@ func startScan(ctx context.Context, config ScannerConfig) {
 		}
 		if resp, err := insecureClient.Get(baseURL); err == nil {
 			defer resp.Body.Close()
+			if resp.Request != nil && resp.Request.URL != nil {
+				prefetchFinalURL = resp.Request.URL.String()
+			}
 			if bodyBytes, readErr := io.ReadAll(resp.Body); readErr == nil {
 				htmlBody = string(bodyBytes)
 				domainHeaders = &resp.Header
@@ -729,6 +812,10 @@ func startScan(ctx context.Context, config ScannerConfig) {
 
 	if domainHeaders == nil {
 		domainHeaders = &http.Header{}
+	}
+	if expandedDomains, expanded, fromHost, toHost := expandAllowedDomainsForCanonicalRedirect(config.AllowedDomains, config.StartURL, prefetchFinalURL); expanded {
+		config.AllowedDomains = expandedDomains
+		log.Printf("Canonical homepage redirect detected: %s -> %s; expanded crawl scope to %v", fromHost, toHost, config.AllowedDomains)
 	}
 
 	var analyzeWg sync.WaitGroup
@@ -844,6 +931,19 @@ func startScan(ctx context.Context, config ScannerConfig) {
 	var mu sync.Mutex
 	var dbWg sync.WaitGroup
 	var pageCount int32
+	var parallelDiscovery *browserpool.DiscoverRenderedResult
+	var parallelDiscoveryErr error
+	parallelDiscoveryDone := make(chan struct{})
+	if browserpool.IsEnabled() && envBool("ENABLE_OBSCURA_PARALLEL_DISCOVERY", true) {
+		go func() {
+			defer close(parallelDiscoveryDone)
+			maxRenderedLinks := envInt("OBSCURA_DISCOVERY_MAX_LINKS_PER_PAGE", 30)
+			renderedWaitMS := envInt("RENDERED_DISCOVERY_TIMEOUT_MS", 20000)
+			parallelDiscovery, parallelDiscoveryErr = browserpool.DiscoverRendered(ctx, config.StartURL, config.AllowedDomains, maxRenderedLinks, true, renderedWaitMS)
+		}()
+	} else {
+		close(parallelDiscoveryDone)
+	}
 	var crawlStopped int32 // Section 2.1: set to 1 when ctx deadline fires
 	contentHashes := map[string][]string{}
 
@@ -1320,6 +1420,68 @@ func startScan(ctx context.Context, config ScannerConfig) {
 			log.Printf("⚠ CF fallback: homepage DB insert failed: %v", err)
 		}
 	}
+	parallelDiscoveryApplied := false
+	applyParallelDiscovery := func(provenance string) bool {
+		if cfFallbackMode || parallelDiscoveryApplied {
+			return parallelDiscoveryApplied
+		}
+		if parallelDiscoveryErr != nil {
+			log.Printf("%s rendered discovery failed: %v", provenance, parallelDiscoveryErr)
+			return false
+		}
+		if parallelDiscovery == nil {
+			return false
+		}
+		if parallelDiscovery.Error != "" {
+			log.Printf("%s rendered discovery returned error: %s", provenance, parallelDiscovery.Error)
+			return false
+		}
+		renderedHTML := strings.TrimSpace(parallelDiscovery.RenderedHTML)
+		finalURL := strings.TrimSpace(parallelDiscovery.FinalURL)
+		if finalURL == "" {
+			finalURL = config.StartURL
+		}
+		if renderedHTML == "" {
+			return false
+		}
+		renderedSEO := seo.Analyze(finalURL, renderedHTML, hasSitemap, hasRobots)
+		renderedUX := ux.Analyze(finalURL, renderedHTML, baseURL)
+		for _, f := range formfuzzer.ExtractForms(finalURL, renderedHTML) {
+			formKey := f.PageURL + "|" + f.FormID + "|" + f.ActionURL
+			if seenDiscoveredForms[formKey] {
+				continue
+			}
+			seenDiscoveredForms[formKey] = true
+			discoveredForms = append(discoveredForms, f)
+		}
+		if err := db.UpdatePageHTML(scanID, finalURL, renderedHTML); err != nil {
+			log.Printf("%s rendered discovery UpdatePageHTML failed for %s: %v", provenance, finalURL, err)
+		}
+		if err := db.MergePageMetrics(scanID, finalURL, map[string]interface{}{
+			"seo":                 renderedSEO,
+			"ux":                  renderedUX,
+			"rendered_discovery":  parallelDiscovery,
+			"evidence_provenance": provenance + "_rendered_discovery",
+			"html_source":         provenance + "_rendered_discovery",
+		}); err != nil {
+			log.Printf("%s rendered discovery MergePageMetrics failed for %s: %v", provenance, finalURL, err)
+		}
+		parallelDiscoveryApplied = true
+		log.Printf("%s rendered discovery enriched homepage with %d link(s), %d form(s), engine=%s",
+			provenance, len(parallelDiscovery.InternalLinks), len(parallelDiscovery.Forms), parallelDiscovery.Engine)
+		return true
+	}
+
+	parallelDiscoveryReady := false
+	select {
+	case <-parallelDiscoveryDone:
+		parallelDiscoveryReady = true
+	case <-time.After(time.Duration(envInt("OBSCURA_PARALLEL_DISCOVERY_JOIN_MS", 1500)) * time.Millisecond):
+		log.Printf("Rendered discovery still running after crawl join budget; continuing without parallel artifact")
+	}
+	if parallelDiscoveryReady {
+		applyParallelDiscovery("parallel")
+	}
 	if cfFallbackMode && browserpool.IsEnabled() {
 		maxRenderedPages := envInt("RENDERED_DISCOVERY_MAX_PAGES", 8)
 		maxRenderedLinks := envInt("RENDERED_DISCOVERY_MAX_LINKS", 30)
@@ -1430,6 +1592,16 @@ func startScan(ctx context.Context, config ScannerConfig) {
 	if cfFallbackMode && atomic.LoadInt32(&pageCount) == 0 && len(allSEOResults) > 0 {
 		atomic.StoreInt32(&pageCount, int32(len(allSEOResults)))
 	}
+	if !parallelDiscoveryReady && !parallelDiscoveryApplied && !cfFallbackMode {
+		lateJoinMS := envInt("OBSCURA_PARALLEL_DISCOVERY_LATE_JOIN_MS", 8000)
+		select {
+		case <-parallelDiscoveryDone:
+			parallelDiscoveryReady = true
+			applyParallelDiscovery("late_parallel")
+		case <-time.After(time.Duration(lateJoinMS) * time.Millisecond):
+			log.Printf("Rendered discovery still running after late join budget; modal discovery will use its own tolerant render path")
+		}
+	}
 
 	formFuzzerSummary := formfuzzer.Summary{
 		Enabled:         formFuzzerCfg.Enabled,
@@ -1447,19 +1619,19 @@ func startScan(ctx context.Context, config ScannerConfig) {
 
 		if browserTimeout > 0 {
 			if browserpool.IsEnabled() {
-				log.Printf("No HTTP forms found with Cloudflare challenge markers, trying browser-pool render fallback...")
+				log.Printf("No HTTP forms found with Cloudflare challenge markers, trying browser-pool rendered discovery fallback...")
 				timeoutMS := int(browserTimeout.Milliseconds())
-				renderResult, renderErr := browserpool.Render(ctx, config.StartURL, timeoutMS, "networkidle")
+				discovery, renderErr := browserpool.DiscoverRendered(ctx, config.StartURL, config.AllowedDomains, 8, true, timeoutMS)
 				if renderErr != nil {
-					log.Printf("⚠ Browser-pool render fallback failed: %v", renderErr)
-				} else if renderResult.Error != "" {
-					log.Printf("⚠ Browser-pool render returned error: %s", renderResult.Error)
+					log.Printf("⚠ Browser-pool rendered discovery fallback failed: %v", renderErr)
+				} else if discovery.Error != "" {
+					log.Printf("⚠ Browser-pool rendered discovery returned error: %s", discovery.Error)
 				} else {
-					finalURL := renderResult.FinalURL
+					finalURL := discovery.FinalURL
 					if finalURL == "" {
 						finalURL = config.StartURL
 					}
-					fallbackForms, parseErr := formbrowser.AnalyzeFromHTML(ctx, finalURL, renderResult.RenderedHTML, formbrowser.Config{
+					fallbackForms, parseErr := formbrowser.AnalyzeFromHTML(ctx, finalURL, discovery.RenderedHTML, formbrowser.Config{
 						MaxForms: formBrowserCfg.MaxForms,
 					})
 					if parseErr != nil {
@@ -1731,25 +1903,26 @@ func startScan(ctx context.Context, config ScannerConfig) {
 			if browserTimeout > 0 && ctx.Err() == nil {
 				var modalForms []formfuzzer.DiscoveredForm
 
-				if browserpool.IsEnabled() {
-					// Pool path: render the page with networkidle and parse any forms
-					// that are visible after JS execution (auto-open modals, lazy content).
-					// Click-triggered modals require a future /render-with-clicks pool
-					// endpoint; until then they are discovered by the NLP/visual worker.
-					log.Printf("🔍 Browser-pool modal/JS form discovery (networkidle render)...")
+				if parallelDiscoveryApplied {
+					log.Printf("🔍 Modal/JS form discovery reused parallel rendered discovery artifact.")
+				} else if browserpool.IsEnabled() {
+					// Pool path: use tolerant rendered discovery and parse forms visible
+					// after JavaScript execution. Click-triggered modal fuzzing remains
+					// on the dedicated form browser path.
+					log.Printf("🔍 Browser-pool modal/JS form discovery (rendered discovery)...")
 					timeoutMS := int(browserTimeout.Milliseconds())
-					renderResult, renderErr := browserpool.Render(ctx, config.StartURL, timeoutMS, "networkidle")
+					discovery, renderErr := browserpool.DiscoverRendered(ctx, config.StartURL, config.AllowedDomains, 8, true, timeoutMS)
 					if renderErr != nil {
-						log.Printf("⚠ Browser-pool modal render failed: %v", renderErr)
-					} else if renderResult.Error != "" {
-						log.Printf("⚠ Browser-pool modal render returned error: %s", renderResult.Error)
+						log.Printf("⚠ Browser-pool modal rendered discovery failed: %v", renderErr)
+					} else if discovery.Error != "" {
+						log.Printf("⚠ Browser-pool modal rendered discovery returned error: %s", discovery.Error)
 					} else {
-						finalURL := renderResult.FinalURL
+						finalURL := discovery.FinalURL
 						if finalURL == "" {
 							finalURL = config.StartURL
 						}
 						cap := formFuzzerCfg.MaxForms - len(discoveredForms)
-						parsed, parseErr := formbrowser.AnalyzeFromHTML(ctx, finalURL, renderResult.RenderedHTML, formbrowser.Config{
+						parsed, parseErr := formbrowser.AnalyzeFromHTML(ctx, finalURL, discovery.RenderedHTML, formbrowser.Config{
 							MaxForms: cap,
 						})
 						if parseErr != nil {
@@ -1917,22 +2090,44 @@ func startScan(ctx context.Context, config ScannerConfig) {
 	// Run headless browser analysis on sampled pages
 	headlessStart := time.Now()
 	headlessCtxExpiredBefore := ctx.Err() != nil
-	headlessResults := performance.RunHeadlessPool(sampleURLs, config.HeadlessConcurrency)
-	headlessMS := time.Since(headlessStart).Milliseconds()
-	if !headlessCtxExpiredBefore && ctx.Err() != nil {
-		setStopReason("headless_overrun")
-	}
 
 	// Phase H (Issue 3): Mobile performance trace on up to 3 representative pages.
 	// 1. Homepage  2. Most-linked internal page  3. A leaf page (no outgoing internal links)
 	mobileTestURLs := selectMobileTestPages(allSEOResults, config.StartURL)
 	fmt.Printf("Running mobile performance trace on %d representative page(s)…\n", len(mobileTestURLs))
 
+	type headlessRun struct {
+		results    []performance.HeadlessResult
+		durationMS int64
+	}
 	type mobileEntry struct {
 		url    string
 		result performance.MobilePerformanceResult
 	}
-	mobileRawResults := performance.RunMobileTraces(mobileTestURLs)
+
+	headlessCh := make(chan headlessRun, 1)
+	mobileCh := make(chan []performance.MobilePerformanceResult, 1)
+	go func() {
+		start := time.Now()
+		headlessCh <- headlessRun{
+			results:    performance.RunHeadlessPool(sampleURLs, config.HeadlessConcurrency),
+			durationMS: time.Since(start).Milliseconds(),
+		}
+	}()
+	go func() {
+		mobileCh <- performance.RunMobileTraces(mobileTestURLs)
+	}()
+
+	headlessRunResult := <-headlessCh
+	headlessResults := headlessRunResult.results
+	headlessMS := headlessRunResult.durationMS
+	if headlessMS == 0 {
+		headlessMS = time.Since(headlessStart).Milliseconds()
+	}
+	if !headlessCtxExpiredBefore && ctx.Err() != nil {
+		setStopReason("headless_overrun")
+	}
+	mobileRawResults := <-mobileCh
 	mobileEntries := make([]mobileEntry, 0, len(mobileTestURLs))
 	for i, mURL := range mobileTestURLs {
 		mobileEntries = append(mobileEntries, mobileEntry{url: mURL, result: mobileRawResults[i]})

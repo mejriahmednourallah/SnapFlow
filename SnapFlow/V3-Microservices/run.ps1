@@ -9,6 +9,8 @@
     If set, tears down the stack and removes volumes before starting
 .PARAMETER RebuildBase
     Explicitly rebuilds shared Python base images. Combine with -NoCacheBuild for a cacheless base rebuild.
+.PARAMETER NoObscura
+    Disables Obscura rendered discovery. Obscura is enabled by default for form discovery.
 .EXAMPLE
     .\run.ps1 -NoCacheBuild
 .EXAMPLE
@@ -18,7 +20,8 @@
 param(
     [switch]$NoCacheBuild,
     [switch]$Down,
-    [switch]$RebuildBase
+    [switch]$RebuildBase,
+    [switch]$NoObscura
 )
 
 Set-StrictMode -Version Latest
@@ -29,6 +32,12 @@ Push-Location $scriptDir
 
 $totalSteps = if ($Down) { 4 } else { 3 }
 $step = 1
+$obscuraEnabled = -not $NoObscura
+$composeArgs = @()
+if ($obscuraEnabled) {
+    $env:ENABLE_OBSCURA_DISCOVERY = "true"
+    $composeArgs += @("--profile", "obscura")
+}
 
 # ─── Banner ───────────────────────────────────────────────────────────────────
 Write-Host ""
@@ -37,12 +46,13 @@ Write-Host "   SnapFlow V3 Backend Launcher           " -ForegroundColor Cyan
 Write-Host "==========================================" -ForegroundColor Cyan
 Write-Host "  No-Cache Build:     $NoCacheBuild"        -ForegroundColor White
 Write-Host "  Rebuild Base:       $RebuildBase"         -ForegroundColor White
+Write-Host "  Obscura:            $obscuraEnabled"      -ForegroundColor White
 Write-Host "==========================================`n" -ForegroundColor Cyan
 
 # ─── Tear Down (optional) ─────────────────────────────────────────────────────
 if ($Down) {
     Write-Host "`n[$step/$totalSteps] Tearing down existing stack..." -ForegroundColor Yellow
-    docker compose down --volumes --remove-orphans
+    docker compose @composeArgs down --volumes --remove-orphans
     Write-Host "Stack torn down." -ForegroundColor Green
     $step++
 }
@@ -74,11 +84,11 @@ Write-Host "`n[$step/$totalSteps] Building Docker images..." -ForegroundColor Ye
 if ($NoCacheBuild) {
     # Do not pass --pull here: service Dockerfiles depend on local snapflow
     # base images and --pull forces Docker Hub lookups for local-only tags.
-    Write-Host "Command: docker compose build --progress=plain --no-cache" -ForegroundColor DarkGray
-    docker compose build --progress=plain --no-cache
+    Write-Host "Command: docker compose $($composeArgs -join ' ') build --progress=plain --no-cache" -ForegroundColor DarkGray
+    docker compose @composeArgs build --progress=plain --no-cache
 } else {
-    Write-Host "Command: docker compose build --progress=plain" -ForegroundColor DarkGray
-    docker compose build --progress=plain
+    Write-Host "Command: docker compose $($composeArgs -join ' ') build --progress=plain" -ForegroundColor DarkGray
+    docker compose @composeArgs build --progress=plain
 }
 
 if ($LASTEXITCODE -ne 0) {
@@ -90,7 +100,7 @@ $step++
 
 # ─── Start DB + Workers ──────────────────────────────────────────────────────
 Write-Host "`n[$step/$totalSteps] Starting full backend stack..." -ForegroundColor Yellow
-docker compose up -d
+docker compose @composeArgs up -d
 
 Write-Host "`n✅ Backend Stack is running!" -ForegroundColor Green
 Write-Host "   Aggregator API: http://localhost:8080" -ForegroundColor Cyan

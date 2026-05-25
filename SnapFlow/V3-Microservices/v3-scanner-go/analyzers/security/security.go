@@ -1291,7 +1291,8 @@ var sensitiveSegments = map[string]bool{
 	"wp-admin": true, "wp-login": true, "cpanel": true, "webmail": true,
 }
 
-// errorIndicators: patterns that indicate information disclosure in error pages
+// errorIndicators: patterns that indicate information disclosure in error pages.
+// All patterns are matched case-insensitively against the error page body.
 var errorIndicators = []string{
 	"Exception thrown", "Stack trace", "at line", "Fatal error",
 	"Warning:", "Notice:", "Parse error", "Deprecated:",
@@ -1300,6 +1301,27 @@ var errorIndicators = []string{
 	"SQL error", "mysql_error", "SQLSTATE", "ORA-",
 	"Error: database", "Error: connection", "database connection",
 	"config path", "file path", "/home/", "/var/", "/opt/",
+}
+
+// strongErrorIndicators: patterns that ALWAYS indicate a real information leak
+// (file paths, stack traces, SQL errors, language-specific tracebacks).
+// A single match from this list is sufficient to flag the error page as leaking.
+var strongErrorIndicators = []string{
+	"Stack trace", "at line",
+	"Class not found", "Method not found", "File not found",
+	"java.lang", "python", "traceback", "Traceback",
+	"SQL error", "mysql_error", "SQLSTATE", "ORA-",
+	"Error: database", "Error: connection", "database connection",
+	"config path", "file path", "/home/", "/var/", "/opt/",
+}
+
+// weakErrorIndicators: PHP runtime message prefixes that may appear in normal
+// error pages without constituting a genuine information leak. These only count
+// toward a fail status when at least 2 different weak indicators match, OR when
+// any strong indicator also matches.
+var weakErrorIndicators = []string{
+	"Exception thrown", "Fatal error",
+	"Warning:", "Notice:", "Parse error", "Deprecated:",
 }
 
 func isStandardCMSRobotsDisallow(path string) bool {
@@ -1408,12 +1430,32 @@ func checkCustomErrorPageLeak(targetURL string) ErrorPageLeakResult {
 	bodyStr := string(bodyBytes)
 	bodyLower := strings.ToLower(bodyStr)
 
-	// Check for error indicators
+	// Collect ALL matching indicators (for reporting/evidence)
+	strongMatches := 0
+	weakMatches := 0
 	for _, indicator := range errorIndicators {
 		if strings.Contains(bodyLower, strings.ToLower(indicator)) {
 			leakIndicators = append(leakIndicators, indicator)
-			status = "fail"
 		}
+	}
+
+	// Classify matches: strong = real leak, weak = PHP runtime prefix
+	for _, indicator := range strongErrorIndicators {
+		if strings.Contains(bodyLower, strings.ToLower(indicator)) {
+			strongMatches++
+		}
+	}
+	for _, indicator := range weakErrorIndicators {
+		if strings.Contains(bodyLower, strings.ToLower(indicator)) {
+			weakMatches++
+		}
+	}
+
+	// Only flag as fail if:
+	// - At least 1 strong indicator (real file paths, stack traces, SQL errors), OR
+	// - At least 2 different weak indicators (PHP runtime prefixes alone are not enough)
+	if strongMatches >= 1 || weakMatches >= 2 {
+		status = "fail"
 	}
 
 	return ErrorPageLeakResult{

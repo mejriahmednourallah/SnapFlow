@@ -253,6 +253,42 @@ class TestFormFuzzerKPIInBuildReport(unittest.TestCase):
         self.assertEqual(content_metrics["pages_thin_content_nlp"], 1)
         self.assertEqual(content_metrics["nlp_not_evaluated_pages"], 1)
 
+    def test_cookie_consent_prechecked_toggles_are_normalized(self):
+        row = self._minimal_page_row()
+        row["metrics"]["rendered_discovery"] = {
+            "consent_banner": {
+                "selector": "#cookie-banner",
+                "visible": True,
+                "text": "Cookie consent banner",
+                "has_accept": True,
+                "has_reject": True,
+                "has_manage": True,
+                "reject_symmetry": True,
+                "prechecked_toggles": "2",
+                "source": "rendered_discovery",
+            },
+            "network_requests": [],
+        }
+
+        page_rows = [row]
+        summary_row = self._minimal_summary_row(None)
+
+        main.get_db = lambda: _FakeConn(page_rows, summary_row)
+        main._load_form_fuzzer_table_stats = lambda cur, scan_id: {
+            "forms_tested": 0,
+            "tests_run": 0,
+            "anomalies_count": 0,
+            "anomalies_by_type": {},
+            "top_findings": [],
+            "top_affected": [],
+        }
+
+        report = main.build_report("scan_form_fuzzer")
+        consent = report["domain_analysis"]["privacy"]["cookie_consent"]
+
+        self.assertEqual(consent["prechecked_toggles"], 2)
+        self.assertEqual(consent["rows"][0]["prechecked_toggles"], 2)
+
 
 class TestMultiBrowserFallback(unittest.TestCase):
     def test_http_user_agent_fallback_when_browser_service_fails(self):

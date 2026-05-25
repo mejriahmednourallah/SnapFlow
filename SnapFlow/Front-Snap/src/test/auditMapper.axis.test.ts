@@ -273,10 +273,11 @@ describe('Axis Mapping', () => {
       const nonTested = techAxis?.findings.filter((finding) => finding.origin === 'coverage') ?? [];
 
       expect(techAxis?.findings).toHaveLength(5);
-      expect(breakdown.x).toBe(3);
+      expect(breakdown.x).toBe(1);
       expect(breakdown.y).toBe(5);
-      expect(nonTested).toHaveLength(2);
-      expect(nonTested.every((finding) => finding.kpiLabels?.statut === 'Non testé')).toBe(true);
+      expect(nonTested).toHaveLength(4);
+      expect(nonTested.filter((finding) => finding.kpiLabels?.statut === 'À vérifier')).toHaveLength(2);
+      expect(nonTested.filter((finding) => finding.kpiLabels?.statut === 'Non testé')).toHaveLength(2);
       expect(nonTested.every((finding) => finding.kpiLabels?.typeLabel === 'Indéterminé')).toBe(true);
       expect(report.bugs.some((item) => item.source_kpi === 'tech_cve_check')).toBe(false);
       expect(report.recommendations.some((item) => item.source_kpi === 'tech_programming_language')).toBe(false);
@@ -398,7 +399,7 @@ describe('Axis Mapping', () => {
 
       const securityFindings = report.axes.find((axis) => axis.id === 'security')?.findings ?? [];
 
-      expect(securityFindings.filter((finding) => finding.title === 'Certificat de securite')).toHaveLength(1);
+      expect(securityFindings.filter((finding) => finding.title === 'Certificat de sécurité')).toHaveLength(1);
     });
   });
 
@@ -659,7 +660,7 @@ describe('Axis Mapping', () => {
 
       const finding = report.axes.find((axis) => axis.id === 'technique')?.findings[0];
 
-      expect(finding?.title).toBe('Version serveur et langage');
+      expect(finding?.title).toBe('Version serveur');
       expect(finding?.description).toContain('serveur Apache');
       expect(finding?.recommendation).toContain('Verifier la configuration du serveur');
       expect(finding?.impact).not.toBe(finding?.risk);
@@ -704,7 +705,7 @@ describe('Axis Mapping', () => {
 
       const finding = report.axes.find((axis) => axis.id === 'technique')?.findings[0];
 
-      expect(finding?.title).toBe('Langage de programmation');
+      expect(finding?.title).toBe('Version du langage de programmation');
       expect(finding?.description).toContain('serveur Apache');
       expect(finding?.description).toContain('2.4');
       expect(finding?.evidenceSummary).toContain('Serveur detecte : Apache');
@@ -712,7 +713,7 @@ describe('Axis Mapping', () => {
       expect((finding?.evidenceSummary ?? []).some((line) => /Source de detection|scanner_aggregation|stack_fingerprint/i.test(line))).toBe(false);
     });
 
-    it('shows module version count as readable main text', () => {
+    it('shows unverified module versions as to-review, not validated', () => {
       const api: ApiResponse = {
         scan_id: 'test-scan-module-version-copy',
         domain: 'https://example.com',
@@ -746,9 +747,47 @@ describe('Axis Mapping', () => {
       const finding = report.axes.find((axis) => axis.id === 'technique')?.findings[0];
 
       expect(finding?.title).toBe('Version des modules');
+      expect(finding?.status).toBe('not_evaluated');
+      expect(finding?.kpiLabels?.statut).toBe('À vérifier');
       expect(finding?.description).toContain('3 modules');
       expect(finding?.description).toContain('version exploitable');
+      expect(finding?.recommendation).not.toContain('Controle conforme');
       expect(finding?.evidenceSummary).toContain('Modules avec version detectee : 3');
+    });
+
+    it('uses specific privacy KPI titles instead of repeating the axis label', () => {
+      const api: ApiResponse = {
+        scan_id: 'test-scan-privacy-title-copy',
+        domain: 'https://example.com',
+        report_version: 'v2',
+        axes: {
+          RGPD: {
+            consent: {
+              kpi_id: 'rgpd_cookie_consent',
+              type: 'compliance',
+              status: 'failing',
+              severity: 'high',
+              name: 'C) Protection des donnees',
+              constat: 'Aucun bouton de refus clair.',
+              evidence_digest: {
+                quality: 'VALID',
+                proof_lines: ['Banniere visible sans refus symetrique.'],
+              },
+            },
+          },
+        },
+      };
+
+      const report = mapApiResponseToReport(api, 'audit-privacy-title-copy', {
+        url: 'https://example.com',
+        site_name: 'Test Site',
+      });
+
+      const finding = report.axes.find((axis) => axis.id === 'rgpd')?.findings[0];
+
+      expect(finding?.title).toBe('Gestion du consentement aux cookies');
+      expect(finding?.title).not.toContain('Protection des donnees');
+      expect(finding?.title).not.toMatch(/^[A-Z]\)/);
     });
 
     it('renders legacy desktop performance as a plain percentage with readable metrics', () => {

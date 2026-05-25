@@ -6,12 +6,13 @@ import { useToast } from '@/hooks/use-toast';
 import { useAsyncAuditPoll } from '@/hooks/useAsyncAuditPoll';
 import { generateAudit, archiveAudit, failAuditRow, deleteAudit } from '@/services/auditService';
 import { normalizeAuditForRead, getAuditScoreFromAny } from '@/lib/auditReadUtils';
+import { isRedmineProjectUrl, resolveAuditTargetUrl as resolveProjectAuditTargetUrl } from '@/lib/projectUrls';
 import { useRedmineIdentifier } from '@/hooks/useRedmineIdentifier';
 import { fetchProjectDetail } from '@/services/redmineService';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
-  FileText, Plus, Eye, Archive, Loader2, Calendar, AlertCircle, X, Trash2, GitCompare, ArrowLeft,
+  FileText, Plus, Eye, Archive, Loader2, AlertCircle, X, Trash2, GitCompare, ArrowLeft,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { fr } from 'date-fns/locale';
@@ -34,37 +35,58 @@ interface AuditRow {
 const ProjectAudits = () => {
   const { projectId, project } = useOutletContext<ProjectContext>();
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, isAdmin } = useAuth();
   const { toast } = useToast();
 
   const [audits, setAudits] = useState<AuditRow[]>([]);
   const [loadingData, setLoadingData] = useState(true);
-  const [dateFilter, setDateFilter] = useState('');
+  const [dateStartFilter, setDateStartFilter] = useState('');
+  const [dateEndFilter, setDateEndFilter] = useState('');
+  const [scoreMinFilter, setScoreMinFilter] = useState('');
+  const [scoreMaxFilter, setScoreMaxFilter] = useState('');
   const [activeTab, setActiveTab] = useState('reports');
   const [selectedForCompare, setSelectedForCompare] = useState<string[]>([]);
   const [staleAuditWarning, setStaleAuditWarning] = useState<AuditRow | null>(null);
   const [redmineHomepage, setRedmineHomepage] = useState<string | null>(null);
+  const [loadingRedmineHomepage, setLoadingRedmineHomepage] = useState(false);
+  const [canLaunchAudit, setCanLaunchAudit] = useState(true);
 
   const redmineIdentifier = useRedmineIdentifier(project?.redmine_url || project?.url);
 
   // Fetch Redmine homepage for audit target resolution
   useEffect(() => {
-    if (!redmineIdentifier) return;
-    fetchProjectDetail(redmineIdentifier).then(detail => {
-      setRedmineHomepage(detail?.homepage?.trim() ?? null);
-    });
-  }, [redmineIdentifier]);
+    setRedmineHomepage(null);
+    if (!redmineIdentifier) {
+      setLoadingRedmineHomepage(false);
+      return;
+    }
+
+    let cancelled = false;
+    setLoadingRedmineHomepage(true);
+    fetchProjectDetail(redmineIdentifier)
+      .then(async detail => {
+        if (cancelled) return;
+        const homepage = detail?.homepage?.trim() ?? null;
+        setRedmineHomepage(homepage);
+        if (projectId && homepage && project?.url && isRedmineProjectUrl(project.url)) {
+          await supabase
+            .from('projects')
+            .update({ url: homepage, redmine_url: project.redmine_url || project.url, audit_url_needs_review: false } as any)
+            .eq('id', projectId);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingRedmineHomepage(false);
+      });
+
+    return () => { cancelled = true; };
+  }, [redmineIdentifier, projectId, project?.url]);
 
   // ── Helpers ──────────────────────────────────────────────────────────────
 
-  const isLikelyRedmineUrl = (v: string) =>
-    v.toLowerCase().includes('redmine') || /\/projects\/[^/]+/.test(v) || /^https?:\/\/[^/]*redmine/i.test(v);
-
   const resolveAuditTargetUrl = (): string => {
     if (!project) return '';
-    const primaryUrl = project.url?.trim() ?? '';
-    if (isLikelyRedmineUrl(primaryUrl) && redmineHomepage) return redmineHomepage;
-    return primaryUrl || redmineHomepage || '';
+    return resolveProjectAuditTargetUrl(project.url, redmineHomepage);
   };
 
   const isStaleAudit = (audit: AuditRow, nowMs: number) =>
@@ -79,12 +101,23 @@ const ProjectAudits = () => {
 
   const fetchData = async () => {
     if (!projectId) return;
-    const { data } = await supabase.from('audits').select('*').eq('project_id', projectId).order('created_at', { ascending: false });
+    const [{ data }, { data: assignment }] = await Promise.all([
+      supabase.from('audits').select('*').eq('project_id', projectId).order('created_at', { ascending: false }),
+      isAdmin
+        ? Promise.resolve({ data: null } as any)
+        : supabase
+            .from('project_assignments')
+            .select('access_level')
+            .eq('project_id', projectId)
+            .eq('user_id', user?.id || '')
+            .maybeSingle(),
+    ]);
     setAudits((data as AuditRow[]) || []);
+    setCanLaunchAudit(isAdmin || (assignment as any)?.access_level === 'full');
     setLoadingData(false);
   };
 
-  useEffect(() => { if (user) fetchData(); }, [user, projectId]);
+  useEffect(() => { if (user) fetchData(); }, [user, projectId, isAdmin]);
 
   // Stale audit check
   useEffect(() => { setStaleAuditWarning(getStaleAudit()); }, [audits]);
@@ -123,13 +156,23 @@ const ProjectAudits = () => {
 
   const handleGenerate = async () => {
     if (!projectId || !project) return;
+    if (!canLaunchAudit) {
+      toast({ title: 'AccÃ¨s lecture seule', description: "Votre rÃ´le Redmine permet de consulter les rapports, mais pas de lancer un audit.", variant: 'destructive' });
+      return;
+    }
     if (isAuditRunning) {
       toast({ title: 'Audit déjà en cours', description: 'Veuillez attendre la fin de la génération en cours.' });
       return;
     }
     const auditTargetUrl = resolveAuditTargetUrl();
     if (!auditTargetUrl) {
-      toast({ title: 'URL site manquante', description: "Impossible de lancer l'audit sans URL de site valide.", variant: 'destructive' });
+      toast({
+        title: 'URL site manquante',
+        description: isRedmineProjectUrl(project.url)
+          ? "Ce projet pointe encore vers Redmine. Renseignez ou synchronisez le site web du client avant de lancer l'audit."
+          : "Impossible de lancer l'audit sans URL de site valide.",
+        variant: 'destructive',
+      });
       return;
     }
     setGenerating(true);
@@ -192,7 +235,35 @@ const ProjectAudits = () => {
 
   // ── Derived ──────────────────────────────────────────────────────────────
 
-  const filteredAudits = audits.filter(a => !dateFilter || a.created_at.startsWith(dateFilter));
+  const getAuditScore = (audit: AuditRow): number | null =>
+    getAuditScoreFromAny(audit.report_data, audit.id, {
+      url: project?.url ?? '',
+      site_name: project?.site_name ?? 'Site',
+    });
+
+  const hasReportFilters = Boolean(dateStartFilter || dateEndFilter || scoreMinFilter || scoreMaxFilter);
+  const resetReportFilters = () => {
+    setDateStartFilter('');
+    setDateEndFilter('');
+    setScoreMinFilter('');
+    setScoreMaxFilter('');
+  };
+
+  const filteredAudits = audits.filter((audit) => {
+    const auditDate = audit.created_at.slice(0, 10);
+    if (dateStartFilter && auditDate < dateStartFilter) return false;
+    if (dateEndFilter && auditDate > dateEndFilter) return false;
+
+    const minScore = scoreMinFilter === '' ? null : Number(scoreMinFilter);
+    const maxScore = scoreMaxFilter === '' ? null : Number(scoreMaxFilter);
+    if (minScore !== null || maxScore !== null) {
+      const score = getAuditScore(audit);
+      if (score === null) return false;
+      if (minScore !== null && Number.isFinite(minScore) && score < minScore) return false;
+      if (maxScore !== null && Number.isFinite(maxScore) && score > maxScore) return false;
+    }
+    return true;
+  });
   const archivedAudits = filteredAudits.filter(a => a.archived_at);
   const activeAudits = filteredAudits.filter(a => !a.archived_at && a.status === 'completed');
   const comparisonAudits = audits.filter(a => selectedForCompare.includes(a.id) && a.report_data)
@@ -224,28 +295,66 @@ const ProjectAudits = () => {
       {/* ── Toolbar ─────────────────────────────────────────────── */}
       <div className="flex flex-wrap items-center gap-3 mb-6">
         {/* Nouveau rapport — primary action, leftmost */}
-        <Button onClick={handleGenerate} disabled={isAuditRunning} className="gap-2 whitespace-nowrap">
-          {isAuditRunning ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
-          {isAuditRunning ? 'Génération…' : 'Nouveau rapport'}
+        <Button
+          onClick={handleGenerate}
+          disabled={isAuditRunning || !canLaunchAudit || (isRedmineProjectUrl(project.url) && loadingRedmineHomepage)}
+          className="gap-2 whitespace-nowrap"
+        >
+          {isAuditRunning || loadingRedmineHomepage ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+          {isAuditRunning ? 'Génération…' : canLaunchAudit ? 'Nouveau rapport' : 'Lecture seule'}
         </Button>
 
-        {/* Date filter — compact */}
-        <div className="flex items-center gap-2">
-          <Calendar className="w-4 h-4 text-muted-foreground flex-shrink-0" />
-          <Input
-            type="date"
-            value={dateFilter}
-            onChange={e => setDateFilter(e.target.value)}
-            className="h-9 w-[160px] text-sm"
-          />
-          {dateFilter && (
-            <Button variant="ghost" size="sm" onClick={() => setDateFilter('')} className="text-xs h-8">
+        {/* Report filters */}
+        <div className="flex flex-wrap items-end gap-2">
+          <div>
+            <label className="text-[11px] text-muted-foreground block mb-1">Date début</label>
+            <Input
+              type="date"
+              value={dateStartFilter}
+              onChange={e => setDateStartFilter(e.target.value)}
+              className="h-9 w-[150px] text-sm"
+            />
+          </div>
+          <div>
+            <label className="text-[11px] text-muted-foreground block mb-1">Date fin</label>
+            <Input
+              type="date"
+              value={dateEndFilter}
+              onChange={e => setDateEndFilter(e.target.value)}
+              className="h-9 w-[150px] text-sm"
+            />
+          </div>
+          <div>
+            <label className="text-[11px] text-muted-foreground block mb-1">Score min</label>
+            <Input
+              type="number"
+              min={0}
+              max={100}
+              value={scoreMinFilter}
+              onChange={e => setScoreMinFilter(e.target.value)}
+              className="h-9 w-[92px] text-sm"
+              placeholder="0"
+            />
+          </div>
+          <div>
+            <label className="text-[11px] text-muted-foreground block mb-1">Score max</label>
+            <Input
+              type="number"
+              min={0}
+              max={100}
+              value={scoreMaxFilter}
+              onChange={e => setScoreMaxFilter(e.target.value)}
+              className="h-9 w-[92px] text-sm"
+              placeholder="100"
+            />
+          </div>
+          {hasReportFilters && (
+            <Button variant="ghost" size="sm" onClick={resetReportFilters} className="text-xs h-9">
               Réinitialiser
             </Button>
           )}
         </div>
 
-        {/* Spacer — pushes action buttons to the right */}
         <div className="flex-1 hidden sm:block" />
 
         {/* Comparer — always visible, dimmed until 2+ selected */}

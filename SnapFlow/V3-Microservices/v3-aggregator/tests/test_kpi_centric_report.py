@@ -578,6 +578,50 @@ class TestKPICentricReport(unittest.TestCase):
         self.assertEqual(evidence["latest_version_source"], "local_catalog_2026_04")
         self.assertEqual(evidence["comparison_result"], "behind_latest")
 
+    def test_module_versions_detected_but_unverified_are_not_passing(self):
+        report = json.loads(json.dumps(self.report))
+        da = report.setdefault("domain_analysis", {})
+        da["cms_kpi"] = {
+            "cms_detected": "Drupal",
+            "cms_version": "10",
+            "cms_version_eol": False,
+            "module_versions": [
+                {"name": "UnknownModule", "version": "1.2.3", "source": "script_src"},
+            ],
+            "cve_severity": {"critical": 0, "high": 0, "medium": 0, "low": 0},
+        }
+
+        rebuilt = build_kpi_centric_report(report)
+        kpi = rebuilt["axes"]["Audit Technique"]["Version Modules Installés"]
+        evidence = kpi["evidence"]
+
+        self.assertEqual(kpi["status"], "not_evaluated")
+        self.assertIsNone(kpi["severity"])
+        self.assertEqual(evidence["module_count"], 1)
+        self.assertEqual(evidence["uncertain_module_count"], 1)
+        self.assertEqual(evidence["module_version_rows"][0]["verification_result"], "non_verifie")
+
+    def test_risky_module_version_fails_with_proof_rows(self):
+        report = json.loads(json.dumps(self.report))
+        da = report.setdefault("domain_analysis", {})
+        da["cms_kpi"] = {
+            "cms_detected": "Drupal",
+            "cms_version": "10",
+            "cms_version_eol": False,
+            "module_versions": [
+                {"name": "jQuery", "version": "1.12.4", "source": "script_src"},
+            ],
+            "cve_severity": {"critical": 0, "high": 0, "medium": 0, "low": 0},
+        }
+
+        rebuilt = build_kpi_centric_report(report)
+        kpi = rebuilt["axes"]["Audit Technique"]["Version Modules Installés"]
+
+        self.assertEqual(kpi["status"], "failing")
+        self.assertEqual(kpi["severity"], "high")
+        self.assertEqual(kpi["evidence"]["risky_module_count"], 1)
+        self.assertEqual(kpi["evidence"]["module_version_rows"][0]["verification_result"], "risque_confirme")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ChevronDown, AlertCircle, CheckCircle, Lightbulb, Bug, ShieldAlert } from 'lucide-react';
+import { ChevronDown, AlertCircle, CheckCircle, Lightbulb, Bug } from 'lucide-react';
 import { CriticalityBadge } from '@/components/CriticalityBadge';
 import { isNonTestedFinding, type AuditFinding } from '@/data/mockAuditData';
 import { KpiUrlIndex } from './KpiUrlIndex';
@@ -27,26 +27,26 @@ export function KpiCard({ kpi }: KpiCardProps) {
   const proofLines = (kpi.evidenceSummary ?? kpi.evidence ?? kpi.annexes ?? []).slice(0, 3);
 
   const getBadge = () => {
-    if (isNonTested) {
-      return (
-        <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border text-yellow-400 bg-yellow-500/10 border-yellow-500/20">
-          <AlertCircle className="w-3 h-3" />
-          <span>Non testé</span>
-        </span>
-      );
-    }
-
     // Use the new KPI labels when available
     if (kpi.kpiLabels) {
       const { statut, typeLabel } = kpi.kpiLabels;
       const isConcluant = statut === 'Concluant';
       const isNonTeste = statut === 'Non testé';
+      const isAverifier = statut === 'À vérifier';
 
       if (isConcluant) {
         return (
           <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border text-emerald-400 bg-emerald-500/10 border-emerald-500/20">
             <CheckCircle className="w-3 h-3" />
             <span>Validé</span>
+          </span>
+        );
+      }
+      if (isAverifier) {
+        return (
+          <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border text-yellow-300 bg-yellow-500/10 border-yellow-500/20">
+            <AlertCircle className="w-3 h-3" />
+            <span>À vérifier</span>
           </span>
         );
       }
@@ -76,15 +76,16 @@ export function KpiCard({ kpi }: KpiCardProps) {
       }
     }
 
-    // Fallback to legacy logic
-    if (kpi.origin === 'RGPD') {
+    if (isNonTested) {
       return (
-        <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border text-orange-400 bg-orange-500/10 border-orange-500/20">
-          <ShieldAlert className="w-3 h-3" />
-          <span>Protection des données</span>
+        <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border text-yellow-400 bg-yellow-500/10 border-yellow-500/20">
+          <AlertCircle className="w-3 h-3" />
+          <span>Non testé</span>
         </span>
       );
     }
+
+    // Fallback to legacy logic
     if (kpi.origin === 'bug' || kpi.type === 'bug') {
       return (
         <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border text-red-400 bg-red-500/10 border-red-500/20">
@@ -119,7 +120,7 @@ export function KpiCard({ kpi }: KpiCardProps) {
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
           {getBadge()}
-          <CriticalityBadge level={kpi.criticality} />
+          {kpi.status !== 'pass' && kpi.origin !== 'passing_kpi' && <CriticalityBadge level={kpi.criticality} />}
         </div>
       </div>
 
@@ -128,7 +129,7 @@ export function KpiCard({ kpi }: KpiCardProps) {
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
           <span>
             <span className="font-medium">Statut :</span>{' '}
-            <span className={kpi.kpiLabels.statut === 'Concluant' ? 'text-emerald-400' : kpi.kpiLabels.statut === 'Non testé' ? 'text-yellow-400' : 'text-red-400'}>
+            <span className={kpi.kpiLabels.statut === 'Concluant' ? 'text-emerald-400' : (kpi.kpiLabels.statut === 'Non testé' || kpi.kpiLabels.statut === 'À vérifier') ? 'text-yellow-400' : 'text-red-400'}>
               {kpi.kpiLabels.statut}
             </span>
           </span>

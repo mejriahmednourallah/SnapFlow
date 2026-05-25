@@ -1,6 +1,7 @@
 package performance
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -59,8 +60,18 @@ func TestRenderPagesViaBrowserPoolReturnsRenderedHTML(t *testing.T) {
 			http.NotFound(w, r)
 			return
 		}
+		var payload map[string]interface{}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode render payload: %v", err)
+		}
+		if payload["wait_until"] != "domcontentloaded" {
+			t.Fatalf("expected domcontentloaded render wait, got %v", payload["wait_until"])
+		}
+		if payload["allow_obscura_fallback"] != true {
+			t.Fatalf("expected Obscura fallback to be enabled, got %v", payload["allow_obscura_fallback"])
+		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"status":"success","url":"https://example.com","rendered_html":"<html><body><main>ok</main></body></html>","final_url":"https://example.com","fcp_ms":321.4,"lcp_ms":987.6,"cls":0.012,"dom_nodes":42,"http_requests":8,"transfer_size_kb":123.45,"asset_breakdown":{"html":{"size_bytes":1000,"count":1,"co2_grams":0},"scripts":{"size_bytes":2000,"count":2,"co2_grams":0}},"desktop_overflow":false,"tablet_overflow":true,"mobile_overflow":true,"invisible_links":3,"console_errors":["[warning] example"],"console_error_count":1,"error":""}`))
+		_, _ = w.Write([]byte(`{"status":"success","url":"https://example.com","rendered_html":"<html><body><main>ok</main></body></html>","final_url":"https://example.com","fcp_ms":321.4,"lcp_ms":987.6,"cls":0.012,"dom_nodes":42,"http_requests":8,"transfer_size_kb":123.45,"asset_breakdown":{"html":{"size_bytes":1000,"count":1,"co2_grams":0},"scripts":{"size_bytes":2000,"count":2,"co2_grams":0}},"desktop_overflow":false,"tablet_overflow":true,"mobile_overflow":true,"invisible_links":3,"console_errors":["[warning] example"],"console_error_count":1,"render_engine":"chromium","confidence":"primary","error":""}`))
 	}))
 	defer server.Close()
 
@@ -88,5 +99,8 @@ func TestRenderPagesViaBrowserPoolReturnsRenderedHTML(t *testing.T) {
 	}
 	if !results[0].ButtonKPIPassed || results[0].ConsoleErrorKPIPassed {
 		t.Fatal("expected pool fallback to keep neutral button defaults and map console KPI state")
+	}
+	if results[0].RenderEngine != "chromium" || results[0].Estimated {
+		t.Fatalf("expected primary chromium render metadata, got engine=%q estimated=%v", results[0].RenderEngine, results[0].Estimated)
 	}
 }

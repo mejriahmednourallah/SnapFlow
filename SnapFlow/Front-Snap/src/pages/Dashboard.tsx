@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { LogOut, FileText, Globe, CalendarClock } from 'lucide-react';
 import snapflowLogo from '@/assets/snapflow-logo.png';
 import Footer from '@/components/Footer';
+import { getProfileDisplayName } from '@/lib/userDisplay';
 
 interface Project {
   id: string;
@@ -16,11 +17,11 @@ interface Project {
 }
 
 const Dashboard = () => {
-  const { user, userRole, loading, signOut } = useAuth();
+  const { user, userRole, loading, displayName, signOut } = useAuth();
   const navigate = useNavigate();
   const [projects, setProjects] = useState<Project[]>([]);
   const [loadingProjects, setLoadingProjects] = useState(true);
-  const [assignments, setAssignments] = useState<Record<string, { full_name: string | null; email: string }>>({});
+  const [assignments, setAssignments] = useState<Record<string, { full_name: string | null; email: string; redmine_login?: string | null; redmine_display_name?: string | null }>>({});
 
   useEffect(() => {
     if (!loading && !user) {
@@ -138,7 +139,7 @@ const Dashboard = () => {
           <img src={snapflowLogo} alt="Snapflow" className="h-7" />
           <div className="flex items-center gap-2">
             <span className="text-xs text-muted-foreground mr-2">
-              {user.email} <span className="text-primary">({userRole})</span>
+              {displayName} <span className="text-primary">({userRole})</span>
             </span>
             <Button variant="ghost" size="icon" onClick={() => { signOut(); navigate('/auth'); }} className="h-9 w-9" title="Déconnexion">
               <LogOut className="w-4 h-4" />
@@ -173,7 +174,7 @@ const Dashboard = () => {
                       {project.url}
                     </a>
                     <p className="text-xs text-muted-foreground mt-1">
-                      {assignments[project.id]?.full_name || assignments[project.id]?.email || <span className="italic">Non assignÃ©</span>}
+                      {assignments[project.id] ? getProfileDisplayName(assignments[project.id]) : <span className="italic">Non assigné</span>}
                     </p>
                   </div>
                 </div>

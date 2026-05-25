@@ -6,6 +6,9 @@ import { fileURLToPath } from 'node:url';
 
 const supabaseUrl = process.env.SUPABASE_URL;
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const redmineBaseUrl = process.env.REDMINE_BASE_URL || null;
+const hasRedmineApiKey = Boolean(process.env.REDMINE_API_KEY);
+const hasRedmineRateLimitSalt = Boolean(process.env.REDMINE_LOGIN_RATE_LIMIT_SALT);
 
 if (!supabaseUrl || !serviceRoleKey) {
   console.error('Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY.');
@@ -91,6 +94,11 @@ try {
     role: 'admin',
     user_id: userId,
     demo_project: project,
+    redmine: {
+      base_url: redmineBaseUrl,
+      admin_api_key_configured: hasRedmineApiKey,
+      login_rate_limit_salt_configured: hasRedmineRateLimitSalt,
+    },
   };
 
   await writeLoginFile(payload);
@@ -101,6 +109,7 @@ try {
   console.log(`Password : ${password}`);
   console.log(`Role     : admin`);
   console.log(`Project  : ${project.site_name} (${project.url})`);
+  console.log(`Redmine  : ${redmineBaseUrl || 'not configured'} (${hasRedmineApiKey ? 'API key configured' : 'API key missing'})`);
   console.log(`Saved    : ${loginFile}`);
 } catch (error) {
   console.error(error instanceof Error ? error.message : error);

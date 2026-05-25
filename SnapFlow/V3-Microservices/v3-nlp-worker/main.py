@@ -2011,7 +2011,7 @@ def process_pending_pages():
         # [N-2] SELECT .. FOR UPDATE SKIP LOCKED prevents parallel NLP workers
         # from processing the same page simultaneously (race condition).
         cur.execute("""
-                        SELECT id, url, html, raw_html, rendered_html FROM scan_pages
+                        SELECT id, url, html, raw_html, rendered_html, metrics FROM scan_pages
                         WHERE nlp_results IS NULL
                             AND (rendered_html IS NOT NULL OR html IS NOT NULL OR raw_html IS NOT NULL)
             ORDER BY id ASC
@@ -2039,6 +2039,21 @@ def process_pending_pages():
         rendered_html = row.get("rendered_html")
         raw_html = row.get("raw_html")
         html = rendered_html or row.get("html") or raw_html
+        metrics = row.get("metrics") or {}
+        if isinstance(metrics, str):
+            try:
+                metrics = json.loads(metrics)
+            except Exception:
+                metrics = {}
+        rendered_discovery = metrics.get("rendered_discovery") if isinstance(metrics, dict) else {}
+        if isinstance(rendered_discovery, dict):
+            discovery_text = str(rendered_discovery.get("visible_text") or "")
+            shadow_dom = rendered_discovery.get("shadow_dom")
+            shadow_text = str(shadow_dom.get("text") or "") if isinstance(shadow_dom, dict) else ""
+            rendered_text = " ".join(part.strip() for part in [discovery_text, shadow_text] if part and part.strip())
+            if rendered_text:
+                safe_rendered_text = rendered_text.replace("<", " ").replace(">", " ")
+                html = f"{html or ''}\n<main data-snapflow-rendered-discovery='true'>{safe_rendered_text}</main>"
         html_for_legacy = row.get("html") or raw_html or html
         # [N-1] Per-row try/except + commit so one bad page cannot roll back
         # the entire batch and trap other pages in a retry loop.

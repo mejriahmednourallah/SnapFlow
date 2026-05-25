@@ -141,6 +141,24 @@ serve(async (req) => {
       return match ? match[1] : null;
     };
 
+    const isRedmineProjectUrl = (url: string | null | undefined): boolean => {
+      const raw = String(url || "").trim();
+      if (!raw) return false;
+      try {
+        const parsed = new URL(/^https?:\/\//i.test(raw) ? raw : `https://${raw}`);
+        const host = parsed.hostname.toLowerCase();
+        const path = parsed.pathname.toLowerCase();
+        const isKnownRedmineHost = host.includes("redmine") || host === "maintenance.medianet.tn";
+        return isKnownRedmineHost && /^\/projects\/[^/]+(?:\/.*)?$/.test(path);
+      } catch {
+        const lowered = raw.toLowerCase();
+        return (
+          (lowered.includes("redmine") || lowered.includes("maintenance.medianet.tn")) &&
+          /\/projects\/[a-z0-9_-]+(?:\/.*)?$/.test(lowered)
+        );
+      }
+    };
+
     // Helper to normalize identity (email or name) for Redmine matching.
     // Handles: trim, lowercase, accent removal (NFD), and space normalization.
     const normalizeIdentity = (value: unknown): string => {
@@ -614,7 +632,272 @@ serve(async (req) => {
       };
     };
 
+    const fetchRedmineUserGroups = async (redmineUserId: number): Promise<number[]> => {
+      if (!REDMINE_KEY || !redmineUserId) return [];
+      try {
+        const res = await fetch(`${REDMINE_BASE}/users/${redmineUserId}.json?key=${REDMINE_KEY}&include=groups,memberships`);
+        const data = await safeJson(res, { user: { groups: [] } });
+        const groups = Array.isArray(data?.user?.groups) ? data.user.groups : [];
+        return groups.map((group: any) => Number(group?.id || 0)).filter(Boolean);
+      } catch (error) {
+        console.warn("[fetch-redmine] Could not fetch Redmine user groups", {
+          redmineUserId,
+          message: error instanceof Error ? error.message : String(error),
+        });
+        return [];
+      }
+    };
+
+    const syncMembershipProjectsForUser = async (
+      serviceClient: ReturnType<typeof createClient>,
+      userId: string,
+      options: { identifiers?: string[]; dryRun?: boolean; revokeMissing?: boolean } = {}
+    ) => {
+      if (!REDMINE_KEY) {
+        throw new Error("REDMINE_API_KEY is required for Redmine project import.");
+      }
+
+      const requestedIdentifiers = new Set(
+        (options.identifiers || [])
+          .map((identifier) => String(identifier || "").trim())
+          .filter(Boolean)
+      );
+      const restrictToIdentifiers = requestedIdentifiers.size > 0;
+      const dryRun = options.dryRun === true;
+
+      const { data: identity, error: identityErr } = await serviceClient
+        .from("redmine_user_identities")
+        .select("redmine_user_id, redmine_login, redmine_display_name")
+        .eq("user_id", userId)
+        .maybeSingle();
+      if (identityErr) throw identityErr;
+      if (!identity?.redmine_user_id) {
+        return {
+          imported: 0,
+          revoked: 0,
+          projects: [],
+          message: "No linked Redmine identity for this user.",
+        };
+      }
+
+      const redmineUserId = Number(identity.redmine_user_id);
+      const redmineGroupIds = await fetchRedmineUserGroups(redmineUserId);
+      const redmineProjects = await fetchAllRedmineProjects();
+
+      const { data: mappings, error: mappingErr } = await serviceClient
+        .from("redmine_role_mappings")
+        .select("redmine_role_id, access_level, can_import");
+      if (mappingErr) throw mappingErr;
+
+      const mappingByRoleId = new Map<number, any>();
+      for (const mapping of mappings || []) {
+        mappingByRoleId.set(Number(mapping.redmine_role_id), mapping);
+      }
+
+      const { data: localProjects, error: localProjectsErr } = await serviceClient
+        .from("projects")
+        .select("id, url, redmine_url, redmine_identifier, audit_url_needs_review");
+      if (localProjectsErr) throw localProjectsErr;
+
+      const projectByIdentifier = new Map<string, any>();
+      for (const project of localProjects || []) {
+        const identifier =
+          (project as any).redmine_identifier ||
+          extractRedmineProjectId((project as any).redmine_url || "") ||
+          extractRedmineProjectId((project as any).url || "");
+        if (identifier) projectByIdentifier.set(identifier, project);
+      }
+
+      const { data: existingAssignments, error: existingAssignmentsErr } = await serviceClient
+        .from("project_assignments")
+        .select("project_id, source")
+        .eq("user_id", userId);
+      if (existingAssignmentsErr) throw existingAssignmentsErr;
+
+      const existingAssignmentByProject = new Map<string, any>();
+      for (const assignment of existingAssignments || []) {
+        existingAssignmentByProject.set((assignment as any).project_id, assignment);
+      }
+
+      const matchedProjects: any[] = [];
+      const assignmentRows: any[] = [];
+      const concurrency = 6;
+
+      await mapWithConcurrency(redmineProjects, concurrency, async (project) => {
+        if (restrictToIdentifiers && !requestedIdentifiers.has(project.identifier)) return null;
+
+        const { memberships } = await fetchProjectAccountInfo(project.identifier);
+        const matchingMemberships = (memberships || []).filter((membership: any) => {
+          const memberUserId = Number(membership?.user?.id || 0);
+          const memberGroupId = Number(membership?.group?.id || 0);
+          return memberUserId === redmineUserId || (memberGroupId && redmineGroupIds.includes(memberGroupId));
+        });
+
+        if (matchingMemberships.length === 0) return null;
+
+        const roleIds = new Set<number>();
+        const roleNames = new Set<string>();
+        const groupIds = new Set<number>();
+
+        for (const membership of matchingMemberships) {
+          const memberGroupId = Number(membership?.group?.id || 0);
+          if (memberGroupId) groupIds.add(memberGroupId);
+          for (const role of membership?.roles || []) {
+            const roleId = Number(role?.id || 0);
+            if (roleId) roleIds.add(roleId);
+            if (role?.name) roleNames.add(String(role.name));
+          }
+        }
+
+        const importableRoleIds = Array.from(roleIds).filter((roleId) => {
+          const mapping = mappingByRoleId.get(roleId);
+          return mapping ? mapping.can_import !== false : true;
+        });
+        if (importableRoleIds.length === 0 && roleIds.size > 0) return null;
+
+        const accessLevel = Array.from(roleIds).some((roleId) => mappingByRoleId.get(roleId)?.access_level === "full")
+          ? "full"
+          : "read_only";
+
+        const redmineUrl = `${REDMINE_BASE}/projects/${project.identifier}`;
+        const homepage = String(project.homepage || "").trim();
+        const siteUrl = homepage || redmineUrl;
+        let localProject = projectByIdentifier.get(project.identifier);
+        const roleIdList = Array.from(roleIds);
+        const roleNameList = Array.from(roleNames);
+        const groupIdList = Array.from(groupIds);
+        const existingAssignment = localProject ? existingAssignmentByProject.get(localProject.id) : null;
+
+        if (dryRun) {
+          matchedProjects.push({
+            id: project.id,
+            local_project_id: localProject?.id || null,
+            redmine_project_id: project.id,
+            site_name: project.name,
+            redmine_identifier: project.identifier,
+            redmine_url: redmineUrl,
+            url: siteUrl,
+            existing: Boolean(localProject),
+            access_level: accessLevel,
+            assignment_source: existingAssignmentByProject.get(localProject?.id || "")?.source || null,
+            redmine_role_ids: roleIdList,
+            redmine_role_names: roleNameList,
+            redmine_group_ids: groupIdList,
+            audit_url_needs_review: !homepage,
+            homepage: homepage || null,
+          });
+          return null;
+        }
+
+        if (!localProject) {
+          const { data: created, error: createErr } = await serviceClient
+            .from("projects")
+            .insert({
+              site_name: project.name,
+              url: siteUrl,
+              redmine_url: redmineUrl,
+              redmine_identifier: project.identifier,
+              audit_url_needs_review: !homepage,
+            })
+            .select("id, url, redmine_url, redmine_identifier, audit_url_needs_review")
+            .single();
+          if (createErr) throw createErr;
+          localProject = created;
+          projectByIdentifier.set(project.identifier, created);
+        } else {
+          const patch: Record<string, unknown> = {};
+          if (!(localProject as any).redmine_identifier) patch.redmine_identifier = project.identifier;
+          if (!(localProject as any).redmine_url) patch.redmine_url = redmineUrl;
+          if (homepage && (!(localProject as any).url || isRedmineProjectUrl((localProject as any).url))) {
+            patch.url = homepage;
+            patch.audit_url_needs_review = false;
+          }
+          if (homepage && (localProject as any).audit_url_needs_review) patch.audit_url_needs_review = false;
+          if (!homepage && !(localProject as any).audit_url_needs_review) patch.audit_url_needs_review = true;
+          if (Object.keys(patch).length > 0) {
+            await serviceClient.from("projects").update(patch).eq("id", localProject.id);
+          }
+        }
+
+        if (existingAssignment?.source !== "manual") {
+          assignmentRows.push({
+            project_id: localProject.id,
+            user_id: userId,
+            source: "redmine",
+            redmine_role_ids: roleIdList,
+            redmine_role_names: roleNameList,
+            redmine_group_ids: groupIdList,
+            access_level: accessLevel,
+            redmine_synced_at: new Date().toISOString(),
+          });
+        }
+
+        matchedProjects.push({
+          id: localProject.id,
+          site_name: project.name,
+          redmine_identifier: project.identifier,
+          redmine_url: redmineUrl,
+          url: siteUrl,
+          access_level: existingAssignment?.source === "manual" ? "full" : accessLevel,
+          assignment_source: existingAssignment?.source || "redmine",
+          redmine_role_ids: roleIdList,
+          redmine_role_names: roleNameList,
+          redmine_group_ids: groupIdList,
+          audit_url_needs_review: !homepage,
+        });
+
+        return null;
+      });
+
+      if (assignmentRows.length > 0) {
+        const { error: upsertErr } = await serviceClient
+          .from("project_assignments")
+          .upsert(assignmentRows, { onConflict: "project_id,user_id" });
+        if (upsertErr) throw upsertErr;
+      }
+
+      let staleProjectIds: string[] = [];
+      const shouldRevokeMissing = options.revokeMissing !== false && !restrictToIdentifiers && !dryRun;
+      if (shouldRevokeMissing) {
+        const currentProjectIds = new Set(assignmentRows.map((row) => row.project_id));
+        const { data: existingRedmineAssignments, error: existingErr } = await serviceClient
+          .from("project_assignments")
+          .select("project_id")
+          .eq("user_id", userId)
+          .eq("source", "redmine");
+        if (existingErr) throw existingErr;
+
+        staleProjectIds = (existingRedmineAssignments || [])
+          .map((row: any) => row.project_id)
+          .filter((projectId: string) => !currentProjectIds.has(projectId));
+
+        if (staleProjectIds.length > 0) {
+          const { error: deleteErr } = await serviceClient
+            .from("project_assignments")
+            .delete()
+            .eq("user_id", userId)
+            .eq("source", "redmine")
+            .in("project_id", staleProjectIds);
+          if (deleteErr) throw deleteErr;
+        }
+      }
+
+      return {
+        imported: assignmentRows.length,
+        revoked: staleProjectIds.length,
+        projects: matchedProjects,
+      };
+    };
+
     if (type === "projects") {
+      const serviceClient = getServiceClient();
+      const callerIsAdmin = await isCallerAdmin(serviceClient);
+      if (!callerIsAdmin) {
+        return new Response(JSON.stringify({ error: "Admin access required" }), {
+          status: 403,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
       const projects = await fetchAllRedmineProjects();
       return new Response(JSON.stringify({ projects, total_count: projects.length }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -755,6 +1038,26 @@ serve(async (req) => {
       const asTrimmedString = typeof project_identifier === "string" ? project_identifier.trim() : "";
       const isUuidLike = (value: string): boolean =>
         /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+
+      if (asTrimmedString && isUuidLike(asTrimmedString)) {
+        const serviceClient = getServiceClient();
+        const callerIsAdmin = await isCallerAdmin(serviceClient);
+        if (!callerIsAdmin) {
+          const { data: assignment } = await serviceClient
+            .from("project_assignments")
+            .select("access_level")
+            .eq("project_id", asTrimmedString)
+            .eq("user_id", callerClaims!.sub)
+            .maybeSingle();
+
+          if (assignment?.access_level !== "full") {
+            return new Response(JSON.stringify({ error: "Accès insuffisant pour créer un ticket Redmine." }), {
+              status: 403,
+              headers: { ...corsHeaders, "Content-Type": "application/json" },
+            });
+          }
+        }
+      }
 
       if (typeof project_identifier === "number" || (asTrimmedString && !isNaN(Number(asTrimmedString)))) {
         projectId = Number(project_identifier);
@@ -1529,6 +1832,73 @@ serve(async (req) => {
         matched: assignmentSync.details[0]?.matched || 0,
         assignment_rows_upserted: assignmentSync.assignmentRowsInserted,
         details: assignmentSync.details,
+      }), {
+        status: 200,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    // List importable projects for the caller's linked Redmine identity without writing rows.
+    if (type === "my_redmine_projects_for_import") {
+      const serviceClient = getServiceClient();
+      const result = await syncMembershipProjectsForUser(serviceClient, callerClaims!.sub, { dryRun: true });
+
+      return new Response(JSON.stringify({
+        success: true,
+        user_id: callerClaims!.sub,
+        projects: result.projects,
+        total_count: result.projects.length,
+        message: result.message || null,
+      }), {
+        status: 200,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    // Import only selected Redmine projects for the caller.
+    if (type === "import_my_redmine_projects") {
+      const identifiers = Array.isArray(body?.identifiers)
+        ? body.identifiers.map((identifier: unknown) => String(identifier || "").trim()).filter(Boolean)
+        : [];
+      if (identifiers.length === 0) {
+        return new Response(JSON.stringify({ error: "identifiers is required" }), {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      const serviceClient = getServiceClient();
+      const result = await syncMembershipProjectsForUser(serviceClient, callerClaims!.sub, {
+        identifiers,
+        revokeMissing: false,
+      });
+
+      return new Response(JSON.stringify({
+        success: true,
+        user_id: callerClaims!.sub,
+        imported: result.imported,
+        projects: result.projects,
+        synced_at: new Date().toISOString(),
+      }), {
+        status: 200,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    // Import/synchronize projects using the caller's linked Redmine identity.
+    // This preserves manual assignments and only revokes source='redmine' rows.
+    if (type === "sync_my_redmine_projects") {
+      const serviceClient = getServiceClient();
+      const result = await syncMembershipProjectsForUser(serviceClient, callerClaims!.sub);
+
+      return new Response(JSON.stringify({
+        success: true,
+        user_id: callerClaims!.sub,
+        imported: result.imported,
+        revoked: result.revoked,
+        projects: result.projects,
+        message: result.message || null,
+        synced_at: new Date().toISOString(),
       }), {
         status: 200,
         headers: { ...corsHeaders, "Content-Type": "application/json" },

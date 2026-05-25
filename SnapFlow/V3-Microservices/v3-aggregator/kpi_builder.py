@@ -1206,7 +1206,7 @@ def _digest_first_rows_from_keys(evidence: dict, keys: list[str]) -> list[dict]:
 _EVIDENCE_COVERAGE_REGISTRY = {
     "tech_modules_versions": {
         "proof_type": "rows",
-        "csv_columns": ["module", "name", "version", "source", "risk", "cve"],
+        "csv_columns": ["module", "name", "version", "source", "verification_result", "verification_source", "risk", "recommendation", "latest_known_version", "minimum_safe_version"],
         "missing_reason": "Aucun tableau module/version exploitable n'a ete fourni par le backend.",
     },
     "tech_cve_check": {
@@ -1540,11 +1540,19 @@ def _build_curated_evidence_digest(kpi_id: str, kpi_name: str, status: str, evid
 
     elif kpi_id == "tech_modules_versions":
         modules = _safe_list(data.get("modules") or data.get("module_versions"))
-        rows = _unique_digest_rows([_safe_dict(row) for row in modules if isinstance(row, dict)])
-        module_count = max(len(rows), _safe_int(data.get("module_count")))
+        rows = _unique_digest_rows(
+            _safe_list(evidence.get("module_version_rows")) or
+            _safe_list(_safe_dict(data.get("module_verification")).get("rows")) or
+            [_safe_dict(row) for row in modules if isinstance(row, dict)]
+        )
+        module_count = max(len(rows), _safe_int(evidence.get("module_count")), _safe_int(data.get("module_count")))
         _append_digest_line(lines, f"Modules avec version détectée: {module_count}")
+        _append_digest_line(lines, f"Modules verifies conformes: {_safe_int(evidence.get('safe_module_count'))}")
+        _append_digest_line(lines, f"Modules a risque confirme: {_safe_int(evidence.get('risky_module_count'))}")
+        _append_digest_line(lines, f"Modules a verifier: {_safe_int(evidence.get('uncertain_module_count'))}")
+        _append_digest_line(lines, f"Methode de verification: {_digest_str(evidence.get('verification_mode')) or 'hybride, catalogue local d abord'}")
         if rows:
-            _append_digest_line(lines, "Table des modules: nom, version et source disponibles.")
+            _append_digest_line(lines, "Table des modules: nom, version, verification et action recommandee disponibles.")
         elif status != "not_evaluated":
             quality = "MISSING"
 
@@ -1842,12 +1850,19 @@ def _build_curated_evidence_digest(kpi_id: str, kpi_name: str, status: str, evid
             value = _digest_str(data.get(key) or evidence.get(key))
             if value:
                 _append_digest_line(lines, f"{label}: {value}")
+        if kpi_id in {"perf_desktop_speed", "perf_mobile_speed"}:
+            checked = _safe_int(evidence.get("pages_checked", 0))
+            available = sum(1 for row in _safe_list(data.get("rows", [])) if _safe_dict(row).get("available") not in (False, None) and _safe_dict(row).get("fcp_ms", 0) > 0)
+            _append_digest_line(lines, f"Pages testees: {checked}, mesures valides: {available}")
         if kpi_id == "perf_console_errors":
             _append_digest_line(lines, f"Pages avec erreurs console: {_safe_int(data.get('pages_with_console_errors'))}")
         if kpi_id == "perf_cache":
             _append_digest_line(lines, f"Cache-Control: {_digest_str(data.get('cache_control')) or 'non renseigné'}")
         if kpi_id == "perf_compression":
             _append_digest_line(lines, f"Compression HTTP: {_digest_str(data.get('html_compression_applied'))}")
+        if kpi_id == "eco_index_score":
+            _append_digest_line(lines, f"Score calcule: {_safe_int(evidence.get('score_value'))} %")
+            _append_digest_line(lines, f"Formule: {_digest_str(evidence.get('score_formula')) or 'Conforme=100, alerte=50, non teste ou non conforme=0'}")
 
     elif kpi_id.startswith("ux_"):
         rows = _unique_digest_rows(_safe_list(data.get("rows") or data.get("items") or data.get("evidence")))
@@ -2063,6 +2078,51 @@ _LATEST_VERSION_CATALOG = {
     "nodejs": {"latest_known_version": "22.15.0", "latest_version_source": "local_catalog_2026_04"},
 }
 
+_MODULE_VERSION_RULES = {
+    "jquery": {
+        "latest_known_version": "3.7.1",
+        "minimum_safe_version": "3.5.0",
+        "source": "offline_module_catalog_2026_04",
+        "risk": "Ancienne branche jQuery associee a des vulnerabilites de script connues.",
+        "recommendation": "Mettre a jour jQuery vers une version 3.7.x ou plus recente.",
+    },
+    "bootstrap": {
+        "latest_known_version": "5.3.3",
+        "minimum_safe_version": "4.6.2",
+        "source": "offline_module_catalog_2026_04",
+        "risk": "Ancienne branche Bootstrap potentiellement non maintenue ou exposee a des corrections manquantes.",
+        "recommendation": "Migrer Bootstrap vers une branche maintenue apres verification de compatibilite.",
+    },
+    "vue js": {
+        "latest_known_version": "3.5.13",
+        "minimum_safe_version": "3.0.0",
+        "source": "offline_module_catalog_2026_04",
+        "risk": "Vue 2 est en fin de vie; les correctifs de securite ne sont plus garantis.",
+        "recommendation": "Planifier la migration vers Vue 3.",
+    },
+    "vue": {
+        "latest_known_version": "3.5.13",
+        "minimum_safe_version": "3.0.0",
+        "source": "offline_module_catalog_2026_04",
+        "risk": "Vue 2 est en fin de vie; les correctifs de securite ne sont plus garantis.",
+        "recommendation": "Planifier la migration vers Vue 3.",
+    },
+    "angular": {
+        "latest_known_version": "19.2.0",
+        "minimum_safe_version": "15.0.0",
+        "source": "offline_module_catalog_2026_04",
+        "risk": "Ancienne branche Angular potentiellement hors support.",
+        "recommendation": "Verifier la branche Angular et planifier une mise a jour maintenue.",
+    },
+    "react": {
+        "latest_known_version": "19.0.0",
+        "minimum_safe_version": "16.14.0",
+        "source": "offline_module_catalog_2026_04",
+        "risk": "Tres ancienne version React; compatibilite et maintenance a verifier.",
+        "recommendation": "Verifier la branche React et appliquer les mises a jour de maintenance.",
+    },
+}
+
 
 def _missing_field(reason: str) -> dict:
     return {"value": None, "status": "MISSING", "reason": reason}
@@ -2149,6 +2209,104 @@ def _lookup_latest_version(product_name: str):
     return _LATEST_VERSION_CATALOG.get(key)
 
 
+def _normalize_product_key(product_name: str) -> str:
+    normalized = re.sub(r"[^a-z0-9]+", " ", _clean_text(product_name).lower()).strip()
+    aliases = {
+        "vue js": "vue js",
+        "vuejs": "vue js",
+        "vue": "vue",
+        "jquery": "jquery",
+        "bootstrap": "bootstrap",
+        "angular": "angular",
+        "react": "react",
+    }
+    return aliases.get(normalized, normalized)
+
+
+def _verify_module_version(module: dict) -> dict:
+    name = _clean_text(module.get("name") or module.get("module") or module.get("library"))
+    version = _clean_text(module.get("version"))
+    source = _clean_text(module.get("source"))
+    key = _normalize_product_key(name)
+    rule = _MODULE_VERSION_RULES.get(key)
+    result = {
+        "module": name or "module non identifie",
+        "name": name or "module non identifie",
+        "version": version or "non detectee",
+        "source": source or "scan automatique",
+        "verification_source": "catalogue local" if rule else "aucune regle disponible",
+        "verification_result": "non_verifie",
+        "risk": "Version detectee mais non verifiee par le catalogue de securite.",
+        "recommendation": "Verifier manuellement la version exposee avant de conclure.",
+        "latest_known_version": None,
+        "minimum_safe_version": None,
+    }
+    if not name or not version:
+        result["verification_result"] = "donnees_incompletes"
+        result["risk"] = "Nom ou version du module incomplet."
+        return result
+    if not rule:
+        return result
+
+    result["verification_source"] = rule.get("source", "catalogue local")
+    result["latest_known_version"] = rule.get("latest_known_version")
+    result["minimum_safe_version"] = rule.get("minimum_safe_version")
+    min_safe = rule.get("minimum_safe_version")
+    latest = rule.get("latest_known_version")
+    cmp_min = _compare_versions(version, min_safe) if min_safe else None
+    cmp_latest = _compare_versions(version, latest) if latest else None
+
+    if cmp_min == -1:
+        result["verification_result"] = "risque_confirme"
+        result["risk"] = rule.get("risk", "Version inferieure au seuil de securite local.")
+        result["recommendation"] = rule.get("recommendation", "Mettre a jour le module.")
+    elif cmp_latest in {0, 1}:
+        result["verification_result"] = "verifie_conforme"
+        result["risk"] = "Aucun risque connu dans le catalogue local pour cette version."
+        result["recommendation"] = "Maintenir la veille de securite sur ce module."
+    else:
+        result["verification_result"] = "a_verifier"
+        result["risk"] = "Version au-dessus du seuil minimal local, mais pas confirmee comme derniere version maintenue."
+        result["recommendation"] = "Verifier la branche de maintenance et appliquer les correctifs disponibles si necessaire."
+    return result
+
+
+def _evaluate_module_versions(modules: list) -> dict:
+    verified_rows = [
+        _verify_module_version(_safe_dict(module))
+        for module in _safe_list(modules)
+        if isinstance(module, dict)
+    ]
+    risky = [row for row in verified_rows if row.get("verification_result") == "risque_confirme"]
+    uncertain = [
+        row for row in verified_rows
+        if row.get("verification_result") in {"non_verifie", "donnees_incompletes", "a_verifier"}
+    ]
+    safe = [row for row in verified_rows if row.get("verification_result") == "verifie_conforme"]
+
+    if risky:
+        status = "failing"
+        severity = "high"
+    elif verified_rows and len(safe) == len(verified_rows):
+        status = "passing"
+        severity = None
+    else:
+        status = "not_evaluated"
+        severity = None
+
+    return {
+        "status": status,
+        "severity": severity,
+        "rows": verified_rows,
+        "module_count": len(verified_rows),
+        "risky_count": len(risky),
+        "safe_count": len(safe),
+        "uncertain_count": len(uncertain),
+        "verification_mode": "hybrid_offline_first",
+        "live_advisory_status": "non_configure",
+    }
+
+
 def _downgrade_confidence(level: str, steps: int = 1) -> str:
     order = ["low", "medium", "high"]
     current = _clean_text(level).lower() or "medium"
@@ -2169,6 +2327,9 @@ def _contract_detection_sources(kpi_id: str) -> list:
         return ["ssl_probe"]
     if kpi_id in {"sec_http_headers", "sec_session_cookies"}:
         return ["http_response_headers"]
+    if kpi_id == "tech_modules_versions":
+        return ["scanner_aggregation", "module_version_catalog"]
+
     if kpi_id == "sec_service_exposure":
         return ["tcp_probe", "scanner_aggregation"]
     if kpi_id in {"sec_trace_track", "sec_cors_misconfiguration"}:
@@ -2664,6 +2825,49 @@ def _build_contract_evidence(kpi_id: str, kpi_obj: dict, pages_scanned: int, dom
         evidence["data_quality"] = data_quality
         return evidence, data_quality, status_override, confidence_penalty
 
+    if kpi_id == "tech_modules_versions":
+        modules = _safe_list(data.get("modules") or data.get("module_versions"))
+        verification = _safe_dict(data.get("module_verification"))
+        verified_rows = _safe_list(verification.get("rows"))
+        if not verified_rows:
+            verification = _evaluate_module_versions(modules)
+            verified_rows = _safe_list(verification.get("rows"))
+        module_count = max(_safe_int(data.get("module_count")), _safe_int(verification.get("module_count")), len(verified_rows))
+        risky_count = _safe_int(verification.get("risky_count"))
+        uncertain_count = _safe_int(verification.get("uncertain_count"))
+        safe_count = _safe_int(verification.get("safe_count"))
+        status_override = _clean_text(verification.get("status")) or "not_evaluated"
+        if status_override == "not_available":
+            status_override = "not_evaluated"
+        if module_count == 0:
+            data_quality = "MISSING"
+            status_override = "not_evaluated"
+            confidence_penalty = 2
+        elif risky_count > 0:
+            data_quality = "VALID"
+        elif uncertain_count > 0:
+            data_quality = "PARTIAL"
+            status_override = "not_evaluated"
+            confidence_penalty = 1
+        elif safe_count == module_count and module_count > 0:
+            data_quality = "VALID"
+            status_override = "passing"
+        else:
+            data_quality = "PARTIAL"
+            status_override = "not_evaluated"
+            confidence_penalty = 1
+        evidence.update({
+            "data_quality": data_quality,
+            "module_count": module_count,
+            "safe_module_count": safe_count,
+            "risky_module_count": risky_count,
+            "uncertain_module_count": uncertain_count,
+            "verification_mode": verification.get("verification_mode") or "hybrid_offline_first",
+            "live_advisory_status": verification.get("live_advisory_status") or "non_configure",
+            "module_version_rows": verified_rows,
+        })
+        return evidence, data_quality, status_override, confidence_penalty
+
     if kpi_id == "tech_cve_check":
         critical = _safe_int(data.get("critical"))
         high = _safe_int(data.get("high"))
@@ -2720,6 +2924,14 @@ def _compute_contract_score(status: str, severity: Optional[str], data_quality: 
     if severity_value == "medium":
         return 40
     return 48 if data_quality == "VALID" else 42
+
+
+def _compute_eco_status_score(status: str) -> int:
+    if status == "passing":
+        return 100
+    if status == "warning":
+        return 50
+    return 0
 
 
 def _cap_severity_by_confidence(severity: Optional[str], confidence: str) -> Optional[str]:
@@ -2925,6 +3137,8 @@ def _make_kpi_v2(kpi_name: str, kpi_obj: dict, axis: str, pages_scanned: int, do
         evidence["data_quality"] = digest_quality
     if digest_quality == "MISSING":
         status = "not_evaluated"
+    if status == "passing" and data_quality in {"PARTIAL", "MISSING"}:
+        status = "not_evaluated"
     kpi_type = _contract_type(kpi_id, axis, kpi_obj)
 
     if status in {"passing", "not_evaluated"}:
@@ -2945,6 +3159,10 @@ def _make_kpi_v2(kpi_name: str, kpi_obj: dict, axis: str, pages_scanned: int, do
             confidence_penalty += 2
         confidence = _downgrade_confidence(base_confidence, confidence_penalty)
     severity = _cap_severity_by_confidence(severity, confidence)
+    score = _compute_eco_status_score(status) if kpi_id == "eco_index_score" else _compute_contract_score(status, severity, data_quality)
+    if kpi_id == "eco_index_score":
+        evidence["score_formula"] = "Conforme=100, alerte=50, non teste ou non conforme=0"
+        evidence["score_value"] = score
 
     return {
         "kpi_id": kpi_id,
@@ -2955,7 +3173,7 @@ def _make_kpi_v2(kpi_name: str, kpi_obj: dict, axis: str, pages_scanned: int, do
         "severity": severity,
         "confidence": confidence,
         "constat": _build_contract_constat(kpi_id, kpi_name, status, kpi_type, axis, kpi_obj, evidence),
-        "score": _compute_contract_score(status, severity, data_quality),
+        "score": score,
         "impact": _contract_impact(kpi_id, status, kpi_obj),
         "evidence": evidence,
         "evidence_digest": evidence_digest,
@@ -3157,7 +3375,15 @@ def build_kpi_centric_report(report: dict) -> dict:
     robots_paths = _safe_list(robots_disclosure.get("disclosed_paths"))
     robots_has_issue = bool(robots_paths) or str(robots_disclosure.get("status", "")).lower() in {"warning", "fail"}
 
-    error_leaks = _safe_list(error_page_leak.get("leak_indicators"))
+    error_leaks_raw = _safe_list(error_page_leak.get("leak_indicators"))
+    # Filter out standalone PHP runtime prefixes (Warning:, Notice:, Deprecated:)
+    # that appear on any PHP site's error page without constituting a real info leak.
+    # Real leaks require file paths, stack traces, SQL errors, or language tracebacks.
+    _WEAK_ERROR_PREFIXES = {"warning:", "notice:", "deprecated:"}
+    error_leaks = [l for l in error_leaks_raw if isinstance(l, str) and str(l).strip().lower() not in _WEAK_ERROR_PREFIXES]
+    # Status is authoritative: if scanner (v3.1+) says "pass", we trust its
+    # strong-vs-weak classification. If scanner says "fail", a strong or multi-weak
+    # indicator was confirmed.
     error_page_has_issue = bool(error_leaks) or str(error_page_leak.get("status", "")).lower() == "fail"
 
     has_login = _safe_bool(functional_kpi.get("has_login"))
@@ -3260,6 +3486,10 @@ def build_kpi_centric_report(report: dict) -> dict:
     # [5.6] Distinguish cms_version_eol=None (probe didn't run) from False (not EOL).
     # None => 'non_evalue' status; only True fires 'failing'+'critical'.
     cms_eol = cms_kpi.get("cms_version_eol")
+    module_verification = _evaluate_module_versions(cms_kpi.get("module_versions", []))
+    module_status = module_verification.get("status", "not_evaluated")
+    module_severity = module_verification.get("severity")
+    module_count = _safe_int(module_verification.get("module_count"))
     
     axes["Audit Technique"] = {
         "Version CMS/Framework": {
@@ -3280,14 +3510,15 @@ def build_kpi_centric_report(report: dict) -> dict:
         "Version Modules Installés": {
             "info": f"{len(cms_kpi.get('module_versions', []))} modules détectés avec versions",
             "impact": "Modules obsolètes = vulnérabilités potentielles non corrigées",
-            "pages_affected": 1,
-            "pages_affected_urls": [report.get("domain", "")],
-            "status": "passing",  # Info only, no pass/fail here
-            "type": None,
-            "severity": None,
+            "pages_affected": 1 if module_count > 0 else 0,
+            "pages_affected_urls": [report.get("domain", "")] if module_count > 0 else [],
+            "status": module_status,
+            "type": "bug" if module_status == "failing" else None,
+            "severity": module_severity,
             "data": {
-                "module_count": len(cms_kpi.get("module_versions", [])),
+                "module_count": module_count,
                 "modules": cms_kpi.get("module_versions", []),
+                "module_verification": module_verification,
             }
         },
         "Version Langage de Programmation": {
@@ -3745,13 +3976,15 @@ def build_kpi_centric_report(report: dict) -> dict:
     mobile_friendly_available = mobile_friendly_status != "not_available"
     avg_fcp_ms = _optional_float(perf.get("avg_fcp_ms"))
     avg_lcp_ms = _optional_float(perf.get("avg_lcp_ms"))
+    effective_lcp_ms = _optional_float(perf.get("effective_lcp_ms")) or avg_lcp_ms
+    fallback_render_count = _safe_int(perf.get("fallback_render_count"))
     avg_cls = _optional_float(perf.get("avg_cls"))
     avg_eco_index = _optional_float(perf.get("avg_eco_index"))
     image_stats = _safe_dict(content.get("image_compression_stats", {}))
     compression_rate_pct = _optional_float(image_stats.get("compression_rate_pct")) or 0.0
     sampled_images = _safe_int(image_stats.get("sampled_images"))
     unoptimised_count = _safe_int(image_stats.get("unoptimised_count"))
-    desktop_perf_status = "non_evalue" if avg_lcp_ms is None or avg_lcp_ms <= 0 or avg_fcp_ms is None or avg_fcp_ms <= 0 else ("failing" if avg_lcp_ms > 2500 else "passing")
+    desktop_perf_status = "non_evalue" if effective_lcp_ms is None or effective_lcp_ms <= 0 or avg_fcp_ms is None or avg_fcp_ms <= 0 else ("failing" if effective_lcp_ms > 2500 else "passing")
     image_perf_status = "non_evalue" if sampled_images <= 0 else ("failing" if unoptimised_count > 0 else "passing")
     cache_is_friendly = _is_cache_friendly(sec.get("cache_control"), bool(sec.get("has_cache")))
     eco_status = "non_evalue" if avg_eco_index is None else ("failing" if avg_eco_index < 30 else "warning" if avg_eco_index < 50 else "passing")
@@ -3772,6 +4005,10 @@ def build_kpi_centric_report(report: dict) -> dict:
             "data": {
                 "fcp_ms": perf.get("avg_fcp_ms"),
                 "lcp_ms": perf.get("avg_lcp_ms"),
+                "effective_lcp_ms": perf.get("effective_lcp_ms"),
+                "fallback_render_count": fallback_render_count,
+                "confidence_multiplier": perf.get("confidence_multiplier"),
+                "measurement_note": "Certaines mesures desktop proviennent du moteur de rendu de secours Obscura et sont ponderees a 90%." if fallback_render_count > 0 else None,
                 "cls": perf.get("avg_cls"),
                 "speed_index_ms": perf.get("avg_speed_index_ms"),
                 "speed_index_synthetic": True,

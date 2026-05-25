@@ -100,6 +100,10 @@ def _to_int(value, default=0):
         return default
 
 
+def _safe_int(value, default=0):
+    return _to_int(value, default)
+
+
 def _to_float(value, default=0.0):
     try:
         return float(value)
@@ -475,7 +479,10 @@ def _build_and_persist_kpi_payload(
 
         started = time.time()
         scan_meta = scan or get_scan_entry(scan_id) or {}
-        report = build_report(scan_id)
+        report = build_report(
+            scan_id,
+            enrichment_artifacts=_safe_dict(scan_meta.get("visual_enrichment")),
+        )
         if report.get("error"):
             raise RuntimeError(str(report["error"]))
 
@@ -931,6 +938,19 @@ def _build_functional_fuzzer_kpi(summary_row: dict | None, table_stats: dict | N
             for u in (table_stats.get("affected_page_urls", []) if isinstance(table_stats, dict) else [])
             if str(u or "").strip()
         ]
+    # Reconcile: if summary reports zero anomalies but table (source of truth) shows
+    # anomalies, trust the table count. The summary's anomalies_found can be stale
+    # or incorrectly computed by the scanner.
+    table_anomalies = int(table_stats.get("anomalies_count", 0) or 0)
+    if has_summary and anomalies_count == 0 and table_anomalies > 0:
+        anomalies_count = table_anomalies
+        if affected_pages == 0:
+            affected_pages = int(table_stats.get("affected_pages", 0) or 0)
+            affected_page_urls = [
+                str(u or "").strip()
+                for u in (table_stats.get("affected_page_urls", []) if isinstance(table_stats, dict) else [])
+                if str(u or "").strip()
+            ]
 
     anomalies_by_type = table_stats.get("anomalies_by_type", {}) if isinstance(table_stats, dict) else {}
     top_findings = table_stats.get("top_findings", []) if isinstance(table_stats, dict) else []
@@ -2278,12 +2298,32 @@ def _build_normalized_kpis(report: dict, context: dict) -> list:
     return kpis
 
 
-def build_report(scan_id: str) -> dict:
+def _load_scan_page_rows(scan_id: str) -> list[dict]:
+    try:
+        conn = get_db()
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur.execute(
+            "SELECT url, metrics, nlp_results FROM scan_pages WHERE scan_id = %s ORDER BY id ASC",
+            (scan_id,),
+        )
+        rows = [dict(row) for row in cur.fetchall()]
+        cur.close()
+        conn.close()
+        return rows
+    except Exception as exc:
+        logger.warning("Could not load page rows for %s: %s", scan_id, exc)
+        return []
+
+
+def evaluate_footer_rgpd_alignment_for_scan(scan_id: str, scan_url: str) -> dict:
+    return evaluate_footer_rgpd_alignment(scan_id, scan_url, _load_scan_page_rows(scan_id))
+
+
+def build_report(scan_id: str, enrichment_artifacts: Optional[dict] = None) -> dict:
     """Build the Plan A three-tier scan report from DB data."""
     try:
         conn = get_db()
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-
         cur.execute(
             "SELECT url, metrics, nlp_results FROM scan_pages WHERE scan_id = %s ORDER BY id ASC",
             (scan_id,)
@@ -2514,6 +2554,7 @@ def build_report(scan_id: str) -> dict:
     headless_cls = []
     headless_speed = []
     headless_eco = []
+    headless_fallback_count = 0
     broken_links = []
     duplicate_pages = []
     headless_sample = []
@@ -2726,6 +2767,10 @@ def build_report(scan_id: str) -> dict:
         # Headless (stored per page in metrics under "headless" key or as legacy flat)
         headless = m.get("headless", {})
         if headless:
+            fallback_engine = str(headless.get("fallback_engine") or "").strip()
+            estimated_render = bool(headless.get("estimated")) or fallback_engine == "obscura"
+            if estimated_render:
+                headless_fallback_count += 1
             if headless.get("fcp_ms"):
                 headless_fcp.append(headless["fcp_ms"])
             if headless.get("lcp_ms"):
@@ -2862,18 +2907,65 @@ def build_report(scan_id: str) -> dict:
                     mobile_metrics_data = headless["mobile_metrics"]
             headless_sample.append({
                 "url": page_url,
-                "fcp_ms": headless.get("fcp_ms"),
-                "lcp_ms": headless.get("lcp_ms"),
+                "fcp_ms": headless.get("fcp_ms") if headless.get("fcp_ms") and headless.get("fcp_ms") > 0 else None,
+                "lcp_ms": headless.get("lcp_ms") if headless.get("lcp_ms") and headless.get("lcp_ms") > 0 else None,
                 "cls": headless.get("cls"),
                 "speed_index_ms": headless.get("speed_index_ms"),
                 "eco_score": headless.get("eco_score"),
                 "eco_index": headless.get("eco_index"),
+                "available": headless.get("available", headless.get("fcp_ms", 0) > 0 and headless.get("lcp_ms", 0) > 0),
+                "measurement_status": headless.get("measurement_status", "measured" if (headless.get("fcp_ms", 0) > 0 and headless.get("lcp_ms", 0) > 0) else "zero_metrics"),
                 "mobile_overflow": headless.get("mobile_overflow"),
                 "tablet_overflow": headless.get("tablet_overflow"),
                 "invisible_links": headless.get("invisible_links", 0),
                 "unused_js_kb": round(headless.get("unused_js_bytes", 0) / 1024, 1),
                 "unused_css_kb": round(headless.get("unused_css_bytes", 0) / 1024, 1),
+                "render_engine": headless.get("render_engine"),
+                "fallback_engine": fallback_engine or None,
+                "estimated": estimated_render,
+                "confidence": headless.get("confidence"),
+                "score_multiplier": headless.get("score_multiplier"),
             })
+
+        rendered_discovery = _safe_dict(m.get("rendered_discovery"))
+        if rendered_discovery:
+            consent_banner = _safe_dict(rendered_discovery.get("consent_banner"))
+            if consent_banner:
+                rgpd_cookie_consent_rows.append({
+                    "page_url": page_url,
+                    "selector": consent_banner.get("selector"),
+                    "visible": bool(consent_banner.get("visible")),
+                    "text": _evidence_snippet(consent_banner.get("text"), 260),
+                    "has_accept": bool(consent_banner.get("has_accept")),
+                    "has_reject": bool(consent_banner.get("has_reject")),
+                    "has_manage": bool(consent_banner.get("has_manage")),
+                    "reject_symmetry": bool(consent_banner.get("reject_symmetry")),
+                    "prechecked_toggles": _safe_int(consent_banner.get("prechecked_toggles")),
+                    "source": consent_banner.get("source") or "rendered_discovery",
+                })
+
+            for req in _safe_list(rendered_discovery.get("network_requests"))[:50]:
+                if not isinstance(req, dict):
+                    continue
+                if req.get("resource_type") not in {"xhr", "fetch"}:
+                    continue
+                status_code = _safe_int(req.get("status"))
+                if status_code < 400:
+                    continue
+                host = str(req.get("host") or "").strip()
+                path = str(req.get("path") or "").strip()
+                rgpd_pre_consent_rows.append({
+                    "page_url": page_url,
+                    "tracker_domain": host,
+                    "category": "runtime_api_error",
+                    "order": None,
+                    "before_consent": None,
+                    "request_url": f"{host}{path}" if host or path else None,
+                    "vendor": "Appel reseau frontend",
+                    "resource_type": req.get("resource_type"),
+                    "status": status_code,
+                    "source": "rendered_discovery_network",
+                })
 
         # ─── Tier 3: Issues per URL Aggregation ─────────────────────────────────
         seo_page_issues = seo.get("issues", [])
@@ -3248,6 +3340,11 @@ def build_report(scan_id: str) -> dict:
         consent["rows"] = rgpd_cookie_consent_rows[:50]
         consent["has_banner"] = True
         consent["cmp_present"] = True
+        consent["runtime_rendered"] = any(
+            row.get("source") == "rendered_discovery" for row in rgpd_cookie_consent_rows
+        )
+        consent["reject_symmetry"] = any(bool(row.get("reject_symmetry")) for row in rgpd_cookie_consent_rows)
+        consent["prechecked_toggles"] = sum(_safe_int(row.get("prechecked_toggles")) for row in rgpd_cookie_consent_rows)
     # ─── Phase L post-loop computations ─────────────────────────────────────
     latest_pub_date = max(content_pub_dates) if content_pub_dates else None
     # Freshness KPI: passed if latest date is within the last 365 days
@@ -3292,11 +3389,17 @@ def build_report(scan_id: str) -> dict:
             })
 
     menu_passed = menu_bad_pages == 0
-    with ThreadPoolExecutor(max_workers=2) as _pool:
-        _footer_fut = _pool.submit(evaluate_footer_rgpd_alignment, scan_id, scan_start_url, page_rows)
-        _compat_fut = _pool.submit(evaluate_multi_browser_compatibility, scan_start_url)
-        footer_rgpd_alignment = _footer_fut.result()
-        multi_browser_compat = _compat_fut.result()
+    enrichment_artifacts = _safe_dict(enrichment_artifacts)
+    footer_rgpd_alignment = _safe_dict(enrichment_artifacts.get("footer_rgpd_alignment"))
+    multi_browser_compat = _safe_dict(enrichment_artifacts.get("multi_browser_compatibility"))
+    if not footer_rgpd_alignment or not multi_browser_compat:
+        with ThreadPoolExecutor(max_workers=2) as _pool:
+            _footer_fut = None if footer_rgpd_alignment else _pool.submit(evaluate_footer_rgpd_alignment, scan_id, scan_start_url, page_rows)
+            _compat_fut = None if multi_browser_compat else _pool.submit(evaluate_multi_browser_compatibility, scan_start_url)
+            if _footer_fut is not None:
+                footer_rgpd_alignment = _footer_fut.result()
+            if _compat_fut is not None:
+                multi_browser_compat = _compat_fut.result()
     inferred_privacy_urls = sorted(rgpd_privacy_policy_inferred_urls)
     inferred_purpose_urls = sorted(rgpd_declared_purpose_inferred_urls)
     if not bool(privacy_kpi.get("has_privacy_policy")) and inferred_privacy_urls:
@@ -3446,6 +3549,13 @@ def build_report(scan_id: str) -> dict:
             "avg_cls": avg(headless_cls),
             "avg_speed_index_ms": avg(headless_speed),
             "avg_eco_index": avg(headless_eco),
+            "fallback_render_count": headless_fallback_count,
+            "confidence_multiplier": 0.90 if headless_fallback_count > 0 else 1.0,
+            "effective_lcp_ms": (
+                round((avg(headless_lcp) or 0) / 0.90, 1)
+                if headless_fallback_count > 0 and avg(headless_lcp) is not None
+                else avg(headless_lcp)
+            ),
             "html_compression_applied": bool((domain_analysis.get("security", {}) or {}).get("has_compression", False)),
             "headless_rows": headless_sample[:200],
             "total_resource_size_kb": float(raw_seo_kpi.get("total_resource_size_kb", 0.0) or 0.0),
@@ -3593,9 +3703,23 @@ def build_report(scan_id: str) -> dict:
 
 
 
+def _enrichment_result(future, label: str) -> dict:
+    if future is None:
+        return {"status": "not_available", "reason": f"{label}_not_started"}
+    try:
+        result = future.result()
+        return result if isinstance(result, dict) else {"status": "not_available", "reason": f"{label}_invalid_result"}
+    except Exception as exc:
+        logger.warning("%s enrichment failed: %s", label, exc)
+        return {"status": "not_available", "reason": f"{label}_failed: {exc}"}
+
+
 def run_scanner(scan_id: str, url: str, max_pages: int, headless_concurrency: int):
     """Triggers the Go scanner API via HTTP."""
     update_scan_entry(scan_id, status=ScanStatus.RUNNING)
+    enrichment_pool = ThreadPoolExecutor(max_workers=2)
+    compat_future = enrichment_pool.submit(evaluate_multi_browser_compatibility, url)
+    footer_future = None
 
     # Extract domains for colly limit rules
     domain = url.split("://")[-1].split("/")[0]
@@ -3617,65 +3741,75 @@ def run_scanner(scan_id: str, url: str, max_pages: int, headless_concurrency: in
     scanner_candidates = _scanner_base_candidates()
     primary_scanner = (SCANNER_API_URL or "").strip().rstrip("/")
 
-    for scanner_base in scanner_candidates:
-        try:
-            logger.info("Trying scanner endpoint: %s", scanner_base)
-            response = requests.post(f"{scanner_base}/scan", json=payload, timeout=900)
-            response.raise_for_status()
-            if scanner_base != primary_scanner:
-                logger.warning(
-                    "Primary scanner endpoint unavailable (%s). Using fallback: %s",
-                    primary_scanner,
-                    scanner_base,
-                )
-            break
-        except requests.exceptions.RequestException as e:
-            attempt_errors.append(f"{scanner_base}: {e}")
-
-    if response is None:
-        update_scan_entry(scan_id, status=ScanStatus.FAILED)
-        err_msg = (
-            "Scanner unreachable on all candidates. "
-            "Set SCANNER_API_URL to a reachable scanner service. "
-            f"Attempts: {' | '.join(attempt_errors)}"
-        )
-        if len(err_msg) > 500:
-            err_msg = err_msg[0:500]
-        update_scan_entry(scan_id, error=err_msg)
-        logger.error(f"Scanner API failed for {scan_id}: {err_msg}")
-        return
-
-    update_scan_entry(scan_id, status=ScanStatus.NLP_PROCESSING)
-    logger.info(f"Scanner done for {scan_id}. Waiting for NLP worker...")
-
-    total = 0
-    nlp_done = 0
-    # Poll until NLP finishes all pages (max 5 minutes)
-    for _ in range(100):
-        total, nlp_done = count_pages(scan_id)
-        if total > 0 and nlp_done >= total:
-            break
-        time.sleep(3)
-
-    nlp_partiel = total > 0 and nlp_done < total
-    if nlp_partiel:
-        logger.warning(
-            f"NLP partiel pour {scan_id}: {nlp_done}/{total} pages enrichies. "
-            "Le rapport contiendra des KPIs NLP incomplets."
-        )
-    update_scan_entry(scan_id, status=ScanStatus.FINALIZING, nlp_partiel=nlp_partiel)
-    logger.info(f"Scanner/NLP done for {scan_id}; building KPI payload before completion.")
     try:
-        _build_and_persist_kpi_payload(scan_id, scan=get_scan_entry(scan_id), wait_for_lock=True)
-    except Exception as exc:
-        err_msg = f"KPI payload build failed: {exc}"
-        if len(err_msg) > 500:
-            err_msg = err_msg[:500]
-        update_scan_entry(scan_id, status=ScanStatus.FAILED, error=err_msg)
-        logger.exception("KPI payload build failed for %s", scan_id)
-        return
-    update_scan_entry(scan_id, status=ScanStatus.COMPLETE, nlp_partiel=nlp_partiel)
-    logger.info(f"Scan {scan_id} complet avec {total} pages (nlp_partiel={nlp_partiel}).")
+        for scanner_base in scanner_candidates:
+            try:
+                logger.info("Trying scanner endpoint: %s", scanner_base)
+                response = requests.post(f"{scanner_base}/scan", json=payload, timeout=900)
+                response.raise_for_status()
+                if scanner_base != primary_scanner:
+                    logger.warning(
+                        "Primary scanner endpoint unavailable (%s). Using fallback: %s",
+                        primary_scanner,
+                        scanner_base,
+                    )
+                break
+            except requests.exceptions.RequestException as e:
+                attempt_errors.append(f"{scanner_base}: {e}")
+
+        if response is None:
+            update_scan_entry(scan_id, status=ScanStatus.FAILED)
+            err_msg = (
+                "Scanner unreachable on all candidates. "
+                "Set SCANNER_API_URL to a reachable scanner service. "
+                f"Attempts: {' | '.join(attempt_errors)}"
+            )
+            if len(err_msg) > 500:
+                err_msg = err_msg[0:500]
+            update_scan_entry(scan_id, error=err_msg)
+            logger.error(f"Scanner API failed for {scan_id}: {err_msg}")
+            return
+
+        footer_future = enrichment_pool.submit(evaluate_footer_rgpd_alignment_for_scan, scan_id, url)
+        update_scan_entry(scan_id, status=ScanStatus.NLP_PROCESSING)
+        logger.info(f"Scanner done for {scan_id}. Waiting for NLP worker...")
+
+        total = 0
+        nlp_done = 0
+        # Poll until NLP finishes all pages (max 5 minutes)
+        for _ in range(100):
+            total, nlp_done = count_pages(scan_id)
+            if total > 0 and nlp_done >= total:
+                break
+            time.sleep(3)
+
+        nlp_partiel = total > 0 and nlp_done < total
+        if nlp_partiel:
+            logger.warning(
+                f"NLP partiel pour {scan_id}: {nlp_done}/{total} pages enrichies. "
+                "Le rapport contiendra des KPIs NLP incomplets."
+            )
+        update_scan_entry(scan_id, status=ScanStatus.FINALIZING, nlp_partiel=nlp_partiel)
+        logger.info(f"Scanner/NLP done for {scan_id}; waiting for visual/browser artifacts.")
+        visual_enrichment = {
+            "multi_browser_compatibility": _enrichment_result(compat_future, "multi_browser_compatibility"),
+            "footer_rgpd_alignment": _enrichment_result(footer_future, "footer_rgpd_alignment"),
+        }
+        update_scan_entry(scan_id, visual_enrichment=visual_enrichment)
+        logger.info(f"Visual/browser artifacts ready for {scan_id}; building KPI payload before completion.")
+        try:
+            _build_and_persist_kpi_payload(scan_id, scan=get_scan_entry(scan_id), wait_for_lock=True)
+        except Exception as exc:
+            err_msg = f"KPI payload build failed: {exc}"
+            if len(err_msg) > 500:
+                err_msg = err_msg[:500]
+            update_scan_entry(scan_id, status=ScanStatus.FAILED, error=err_msg)
+            logger.exception("KPI payload build failed for %s", scan_id)
+            return
+        update_scan_entry(scan_id, status=ScanStatus.COMPLETE, nlp_partiel=nlp_partiel)
+        logger.info(f"Scan {scan_id} complet avec {total} pages (nlp_partiel={nlp_partiel}).")
+    finally:
+        enrichment_pool.shutdown(wait=False, cancel_futures=True)
 
 
 # ─── Endpoints ────────────────────────────────────────────────────────────────

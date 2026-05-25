@@ -13,6 +13,7 @@ NO_CACHE=false
 REBUILD_BASE=false
 FORCE_RECREATE=false
 DOWN=false
+OBSCURA=true
 
 log() {
   printf '[%s] %s\n' "$(date '+%H:%M:%S')" "$*"
@@ -20,7 +21,7 @@ log() {
 
 usage() {
   cat <<'EOF'
-Usage: ./run-all.sh [--local] [--no-cache] [--rebuild-base] [--force-recreate] [--down]
+Usage: ./run-all.sh [--local] [--no-cache] [--rebuild-base] [--force-recreate] [--down] [--no-obscura]
 
 Options:
   --local                  Use .env.local and the snapflow-local-preprod compose project.
@@ -29,6 +30,8 @@ Options:
   --rebuild-base           Rebuild shared Python base images even when they already exist.
   --force-recreate         Recreate containers after build.
   --down                   Stop and remove containers before rebuilding. Keeps named volumes unless combined manually.
+  --obscura                Start the Obscura profile and enable rendered discovery through Obscura.
+  --no-obscura             Disable Obscura and use the local Chromium pool only.
   -h, --help               Show this help.
 
 Examples:
@@ -67,6 +70,12 @@ for arg in "$@"; do
     --down)
       DOWN=true
       ;;
+    --obscura)
+      OBSCURA=true
+      ;;
+    --no-obscura)
+      OBSCURA=false
+      ;;
     -h|--help)
       usage
       exit 0
@@ -78,6 +87,10 @@ for arg in "$@"; do
       ;;
   esac
 done
+
+if [ "$OBSCURA" = true ]; then
+  export ENABLE_OBSCURA_DISCOVERY=true
+fi
 
 read_env_value() {
   local key="$1"
@@ -119,10 +132,14 @@ validate_env_file() {
 
 compose_cmd=()
 if [ "$LOCAL" = true ]; then
-  compose_cmd=(docker compose -p "$COMPOSE_PROJECT" --env-file "$ENV_FILE" -f docker-compose.preprod.yml)
+  compose_cmd=(docker compose -p "$COMPOSE_PROJECT")
 else
-  compose_cmd=(docker compose --env-file "$ENV_FILE" -f docker-compose.preprod.yml)
+  compose_cmd=(docker compose)
 fi
+if [ "$OBSCURA" = true ]; then
+  compose_cmd+=(--profile obscura)
+fi
+compose_cmd+=(--env-file "$ENV_FILE" -f docker-compose.preprod.yml)
 
 require_env_file "$ENV_FILE"
 validate_env_file "$ENV_FILE"
@@ -132,6 +149,7 @@ log "Env file : $ENV_FILE"
 log "No cache : $NO_CACHE"
 log "Rebuild base : $REBUILD_BASE"
 log "Force recreate : $FORCE_RECREATE"
+log "Obscura  : $OBSCURA"
 if [ "$LOCAL" = true ]; then
   log "Project  : $COMPOSE_PROJECT"
 fi

@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/input';
 import { useProjectAssignments } from '@/hooks/useProjectAssignments';
 import { useRedmineIdentifier } from '@/hooks/useRedmineIdentifier';
 import { fetchProjectDetail } from '@/services/redmineService';
+import { isRedmineProjectUrl, resolveProjectWebsiteUrl, resolveRedmineProjectLink } from '@/lib/projectUrls';
 import { ClientLogoSidebar } from '@/components/projects/ClientLogoSidebar';
 import { Globe, User, ExternalLink, FileText, ChevronUp, ChevronDown, Loader2 } from 'lucide-react';
 import type { ProjectContext } from './ProjectShell';
@@ -20,11 +21,6 @@ interface RedmineProjectDetail {
   homepage?: string;
   custom_fields?: Array<{ id: number; name: string; value: string }>;
   memberships?: Array<{ id: number; user?: { id: number; name: string }; roles: Array<{ id: number; name: string }> }>;
-}
-
-function isLikelyRedmineUrl(value: string): boolean {
-  const lowered = value.toLowerCase();
-  return lowered.includes('redmine') || /\/projects\/[^/]+/.test(lowered) || /^https?:\/\/[^/]*redmine/i.test(value);
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -52,16 +48,22 @@ const ProjectFiche = () => {
     if (!redmineIdentifier) { setLoadingCard(false); return; }
     setLoadingCard(true);
     fetchProjectDetail(redmineIdentifier)
-      .then(setRedmineDetail)
+      .then(async detail => {
+        setRedmineDetail(detail);
+        const homepage = detail?.homepage?.trim();
+        if (homepage && project?.url && isRedmineProjectUrl(project.url)) {
+          await supabase
+            .from('projects')
+            .update({ url: homepage, redmine_url: project.redmine_url || project.url, audit_url_needs_review: false } as any)
+            .eq('id', projectId);
+        }
+      })
       .finally(() => setLoadingCard(false));
-  }, [redmineIdentifier]);
+  }, [redmineIdentifier, projectId, project?.url, project?.redmine_url]);
 
   const resolveLogoTargetUrl = (): string => {
     if (!project) return '';
-    const primaryUrl = project.url?.trim() ?? '';
-    const homepage = redmineDetail?.homepage?.trim() ?? '';
-    if (isLikelyRedmineUrl(primaryUrl) && homepage) return homepage;
-    return primaryUrl || homepage;
+    return resolveProjectWebsiteUrl(project.url, redmineDetail?.homepage);
   };
 
   const handleSaveLogoUrl = async () => {
@@ -86,6 +88,8 @@ const ProjectFiche = () => {
   };
 
   if (!project) return null;
+  const websiteUrl = resolveProjectWebsiteUrl(project.url, redmineDetail?.homepage);
+  const redmineProjectLink = resolveRedmineProjectLink(project.url, project.redmine_url);
 
   return (
     <div className="glass-card overflow-hidden">
@@ -148,9 +152,9 @@ const ProjectFiche = () => {
                   <ExternalLink className="w-4 h-4 text-muted-foreground mt-0.5 flex-shrink-0" />
                   <div>
                     <p className="text-xs text-muted-foreground">Site web</p>
-                    {redmineDetail?.homepage ? (
-                      <a href={redmineDetail.homepage} target="_blank" rel="noopener noreferrer" className="text-sm text-primary hover:underline break-all">
-                        {redmineDetail.homepage}
+                    {websiteUrl ? (
+                      <a href={websiteUrl} target="_blank" rel="noopener noreferrer" className="text-sm text-primary hover:underline break-all">
+                        {websiteUrl}
                       </a>
                     ) : (
                       <p className="text-sm text-muted-foreground italic">Non renseigné dans Redmine</p>
@@ -163,9 +167,13 @@ const ProjectFiche = () => {
                   <ExternalLink className="w-4 h-4 text-muted-foreground mt-0.5 flex-shrink-0" />
                   <div>
                     <p className="text-xs text-muted-foreground">Lien projet</p>
-                    <a href={project.url} target="_blank" rel="noopener noreferrer" className="text-sm text-primary hover:underline break-all">
-                      {project.url}
-                    </a>
+                    {redmineProjectLink ? (
+                      <a href={redmineProjectLink} target="_blank" rel="noopener noreferrer" className="text-sm text-primary hover:underline break-all">
+                        {redmineProjectLink}
+                      </a>
+                    ) : (
+                      <p className="text-sm text-muted-foreground italic">Non relié à Redmine</p>
+                    )}
                   </div>
                 </div>
 

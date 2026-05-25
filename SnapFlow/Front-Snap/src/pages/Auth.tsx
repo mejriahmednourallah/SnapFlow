@@ -24,8 +24,46 @@ const Auth = () => {
 
     try {
       if (mode === 'login') {
-        const { error } = await supabase.auth.signInWithPassword({ email, password });
+        const identifier = email.trim();
+        const looksLikeEmail = identifier.includes('@');
+
+        if (looksLikeEmail) {
+          const { error } = await supabase.auth.signInWithPassword({ email: identifier, password });
+          if (!error) {
+            toast({ title: 'Connecté', description: 'Bienvenue sur Snapflow !' });
+            navigate('/app');
+            return;
+          }
+        }
+
+        const { data, error } = await supabase.functions.invoke('redmine-login', {
+          body: {
+            login: identifier,
+            password,
+            redirect_to: window.location.origin,
+          },
+        });
+
         if (error) throw error;
+        if (data?.manual_account_exists) {
+          throw new Error(data.error || 'Ce compte doit utiliser la connexion SnapFlow.');
+        }
+        if (data?.error) throw new Error(data.error);
+
+        if (data?.email && data?.token) {
+          const { error: otpError } = await supabase.auth.verifyOtp({
+            email: data.email,
+            token: data.token,
+            type: 'magiclink',
+          });
+          if (otpError) throw otpError;
+        } else if (data?.action_link) {
+          window.location.href = data.action_link;
+          return;
+        } else {
+          throw new Error('Connexion Redmine valide, mais session SnapFlow indisponible.');
+        }
+
         toast({ title: 'Connecté', description: 'Bienvenue sur Snapflow !' });
         navigate('/app');
       } else if (mode === 'signup') {
@@ -88,12 +126,14 @@ const Auth = () => {
             {mode !== 'confirm' && (
               <>
                 <div>
-                  <label className="text-sm text-muted-foreground mb-1 block">Email</label>
+                  <label className="text-sm text-muted-foreground mb-1 block">
+                    {mode === 'login' ? 'Email ou identifiant Redmine' : 'Email'}
+                  </label>
                   <Input
-                    type="email"
+                    type={mode === 'login' ? 'text' : 'email'}
                     value={email}
                     onChange={e => setEmail(e.target.value)}
-                    placeholder="vous@exemple.com"
+                    placeholder={mode === 'login' ? 'vous@exemple.com ou identifiant Redmine' : 'vous@exemple.com'}
                     required
                   />
                 </div>

@@ -5,7 +5,7 @@ export type FindingStatus = 'pass' | 'fail' | 'not_measured' | 'not_available' |
 export type FindingOrigin = 'bug' | 'recommendation' | 'RGPD' | 'coverage' | 'passing_kpi' | 'legacy';
 
 // ── French display labels for the new KPI contract ───────────────────
-export type KpiStatut = 'Concluant' | 'Non concluant' | 'Non testé';
+export type KpiStatut = 'Concluant' | 'Non concluant' | 'Non testé' | 'À vérifier';
 export type KpiTypeLabel = 'Conforme' | 'Bug' | 'Recommandation' | 'Indéterminé' | 'Non applicable';
 export type KpiPriorite = 'Majeure' | 'Mineure' | 'Normale';
 
@@ -185,6 +185,7 @@ export interface AuditFinding {
   evidenceMissingReason?: string;
   evidenceRaw?: unknown;
   recommendationSource?: string;
+  displayScorePct?: number;
   /** French display labels per the new KPI contract */
   kpiLabels?: KpiLabels;
 }

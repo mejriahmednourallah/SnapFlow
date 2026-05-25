@@ -1,5 +1,6 @@
 import { supabase } from '@/integrations/supabase/client';
 import { mapApiResponseToReport, type ApiResponse } from '@/lib/auditMapper';
+import { isRedmineProjectUrl, normalizeAuditUrl } from '@/lib/projectUrls';
 import type { AuditReport } from '@/data/mockAuditData';
 
 export interface PendingJob {
@@ -13,18 +14,14 @@ export interface ProjectRef {
   url: string;
 }
 
-function normalizeAuditUrl(projectUrl: string): string {
-  const raw = projectUrl.trim();
-  if (!raw) return raw;
-  const withProtocol = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
-  return withProtocol;
-}
-
 /** Insert a new "generating" audit row and kick off the async audit job.
  *  Returns the newly created auditId and the job_id from the backend.
  */
 export async function generateAudit(projectId: string, projectUrl: string): Promise<PendingJob> {
   const auditUrl = normalizeAuditUrl(projectUrl);
+  if (isRedmineProjectUrl(auditUrl)) {
+    throw new Error("L'URL d'audit pointe vers Redmine. Renseignez le site web du client avant de lancer le rapport.");
+  }
   console.log(`[generateAudit] projectId=${projectId}, original=${projectUrl}, normalized=${auditUrl}`);
 
   // Step 1 — create audit row

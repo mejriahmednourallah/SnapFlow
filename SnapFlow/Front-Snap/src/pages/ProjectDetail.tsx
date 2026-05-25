@@ -18,6 +18,7 @@ import { useRedmineIdentifier } from '@/hooks/useRedmineIdentifier';
 import { generateAudit, archiveAudit, failAuditRow } from '@/services/auditService';
 import { fetchProjectDetail } from '@/services/redmineService';
 import { normalizeAuditForRead, getAuditScoreFromAny } from '@/lib/auditReadUtils';
+import { isRedmineProjectUrl, resolveAuditTargetUrl as resolveProjectAuditTargetUrl, resolveProjectWebsiteUrl, resolveRedmineProjectLink } from '@/lib/projectUrls';
 import { ClientLogoSidebar } from '@/components/projects/ClientLogoSidebar';
 
 interface AuditRow {
@@ -68,15 +69,14 @@ const ProjectDetail = () => {
   const [logoUrlInput, setLogoUrlInput] = useState('');
   const [isSavingLogo, setIsSavingLogo] = useState(false);
 
-  const isLikelyRedmineUrl = (value: string): boolean => {
-    const lowered = value.toLowerCase();
-    // Check for redmine domain, /projects/ path, or common Redmine patterns
-    return lowered.includes('redmine') || 
-           /\/projects\/[^/]+/.test(lowered) ||
-           /^https?:\/\/[^/]*redmine/i.test(value);
+  const resolveAuditTargetUrl = (): string => {
+    if (!project) return '';
+    return resolveProjectAuditTargetUrl(project.url, redmineDetail?.homepage);
   };
 
-  const resolveAuditTargetUrl = (): string => {
+  const isLikelyRedmineUrl = isRedmineProjectUrl;
+
+  const resolveLegacyAuditTargetUrl = (): string => {
     if (!project) return '';
     const primaryUrl = project.url?.trim() ?? '';
     const fallbackHomepage = redmineDetail?.homepage?.trim() ?? '';
@@ -129,11 +129,11 @@ const ProjectDetail = () => {
 
   const resolveLogoTargetUrl = (): string => {
     if (!project) return '';
-    const primaryUrl = project.url?.trim() ?? '';
-    const homepage = redmineDetail?.homepage?.trim() ?? '';
-    if (isLikelyRedmineUrl(primaryUrl) && homepage) return homepage;
-    return primaryUrl || homepage;
+    return resolveProjectWebsiteUrl(project.url, redmineDetail?.homepage);
   };
+
+  const websiteUrl = project ? resolveProjectWebsiteUrl(project.url, redmineDetail?.homepage) : '';
+  const redmineProjectLink = project ? resolveRedmineProjectLink(project.url, project.redmine_url) : '';
 
   // Hooks replacing inline logic
   const { assignedUser } = useProjectAssignments(projectId);
@@ -171,11 +171,18 @@ const ProjectDetail = () => {
       setLoadingCard(false);
       return;
     }
-    fetchProjectDetail(redmineIdentifier).then(detail => {
+    fetchProjectDetail(redmineIdentifier).then(async detail => {
       setRedmineDetail(detail);
+      const homepage = detail?.homepage?.trim();
+      if (homepage && projectId && project?.url && isRedmineProjectUrl(project.url)) {
+        await supabase
+          .from('projects')
+          .update({ url: homepage, redmine_url: project.redmine_url || project.url, audit_url_needs_review: false } as any)
+          .eq('id', projectId);
+      }
       setLoadingCard(false);
     });
-  }, [redmineIdentifier]);
+  }, [redmineIdentifier, projectId, project?.url, project?.redmine_url]);
 
   // Async audit polling hook — replaces the inline setInterval block
   const { pendingJob, generating, setPendingJob, setGenerating } = useAsyncAuditPoll(
@@ -220,7 +227,9 @@ const ProjectDetail = () => {
     if (!auditTargetUrl) {
       toast({
         title: 'URL site manquante',
-        description: "Impossible de lancer l'audit sans URL de site valide.",
+        description: isRedmineProjectUrl(project.url)
+          ? "Ce projet pointe encore vers Redmine. Renseignez ou synchronisez le site web du client avant de lancer l'audit."
+          : "Impossible de lancer l'audit sans URL de site valide.",
         variant: 'destructive',
       });
       return;
@@ -402,9 +411,9 @@ const ProjectDetail = () => {
                       <ExternalLink className="w-4 h-4 text-muted-foreground mt-0.5 flex-shrink-0" />
                       <div>
                         <p className="text-xs text-muted-foreground">Site web</p>
-                        {redmineDetail?.homepage ? (
-                          <a href={redmineDetail.homepage} target="_blank" rel="noopener noreferrer" className="text-sm text-primary hover:underline break-all">
-                            {redmineDetail.homepage}
+                        {websiteUrl ? (
+                          <a href={websiteUrl} target="_blank" rel="noopener noreferrer" className="text-sm text-primary hover:underline break-all">
+                            {websiteUrl}
                           </a>
                         ) : (
                           <p className="text-sm text-muted-foreground italic">Non renseigné dans Redmine</p>
@@ -416,9 +425,13 @@ const ProjectDetail = () => {
                       <ExternalLink className="w-4 h-4 text-muted-foreground mt-0.5 flex-shrink-0" />
                       <div>
                         <p className="text-xs text-muted-foreground">Lien projet</p>
-                        <a href={project.url} target="_blank" rel="noopener noreferrer" className="text-sm text-primary hover:underline break-all">
-                          {project.url}
-                        </a>
+                        {redmineProjectLink ? (
+                          <a href={redmineProjectLink} target="_blank" rel="noopener noreferrer" className="text-sm text-primary hover:underline break-all">
+                            {redmineProjectLink}
+                          </a>
+                        ) : (
+                          <p className="text-sm text-muted-foreground italic">Non relié à Redmine</p>
+                        )}
                       </div>
                     </div>
 

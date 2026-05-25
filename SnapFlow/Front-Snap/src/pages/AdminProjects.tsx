@@ -8,6 +8,7 @@ import { Globe, Plus, Download, Users, ArrowLeft, Trash2, Eye, Filter, ArrowUpDo
 import { RefreshCw } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { getAuditScoreFromAny } from '@/lib/auditReadUtils';
+import { getProfileDisplayName } from '@/lib/userDisplay';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from '@/components/ui/dialog';
@@ -17,6 +18,8 @@ interface Profile {
   id: string;
   email: string;
   full_name: string | null;
+  redmine_login?: string | null;
+  redmine_display_name?: string | null;
 }
 
 interface Project {
@@ -49,10 +52,11 @@ interface RedmineProject {
   name: string;
   identifier: string;
   homepage?: string;
+  existing?: boolean;
 }
 
 const AdminProjects = () => {
-  const { user, isAdmin } = useAuth();
+  const { user, isAdmin, userRole } = useAuth();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const filterUserId = searchParams.get('user');
@@ -86,17 +90,24 @@ const AdminProjects = () => {
   const [selectedRedmine, setSelectedRedmine] = useState<Set<number>>(new Set());
   const [redmineAssignee, setRedmineAssignee] = useState('');
   const [importing, setImporting] = useState(false);
+  const [syncingMyRedmine, setSyncingMyRedmine] = useState(false);
   const [redmineSearch, setRedmineSearch] = useState('');
 
   const fetchData = async () => {
-    const [profilesRes, projectsRes, assignmentsRes, auditsRes, schedulesRes] = await Promise.all([
+    const [profilesRes, redmineIdentitiesRes, projectsRes, assignmentsRes, auditsRes, schedulesRes] = await Promise.all([
       supabase.from('profiles').select('id, email, full_name'),
+      supabase.from('redmine_user_identities').select('user_id, redmine_login, redmine_display_name'),
       supabase.from('projects').select('*'),
       supabase.from('project_assignments').select('*'),
       supabase.from('audits').select('project_id, report_data, created_at, status').order('created_at', { ascending: false }),
       supabase.from('report_schedules').select('project_id, next_run_at, report_type').eq('is_active', true).order('next_run_at', { ascending: true }),
     ]);
-    setProfiles(profilesRes.data || []);
+    const identitiesByUser = new Map((redmineIdentitiesRes.data || []).map((identity: any) => [identity.user_id, identity]));
+    setProfiles((profilesRes.data || []).map((profile: any) => ({
+      ...profile,
+      redmine_login: identitiesByUser.get(profile.id)?.redmine_login ?? null,
+      redmine_display_name: identitiesByUser.get(profile.id)?.redmine_display_name ?? null,
+    })));
     setProjects(projectsRes.data || []);
     setAssignments(assignmentsRes.data || []);
 
@@ -208,6 +219,8 @@ const AdminProjects = () => {
   }, [projects, assignments, latestAudits, filterUserId, filterCharge, filterScoreMin, filterScoreMax, sortBy]);
 
   const filterUser = filterUserId ? profiles.find((p) => p.id === filterUserId) : null;
+  const currentUserProfile = user?.id ? profiles.find((p) => p.id === user.id) : null;
+  const canImportRedmine = isAdmin || ['charge', 'charge_de_projet'].includes(String(userRole || '').toLowerCase());
 
   const handleAddProject = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -332,6 +345,17 @@ const AdminProjects = () => {
     setLoadingRedmine(true);
     setFilteringRedmineByUser(Boolean(filterUserId));
     try {
+      if (!isAdmin) {
+        const { data, error } = await supabase.functions.invoke('fetch-redmine', {
+          body: { type: 'my_redmine_projects_for_import' },
+        });
+        if (error) throw error;
+        if (data?.error) throw new Error(data.error);
+        setRedmineProjects((data?.projects || []) as RedmineProject[]);
+        setShowRedmine(true);
+        return;
+      }
+
       const [{ data: projectData, error: projectError }, { data: cacheData, error: cacheError }] = await Promise.all([
         supabase.functions.invoke('fetch-redmine', {
           body: { type: 'projects' },
@@ -399,6 +423,27 @@ const AdminProjects = () => {
     if (selectedRedmine.size === 0) return;
     setImporting(true);
     try {
+      if (!isAdmin) {
+        const identifiers = Array.from(selectedRedmine)
+          .map((rid) => redmineProjects.find((p) => p.id === rid)?.identifier)
+          .filter((identifier): identifier is string => Boolean(identifier));
+
+        const { data, error } = await supabase.functions.invoke('fetch-redmine', {
+          body: { type: 'import_my_redmine_projects', identifiers },
+        });
+        if (error) throw error;
+        if (data?.error) throw new Error(data.error);
+
+        toast({
+          title: 'Import terminé',
+          description: `${data?.imported ?? identifiers.length} projet(s) Redmine disponible(s).`,
+        });
+        setShowRedmine(false);
+        setSelectedRedmine(new Set());
+        await fetchData();
+        return;
+      }
+
       const assigneeId = filterUserId || redmineAssignee;
 
       for (const rid of selectedRedmine) {
@@ -410,7 +455,13 @@ const AdminProjects = () => {
 
         const { data: proj, error } = await supabase
           .from('projects')
-          .insert({ url: siteUrl, redmine_url: redmineUrl, site_name: rp.name })
+          .insert({
+            url: siteUrl,
+            redmine_url: redmineUrl,
+            redmine_identifier: rp.identifier,
+            site_name: rp.name,
+            audit_url_needs_review: !rp.homepage,
+          })
           .select()
           .single();
         if (error) throw error;
@@ -432,6 +483,31 @@ const AdminProjects = () => {
     }
   };
 
+  const handleSyncMyRedmineProjects = async () => {
+    setSyncingMyRedmine(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('fetch-redmine', {
+        body: { type: 'sync_my_redmine_projects' },
+      });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+
+      toast({
+        title: 'Projets Redmine synchronisÃ©s',
+        description: `${data?.imported ?? 0} projet(s) disponible(s), ${data?.revoked ?? 0} accÃ¨s retirÃ©(s).`,
+      });
+      await fetchData();
+    } catch (err: any) {
+      toast({
+        title: 'Synchronisation Redmine impossible',
+        description: err.message || 'Connectez-vous avec Redmine pour importer vos projets.',
+        variant: 'destructive',
+      });
+    } finally {
+      setSyncingMyRedmine(false);
+    }
+  };
+
   const handleResetFilters = () => {
     setFilterCharge('');
     setFilterScoreMin('');
@@ -448,7 +524,7 @@ const AdminProjects = () => {
         <Button variant="ghost" size="sm" onClick={() => navigate('/app/projects')}>
             <ArrowLeft className="w-4 h-4 mr-1" /> Tous les projets
           </Button>
-          <span className="text-muted-foreground">Projets de <strong className="text-foreground">{filterUser.full_name || filterUser.email}</strong></span>
+          <span className="text-muted-foreground">Projets de <strong className="text-foreground">{getProfileDisplayName(filterUser)}</strong></span>
         </div>
       )}
 
@@ -456,8 +532,25 @@ const AdminProjects = () => {
         <h2 className="text-xl font-bold flex items-center gap-2">
           <Globe className="w-5 h-5 text-primary" /> Projets ({filteredAndSortedProjects.length})
         </h2>
-        {isAdmin && (
-          <div className="flex gap-2 flex-wrap">
+        <div className="flex gap-2 flex-wrap">
+          {!isAdmin && (
+            <>
+              <Button size="sm" variant="outline" onClick={handleSyncMyRedmineProjects} disabled={syncingMyRedmine}>
+                <RefreshCw className={`w-4 h-4 mr-1.5 ${syncingMyRedmine ? 'animate-spin' : ''}`} />
+                <span className="hidden sm:inline">{syncingMyRedmine ? 'Synchronisation...' : 'Synchroniser mes accès'}</span>
+                <span className="sm:hidden">{syncingMyRedmine ? '...' : 'Sync'}</span>
+              </Button>
+              {canImportRedmine && (
+                <Button size="sm" variant="outline" onClick={handleFetchRedmine} disabled={loadingRedmine}>
+                  <Download className="w-4 h-4 mr-1.5" />
+                  <span className="hidden sm:inline">{loadingRedmine ? 'Chargement...' : 'Importer de Redmine'}</span>
+                  <span className="sm:hidden">{loadingRedmine ? '...' : 'Redmine'}</span>
+                </Button>
+              )}
+            </>
+          )}
+          {isAdmin && (
+            <>
             <Button size="sm" variant="outline" onClick={handleBulkSyncAssignments} disabled={syncingBulk}>
               <RefreshCw className={`w-4 h-4 mr-1.5 ${syncingBulk ? 'animate-spin' : ''}`} />
               <span className="hidden sm:inline">{syncingBulk ? 'Syncing…' : 'Sync to Redmine'}</span>
@@ -469,8 +562,9 @@ const AdminProjects = () => {
             <Button size="sm" onClick={() => setShowAdd(!showAdd)}>
               <Plus className="w-4 h-4 mr-1.5" /> Ajouter
             </Button>
-          </div>
-        )}
+            </>
+          )}
+        </div>
       </div>
 
       {/* Filters & Sorting bar */}
@@ -494,7 +588,7 @@ const AdminProjects = () => {
             >
               <option value="">Tous</option>
               {chargeProfiles.map(p => (
-                <option key={p.id} value={p.id}>{p.full_name || p.email}</option>
+                <option key={p.id} value={p.id}>{getProfileDisplayName(p)}</option>
               ))}
             </select>
           </div>
@@ -559,7 +653,7 @@ const AdminProjects = () => {
             <select value={newAssignee} onChange={e => setNewAssignee(e.target.value)} className="w-full h-10 text-sm bg-secondary border border-border rounded-md px-3 text-foreground">
               <option value="">— Aucun —</option>
               {profiles.map(p => (
-                <option key={p.id} value={p.id}>{p.full_name || p.email}</option>
+                <option key={p.id} value={p.id}>{getProfileDisplayName(p)}</option>
               ))}
             </select>
           </div>
@@ -572,7 +666,7 @@ const AdminProjects = () => {
         <div className="glass-card p-4 space-y-4">
           <div className="flex items-center justify-between">
             <h3 className="font-semibold text-sm">
-              Projets Redmine {filterUserId ? `pour ${filterUser?.full_name || filterUser?.email}` : ''} ({redmineProjects.length})
+              Projets Redmine {filterUserId ? `pour ${getProfileDisplayName(filterUser)}` : ''} ({redmineProjects.length})
             </h3>
             <Button variant="ghost" size="sm" onClick={() => setShowRedmine(false)}>Fermer</Button>
           </div>
@@ -586,21 +680,23 @@ const AdminProjects = () => {
           <div className="flex items-end gap-3 mb-2">
             <div className="flex-1">
               <label className="text-xs text-muted-foreground mb-1 block">
-                {filterUserId ? `Affecter les projets sélectionnés à ${filterUser?.full_name || filterUser?.email}` : 'Affecter les projets sélectionnés à'}
+                {filterUserId ? `Affecter les projets sélectionnés à ${getProfileDisplayName(filterUser)}` : isAdmin ? 'Affecter les projets sélectionnés à' : 'Importer pour mon compte'}
               </label>
               <select 
-                value={filterUserId ? filterUserId : redmineAssignee} 
-                onChange={e => !filterUserId && setRedmineAssignee(e.target.value)} 
-                disabled={!!filterUserId}
+                value={filterUserId ? filterUserId : !isAdmin ? user?.id || '' : redmineAssignee}
+                onChange={e => !filterUserId && isAdmin && setRedmineAssignee(e.target.value)}
+                disabled={!!filterUserId || !isAdmin}
                 className="w-full h-10 text-sm bg-secondary border border-border rounded-md px-3 text-foreground disabled:opacity-60"
               >
                 {filterUserId ? (
-                  <option value={filterUserId}>{filterUser?.full_name || filterUser?.email || 'Utilisateur'}</option>
+                  <option value={filterUserId}>{getProfileDisplayName(filterUser)}</option>
+                ) : !isAdmin ? (
+                  <option value={user?.id || ''}>{getProfileDisplayName(currentUserProfile)}</option>
                 ) : (
                   <>
                     <option value="">— Aucun —</option>
                     {profiles.map(p => (
-                      <option key={p.id} value={p.id}>{p.full_name || p.email}</option>
+                      <option key={p.id} value={p.id}>{getProfileDisplayName(p)}</option>
                     ))}
                   </>
                 )}
@@ -703,7 +799,7 @@ const AdminProjects = () => {
               <div className="flex items-center gap-1 flex-wrap">
                 <Users className="w-3 h-3 text-muted-foreground" />
                 {assignedUsers.length > 0 ? assignedUsers.map(u => (
-                  <span key={u.id} className="text-xs bg-primary/10 text-primary px-2 py-0.5 rounded-full">{u.full_name || u.email}</span>
+                  <span key={u.id} className="text-xs bg-primary/10 text-primary px-2 py-0.5 rounded-full">{getProfileDisplayName(u)}</span>
                 )) : (
                   <span className="text-xs text-muted-foreground">Non assigne</span>
                 )}

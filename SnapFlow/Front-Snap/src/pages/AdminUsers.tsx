@@ -8,12 +8,15 @@ import { UserPlus, Trash2, Download, ExternalLink, Search, RefreshCw } from 'luc
 import { useToast } from '@/hooks/use-toast';
 import { createUser, updateRole, deleteUser } from '@/services/authService';
 import { fetchRedmineUsers, syncRedmineHomepages } from '@/services/redmineService';
+import { getProfileDisplayName, isSyntheticRedmineEmail } from '@/lib/userDisplay';
 
 interface Profile {
   id: string;
   email: string;
   full_name: string | null;
   created_at: string;
+  redmine_login?: string | null;
+  redmine_display_name?: string | null;
 }
 
 interface UserRole {
@@ -59,11 +62,17 @@ const AdminUsers = () => {
   const [syncingProjectsUserId, setSyncingProjectsUserId] = useState<string | null>(null);
 
   const fetchData = async () => {
-    const [profilesRes, rolesRes] = await Promise.all([
+    const [profilesRes, rolesRes, redmineIdentitiesRes] = await Promise.all([
       supabase.from('profiles').select('*'),
       supabase.from('user_roles').select('*'),
+      supabase.from('redmine_user_identities').select('user_id, redmine_login, redmine_display_name'),
     ]);
-    setProfiles(profilesRes.data || []);
+    const identitiesByUser = new Map((redmineIdentitiesRes.data || []).map((identity: any) => [identity.user_id, identity]));
+    setProfiles((profilesRes.data || []).map((profile: any) => ({
+      ...profile,
+      redmine_login: identitiesByUser.get(profile.id)?.redmine_login ?? null,
+      redmine_display_name: identitiesByUser.get(profile.id)?.redmine_display_name ?? null,
+    })));
     setRoles(rolesRes.data || []);
     setLoadingData(false);
   };
@@ -73,6 +82,8 @@ const AdminUsers = () => {
   }, [user, isAdmin]);
 
   const getUserRole = (userId: string) => roles.find(r => r.user_id === userId)?.role || 'aucun';
+  const getProfileContact = (profile: Profile) =>
+    isSyntheticRedmineEmail(profile.email) ? getProfileDisplayName(profile) : profile.email;
 
   const handleFetchRedmineUsers = async () => {
     setLoadingRedmine(true);
@@ -293,8 +304,8 @@ const AdminUsers = () => {
                 const isSelf = p.id === user?.id;
                 return (
                   <tr key={p.id} className="border-b border-border/30 hover:bg-muted/20">
-                    <td className="p-3 font-medium">{p.full_name || '—'}</td>
-                    <td className="p-3 text-muted-foreground">{p.email}</td>
+                    <td className="p-3 font-medium">{getProfileDisplayName(p)}</td>
+                    <td className="p-3 text-muted-foreground">{getProfileContact(p)}</td>
                     <td className="p-3 text-center">
                       <select
                         value={role}
@@ -341,8 +352,8 @@ const AdminUsers = () => {
             <div key={p.id} className="glass-card p-4 space-y-3">
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
-                  <div className="font-medium text-sm truncate">{p.full_name || '—'}</div>
-                  <div className="text-xs text-muted-foreground truncate">{p.email}</div>
+                  <div className="font-medium text-sm truncate">{getProfileDisplayName(p)}</div>
+                  <div className="text-xs text-muted-foreground truncate">{getProfileContact(p)}</div>
                 </div>
                 {!isSelf && (
                   <Button variant="ghost" size="icon" onClick={() => handleDeleteUser(p.id, p.email)} className="h-8 w-8 text-destructive hover:text-destructive flex-shrink-0">

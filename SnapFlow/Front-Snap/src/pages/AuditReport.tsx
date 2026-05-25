@@ -97,7 +97,7 @@ const AuditReport = () => {
   const [selectedAxisId, setSelectedAxisId] = useState<string | undefined>();
   const [isExporting, setIsExporting] = useState(false);
   const [pdfModalOpen, setPdfModalOpen] = useState(false);
-  const { user, userRole, signOut } = useAuth();
+  const { user, userRole, displayName, signOut } = useAuth();
   const { toast } = useToast();
 
   const [audit, setAudit] = useState<AuditReportType | null>(null);
@@ -493,7 +493,7 @@ const AuditReport = () => {
           </div>
           <div className="flex items-center gap-1 sm:gap-2 flex-shrink-0">
             <span className="text-xs text-muted-foreground mr-1 hidden md:inline">
-              {user?.email} {userRole && <span className="text-primary">({userRole})</span>}
+              {displayName} {userRole && <span className="text-primary">({userRole})</span>}
             </span>
             {isDirty && (
               <span className="text-xs text-amber-300 hidden lg:inline">Modifications non enregistrees</span>

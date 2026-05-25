@@ -9,13 +9,15 @@ fleet instead of each launching its own.
 import asyncio
 import ipaddress
 import io
+import json
 import logging
 import os
 import socket
 from dataclasses import dataclass
 from enum import Enum
 from typing import Optional
-from urllib.parse import urlparse
+from urllib.parse import parse_qsl, urlparse, urlunparse
+from urllib.request import urlopen
 
 from PIL import Image
 from playwright.async_api import async_playwright, Browser, Playwright
@@ -45,6 +47,20 @@ BROWSER_POOL_SCREENSHOT_LOAD_STATE_TIMEOUT_MS = max(0, int(os.getenv("BROWSER_PO
 _CHROME_NO_SANDBOX = os.getenv("CHROME_NO_SANDBOX", "").strip().lower() in ("1", "true", "yes", "on")
 _ENABLE_OBSCURA_DISCOVERY = os.getenv("ENABLE_OBSCURA_DISCOVERY", "").strip().lower() in ("1", "true", "yes", "on")
 _OBSCURA_CDP_URL = os.getenv("OBSCURA_CDP_URL", "").strip()
+_OBSCURA_CDP_WS_URL = os.getenv("OBSCURA_CDP_WS_URL", "").strip()
+_OBSCURA_CDP_RESOLVE_TIMEOUT_S = float(os.getenv("OBSCURA_CDP_RESOLVE_TIMEOUT_S", "2"))
+_OBSCURA_CDP_CONNECT_TIMEOUT_MS = max(1000, int(os.getenv("OBSCURA_CDP_CONNECT_TIMEOUT_MS", "15000")))
+_OBSCURA_RENDER_ENABLED = os.getenv("OBSCURA_RENDER_ENABLED", "").strip().lower() in ("1", "true", "yes", "on")
+_OBSCURA_MAX_SESSIONS = max(1, int(os.getenv("OBSCURA_MAX_SESSIONS", "16")))
+_OBSCURA_DISCOVERY_CONCURRENCY = max(1, min(_OBSCURA_MAX_SESSIONS, int(os.getenv("OBSCURA_DISCOVERY_CONCURRENCY", "8"))))
+_OBSCURA_RENDER_FALLBACK_CONCURRENCY = max(1, min(_OBSCURA_MAX_SESSIONS, int(os.getenv("OBSCURA_RENDER_FALLBACK_CONCURRENCY", "8"))))
+_DEFAULT_RENDER_WAIT_UNTIL = _normalize_wait_until(os.getenv("BROWSER_POOL_RENDER_WAIT_UNTIL", "domcontentloaded"))
+_DEFAULT_RENDER_SETTLE_MS = max(0, int(os.getenv("BROWSER_POOL_RENDER_SETTLE_MS", "1000")))
+_SENSITIVE_QUERY_KEYS = (
+    "token", "secret", "password", "passwd", "authorization", "auth",
+    "cookie", "session", "jwt", "apikey", "api_key", "access_token",
+    "refresh_token", "key", "signature", "sig",
+)
 
 # Seconds to wait when all slots are busy before giving up.
 _ACQUIRE_TIMEOUT = float(os.getenv("BROWSER_POOL_ACQUIRE_TIMEOUT_S", "8"))
@@ -87,6 +103,13 @@ class RenderResult:
     console_error_count: int = 0
     tracker_timeline: Optional[list[dict]] = None
     cmp_banner: Optional[dict] = None
+    metrics_available: bool = False
+    render_engine: str = "chromium"
+    fallback_engine: Optional[str] = None
+    estimated: bool = False
+    confidence: str = "primary"
+    wait_until: str = _DEFAULT_RENDER_WAIT_UNTIL
+    attempts: Optional[list[dict]] = None
     error:         Optional[str] = None
 
 
@@ -123,6 +146,10 @@ class DiscoveryResult:
     risk_flags: Optional[list[str]] = None
     candidate_messages: Optional[list[str]] = None
     detection_sources: Optional[list[str]] = None
+    network_requests: Optional[list[dict]] = None
+    consent_banner: Optional[dict] = None
+    shadow_dom: Optional[dict] = None
+    auth_wall: Optional[dict] = None
     confidence: str = "low"
     error: Optional[str] = None
 
@@ -134,6 +161,10 @@ def _normalise_allowed_domains(domains: list[str]) -> set[str]:
         host = (host or "").strip().lower().strip(".")
         if host:
             clean.add(host)
+            if host.startswith("www."):
+                clean.add(host[4:])
+            elif not _looks_like_ip(host) and host not in {"localhost", "localhost.localdomain"}:
+                clean.add(f"www.{host}")
     return clean
 
 
@@ -142,7 +173,18 @@ def _host_matches_allowed(host: str, allowed_domains: list[str]) -> bool:
     allowed = _normalise_allowed_domains(allowed_domains)
     if not host or not allowed:
         return False
-    return any(host == domain or host.endswith("." + domain) for domain in allowed)
+    candidates = {host}
+    if host.startswith("www."):
+        candidates.add(host[4:])
+    return any(candidate == domain or candidate.endswith("." + domain) for candidate in candidates for domain in allowed)
+
+
+def _looks_like_ip(host: str) -> bool:
+    try:
+        ipaddress.ip_address(host)
+        return True
+    except ValueError:
+        return False
 
 
 def _is_private_host(host: str) -> tuple[bool, str]:
@@ -188,14 +230,104 @@ def _validate_discovery_target(url: str, allowed_domains: list[str]) -> tuple[bo
     return True, ""
 
 
+def _sanitize_network_request(method: str, request_url: str, status: int, resource_type: str) -> Optional[dict]:
+    try:
+        parsed = urlparse(request_url)
+    except Exception:
+        return None
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        return None
+
+    query_keys: list[str] = []
+    sensitive_count = 0
+    for key, _ in parse_qsl(parsed.query, keep_blank_values=True):
+        key = str(key or "").strip()
+        if not key:
+            continue
+        lower = key.lower()
+        if any(fragment in lower for fragment in _SENSITIVE_QUERY_KEYS):
+            sensitive_count += 1
+            continue
+        if key not in query_keys and len(query_keys) < 20:
+            query_keys.append(key[:80])
+
+    return {
+        "method": (method or "GET").upper(),
+        "host": parsed.hostname.lower(),
+        "path": parsed.path or "/",
+        "status": int(status or 0),
+        "resource_type": resource_type or "other",
+        "query_keys": query_keys,
+        "sensitive_query_key_count": sensitive_count,
+        "source": "obscura_runtime_network" if _OBSCURA_CDP_URL else "browser_pool_runtime_network",
+    }
+
+
+def _rewrite_obscura_ws_url(advertised_ws_url: str, cdp_http_url: str) -> str:
+    """Rewrite CDP websocket URLs that Obscura advertises as localhost.
+
+    Some remote Chrome/Obscura images expose /json/version through the Docker
+    service host but return ws://127.0.0.1:9222/... in webSocketDebuggerUrl.
+    From browser-pool, 127.0.0.1 points to browser-pool itself, so we replace
+    only the localhost netloc with the configured Obscura service netloc.
+    """
+    advertised = (advertised_ws_url or "").strip()
+    cdp = (cdp_http_url or "").strip()
+    if not advertised:
+        return cdp
+    parsed_advertised = urlparse(advertised)
+    parsed_cdp = urlparse(cdp)
+    if parsed_advertised.scheme not in {"ws", "wss"}:
+        return advertised
+    if parsed_advertised.hostname not in {"127.0.0.1", "localhost", "0.0.0.0"}:
+        return advertised
+    if not parsed_cdp.netloc:
+        return advertised
+    scheme = "wss" if parsed_cdp.scheme == "https" else "ws"
+    return urlunparse((
+        scheme,
+        parsed_cdp.netloc,
+        parsed_advertised.path,
+        parsed_advertised.params,
+        parsed_advertised.query,
+        parsed_advertised.fragment,
+    ))
+
+
+def _resolve_obscura_cdp_endpoint_sync() -> str:
+    if _OBSCURA_CDP_WS_URL:
+        return _OBSCURA_CDP_WS_URL
+    if not _OBSCURA_CDP_URL:
+        return ""
+    if _OBSCURA_CDP_URL.startswith(("ws://", "wss://")):
+        return _OBSCURA_CDP_URL
+
+    version_url = _OBSCURA_CDP_URL.rstrip("/") + "/json/version"
+    with urlopen(version_url, timeout=_OBSCURA_CDP_RESOLVE_TIMEOUT_S) as response:
+        payload = json.loads(response.read().decode("utf-8") or "{}")
+    advertised_ws = str(payload.get("webSocketDebuggerUrl") or "").strip()
+    return _rewrite_obscura_ws_url(advertised_ws, _OBSCURA_CDP_URL) or _OBSCURA_CDP_URL
+
+
 class BrowserPool:
     def __init__(self) -> None:
         self._playwright:       Optional[Playwright] = None
         self._browser:          Optional[Browser]    = None
         self._semaphore:        Optional[asyncio.Semaphore] = None
+        self._obscura_semaphore: Optional[asyncio.Semaphore] = None
+        self._obscura_discovery_semaphore: Optional[asyncio.Semaphore] = None
+        self._obscura_render_semaphore: Optional[asyncio.Semaphore] = None
+        self._obscura_browser: Optional[Browser] = None
+        self._obscura_lock = asyncio.Lock()
         self._recycle_lock      = asyncio.Lock()
         self._pages_served      = 0
         self._active_sessions   = 0
+        self._obscura_active_sessions = 0
+        self._obscura_success_count = 0
+        self._obscura_timeout_count = 0
+        self._obscura_crash_count = 0
+        self._obscura_endpoint_cache: Optional[str] = None
+        self._obscura_endpoint_last_error: Optional[str] = None
         self._crash_count       = 0
         self._timeout_count     = 0
         self._success_count     = 0
@@ -207,13 +339,22 @@ class BrowserPool:
         self._playwright = await async_playwright().start()
         self._browser    = await self._launch()
         self._semaphore  = asyncio.Semaphore(POOL_CONCURRENCY)
+        self._obscura_semaphore = asyncio.Semaphore(_OBSCURA_MAX_SESSIONS)
+        self._obscura_discovery_semaphore = asyncio.Semaphore(_OBSCURA_DISCOVERY_CONCURRENCY)
+        self._obscura_render_semaphore = asyncio.Semaphore(_OBSCURA_RENDER_FALLBACK_CONCURRENCY)
         self._started    = True
         logger.info(
-            "BrowserPool ready: concurrency=%d  recycle_after=%d  timeout_ms=%d  ignore_https_errors=%s",
-            POOL_CONCURRENCY, RECYCLE_AFTER, DEFAULT_TIMEOUT, _BROWSER_POOL_IGNORE_HTTPS_ERRORS,
+            "BrowserPool ready: concurrency=%d  obscura_max_sessions=%d  obscura_discovery=%d  obscura_render_fallback=%d  recycle_after=%d  timeout_ms=%d  ignore_https_errors=%s",
+            POOL_CONCURRENCY, _OBSCURA_MAX_SESSIONS, _OBSCURA_DISCOVERY_CONCURRENCY, _OBSCURA_RENDER_FALLBACK_CONCURRENCY, RECYCLE_AFTER, DEFAULT_TIMEOUT, _BROWSER_POOL_IGNORE_HTTPS_ERRORS,
         )
 
     async def stop(self) -> None:
+        if self._obscura_browser:
+            try:
+                await self._obscura_browser.close()
+            except Exception:
+                pass
+            self._obscura_browser = None
         if self._browser:
             try:
                 await self._browser.close()
@@ -488,6 +629,110 @@ class BrowserPool:
         except asyncio.TimeoutError:
             return False
 
+    def _obscura_purpose_semaphore(self, purpose: str) -> Optional[asyncio.Semaphore]:
+        if purpose == "render":
+            return self._obscura_render_semaphore
+        return self._obscura_discovery_semaphore
+
+    async def _acquire_obscura(self, purpose: str) -> bool:
+        """Try to acquire a total Obscura slot plus a purpose-specific slot."""
+        purpose_sem = self._obscura_purpose_semaphore(purpose)
+        if self._obscura_semaphore is None or purpose_sem is None:
+            return False
+        try:
+            await asyncio.wait_for(self._obscura_semaphore.acquire(), timeout=_ACQUIRE_TIMEOUT)
+            try:
+                await asyncio.wait_for(purpose_sem.acquire(), timeout=_ACQUIRE_TIMEOUT)
+            except asyncio.TimeoutError:
+                self._obscura_semaphore.release()
+                return False
+            return True
+        except asyncio.TimeoutError:
+            return False
+
+    def _release_obscura(self, purpose: str) -> None:
+        purpose_sem = self._obscura_purpose_semaphore(purpose)
+        if purpose_sem is not None:
+            purpose_sem.release()
+        if self._obscura_semaphore is not None:
+            self._obscura_semaphore.release()
+
+    def _obscura_available_for(self, purpose: str) -> bool:
+        if not self._started or not self._playwright or not _OBSCURA_CDP_URL:
+            return False
+        if purpose == "render":
+            return _OBSCURA_RENDER_ENABLED
+        return _ENABLE_OBSCURA_DISCOVERY
+
+    async def _obscura_connect_endpoint(self) -> str:
+        if self._obscura_endpoint_cache:
+            return self._obscura_endpoint_cache
+        try:
+            endpoint = await asyncio.to_thread(_resolve_obscura_cdp_endpoint_sync)
+            if endpoint:
+                self._obscura_endpoint_cache = endpoint
+                self._obscura_endpoint_last_error = None
+                if endpoint != _OBSCURA_CDP_URL:
+                    logger.info("Obscura CDP endpoint resolved: %s -> %s", _OBSCURA_CDP_URL, endpoint)
+                return endpoint
+        except Exception as exc:
+            self._obscura_endpoint_last_error = str(exc)
+            logger.warning("Obscura CDP endpoint resolution failed: %s", exc)
+        return _OBSCURA_CDP_WS_URL or _OBSCURA_CDP_URL
+
+    def _is_obscura_browser_connected(self) -> bool:
+        browser = self._obscura_browser
+        if browser is None:
+            return False
+        is_connected = getattr(browser, "is_connected", None)
+        if callable(is_connected):
+            try:
+                return bool(is_connected())
+            except Exception:
+                return False
+        return not getattr(browser, "_closed", False)
+
+    async def _get_obscura_browser(self) -> Browser:
+        if not self._playwright:
+            raise RuntimeError("Playwright is not started")
+        if self._is_obscura_browser_connected():
+            return self._obscura_browser
+        async with self._obscura_lock:
+            if self._is_obscura_browser_connected():
+                return self._obscura_browser
+            endpoint = await self._obscura_connect_endpoint()
+            logger.info("Connecting Obscura CDP endpoint=%s timeout_ms=%d", endpoint, _OBSCURA_CDP_CONNECT_TIMEOUT_MS)
+            self._obscura_browser = await self._playwright.chromium.connect_over_cdp(
+                endpoint,
+                timeout=_OBSCURA_CDP_CONNECT_TIMEOUT_MS,
+            )
+            return self._obscura_browser
+
+    async def _reset_obscura_browser(self) -> None:
+        async with self._obscura_lock:
+            browser = self._obscura_browser
+            self._obscura_browser = None
+        if browser is not None:
+            try:
+                await browser.close()
+            except Exception:
+                pass
+
+    def _should_reset_obscura_browser(self, exc: Exception) -> bool:
+        msg = str(exc).lower()
+        return any(
+            fragment in msg
+            for fragment in (
+                "connect_over_cdp",
+                "websocket",
+                "browser has been closed",
+                "target page, context or browser has been closed",
+                "econnrefused",
+                "connection refused",
+                "connection closed",
+            )
+        )
+
     # ── Public API ─────────────────────────────────────────────────────────────
 
     async def render(
@@ -573,6 +818,168 @@ class BrowserPool:
             self._active_sessions -= 1
             self._semaphore.release()
 
+    async def _render_once(
+        self,
+        url: str,
+        timeout_ms: int,
+        wait_until: str,
+        settle_ms: int,
+        engine: str,
+    ) -> RenderResult:
+        if not self._started:
+            return RenderResult(status=PageStatus.POOL_EXHAUSTED, url=url, render_engine=engine, error="Pool not started")
+
+        use_obscura = engine == "obscura"
+        if use_obscura:
+            if not self._obscura_available_for("render"):
+                return RenderResult(status=PageStatus.POOL_EXHAUSTED, url=url, render_engine=engine, error="Obscura render is not enabled")
+            if not await self._acquire_obscura("render"):
+                return RenderResult(status=PageStatus.POOL_EXHAUSTED, url=url, render_engine=engine, error="All Obscura slots busy - queue timeout")
+            self._obscura_active_sessions += 1
+        else:
+            if not await self._acquire():
+                return RenderResult(status=PageStatus.POOL_EXHAUSTED, url=url, render_engine="chromium", error="All browser slots busy - queue timeout")
+            self._active_sessions += 1
+
+        context = None
+        page = None
+        console_errors: list[str] = []
+        try:
+            if use_obscura:
+                browser = await self._get_obscura_browser()
+                context = await browser.new_context(
+                    viewport={"width": 1366, "height": 768},
+                    ignore_https_errors=_BROWSER_POOL_IGNORE_HTTPS_ERRORS,
+                )
+            else:
+                async with self._recycle_lock:
+                    await self._maybe_recycle()
+                    browser = self._browser
+                context = await browser.new_context(
+                    viewport={"width": 1366, "height": 768},
+                    ignore_https_errors=_BROWSER_POOL_IGNORE_HTTPS_ERRORS,
+                )
+
+            page = await context.new_page()
+            page.on(
+                "console",
+                lambda msg: console_errors.append(f"[{msg.type}] {msg.text}")
+                if msg.type in ("error", "warning")
+                else None,
+            )
+            logger.info("render navigation url=%s engine=%s wait_until=%s timeout_ms=%d settle_ms=%d", url, engine, wait_until, timeout_ms, settle_ms)
+            await page.goto(url, wait_until=wait_until, timeout=timeout_ms)
+            if settle_ms > 0:
+                await page.wait_for_timeout(settle_ms)
+            html = await page.content()
+            title = await page.title()
+            page_height = await page.evaluate("document.documentElement.scrollHeight")
+            page_width = await page.evaluate("document.documentElement.scrollWidth")
+            final_url = page.url
+            metrics = await self._measure_render_metrics(page)
+            self._pages_served += 1
+            if use_obscura:
+                self._obscura_success_count += 1
+            else:
+                self._success_count += 1
+            return RenderResult(
+                status=PageStatus.SUCCESS,
+                url=url,
+                rendered_html=html,
+                title=title,
+                page_height=page_height,
+                page_width=page_width,
+                final_url=final_url,
+                fcp_ms=metrics.get("fcp_ms", 0.0),
+                lcp_ms=metrics.get("lcp_ms", 0.0),
+                cls=metrics.get("cls", 0.0),
+                dom_nodes=metrics.get("dom_nodes", 0),
+                http_requests=metrics.get("http_requests", 0),
+                transfer_size_kb=metrics.get("transfer_size_kb", 0.0),
+                asset_breakdown=metrics.get("asset_breakdown"),
+                desktop_overflow=metrics.get("desktop_overflow", False),
+                tablet_overflow=metrics.get("tablet_overflow", False),
+                mobile_overflow=metrics.get("mobile_overflow", False),
+                invisible_links=metrics.get("invisible_links", 0),
+                console_errors=console_errors,
+                console_error_count=len(console_errors),
+                tracker_timeline=metrics.get("tracker_timeline") or [],
+                cmp_banner=metrics.get("cmp_banner") or None,
+                metrics_available=bool(metrics.get("fcp_ms", 0) > 0 and metrics.get("lcp_ms", 0) > 0),
+                render_engine=engine,
+                wait_until=wait_until,
+            )
+        except asyncio.TimeoutError:
+            if use_obscura:
+                self._obscura_timeout_count += 1
+            else:
+                self._timeout_count += 1
+            return RenderResult(status=PageStatus.TIMEOUT, url=url, render_engine=engine, wait_until=wait_until, error=f"Navigation timeout after {timeout_ms} ms")
+        except Exception as exc:
+            st = self._classify_error(exc)
+            if st == PageStatus.TIMEOUT:
+                if use_obscura:
+                    self._obscura_timeout_count += 1
+                else:
+                    self._timeout_count += 1
+            elif use_obscura:
+                self._obscura_crash_count += 1
+            if use_obscura and self._should_reset_obscura_browser(exc):
+                await self._reset_obscura_browser()
+            return RenderResult(status=st, url=url, render_engine=engine, wait_until=wait_until, error=str(exc))
+        finally:
+            await self._safe_close_page(page)
+            await self._safe_close_context(context)
+            if use_obscura:
+                self._obscura_active_sessions -= 1
+                self._release_obscura("render")
+            else:
+                self._active_sessions -= 1
+                self._semaphore.release()
+
+    async def render(
+        self,
+        url: str,
+        timeout_ms: int = DEFAULT_TIMEOUT,
+        wait_until: str = _DEFAULT_RENDER_WAIT_UNTIL,
+        engine: str = "chromium",
+        allow_obscura_fallback: bool = False,
+        settle_ms: int = _DEFAULT_RENDER_SETTLE_MS,
+    ) -> RenderResult:
+        """Open *url*, wait for the DOM to settle, and return the rendered HTML."""
+        wait_until = _normalize_wait_until(wait_until, _DEFAULT_RENDER_WAIT_UNTIL)
+        engine = (engine or "chromium").strip().lower()
+        if engine not in {"chromium", "obscura", "auto"}:
+            engine = "chromium"
+        settle_ms = max(0, min(int(settle_ms or 0), 10000))
+        first_engine = "chromium" if engine == "auto" else engine
+        first = await self._render_once(url, timeout_ms, wait_until, settle_ms, first_engine)
+        attempts = [{
+            "engine": first.render_engine,
+            "status": first.status.value if isinstance(first.status, PageStatus) else str(first.status),
+            "error": first.error,
+        }]
+        fallback_allowed = allow_obscura_fallback or engine == "auto"
+        if first.status == PageStatus.SUCCESS or first_engine == "obscura" or not fallback_allowed:
+            first.attempts = attempts
+            return first
+
+        fallback = await self._render_once(url, timeout_ms, wait_until, settle_ms, "obscura")
+        attempts.append({
+            "engine": fallback.render_engine,
+            "status": fallback.status.value if isinstance(fallback.status, PageStatus) else str(fallback.status),
+            "error": fallback.error,
+        })
+        fallback.attempts = attempts
+        if fallback.status == PageStatus.SUCCESS:
+            fallback.fallback_engine = "obscura"
+            fallback.estimated = True
+            fallback.confidence = "fallback"
+            return fallback
+        first.attempts = attempts
+        first.error = f"{first.error or 'Chromium render failed'}; Obscura fallback failed: {fallback.error or fallback.status}"
+        return first
+
     async def discover_rendered(
         self,
         url: str,
@@ -583,29 +990,36 @@ class BrowserPool:
         force_chromium: bool = False,
     ) -> DiscoveryResult:
         """Discovery-only rendered extraction for routes, text, buttons and forms."""
-        allowed_domains = allowed_domains or []
+        allowed_domains = sorted(_normalise_allowed_domains(allowed_domains or []))
         ok, reason = _validate_discovery_target(url, allowed_domains)
         if not ok:
             return DiscoveryResult(status=PageStatus.BLOCKED, url=url, error=reason, risk_flags=[reason])
         if not self._started:
             return DiscoveryResult(status=PageStatus.POOL_EXHAUSTED, url=url, error="Pool not started")
-        if not await self._acquire():
-            return DiscoveryResult(status=PageStatus.POOL_EXHAUSTED, url=url, error="All browser slots busy - queue timeout")
 
-        self._active_sessions += 1
+        use_obscura = self._obscura_available_for("discovery") and not force_chromium
+        if use_obscura:
+            if not await self._acquire_obscura("discovery"):
+                return DiscoveryResult(status=PageStatus.POOL_EXHAUSTED, url=url, error="All Obscura slots busy - queue timeout")
+            self._obscura_active_sessions += 1
+        else:
+            if not await self._acquire():
+                return DiscoveryResult(status=PageStatus.POOL_EXHAUSTED, url=url, error="All browser slots busy - queue timeout")
+            self._active_sessions += 1
+
         context = None
         page = None
         engine = "chromium"
+        network_requests: list[dict] = []
         try:
             async with self._recycle_lock:
                 await self._maybe_recycle()
                 browser = self._browser
 
-            use_obscura = _ENABLE_OBSCURA_DISCOVERY and bool(_OBSCURA_CDP_URL) and not force_chromium
             try:
                 if use_obscura:
-                    remote_browser = await self._playwright.chromium.connect_over_cdp(_OBSCURA_CDP_URL)
-                    context = await remote_browser.new_context(
+                    browser = await self._get_obscura_browser()
+                    context = await browser.new_context(
                         viewport={"width": 1366, "height": 768},
                         ignore_https_errors=_BROWSER_POOL_IGNORE_HTTPS_ERRORS,
                     )
@@ -617,6 +1031,15 @@ class BrowserPool:
                     )
             except Exception as exc:
                 logger.warning("Obscura discovery unavailable, falling back to Chromium: %s", exc)
+                if use_obscura:
+                    if self._should_reset_obscura_browser(exc):
+                        await self._reset_obscura_browser()
+                    self._obscura_active_sessions -= 1
+                    self._release_obscura("discovery")
+                    use_obscura = False
+                    if not await self._acquire():
+                        return DiscoveryResult(status=PageStatus.POOL_EXHAUSTED, url=url, error="All browser slots busy - queue timeout")
+                    self._active_sessions += 1
                 context = await browser.new_context(
                     viewport={"width": 1366, "height": 768},
                     ignore_https_errors=_BROWSER_POOL_IGNORE_HTTPS_ERRORS,
@@ -624,6 +1047,21 @@ class BrowserPool:
                 engine = "chromium"
 
             page = await context.new_page()
+            page.on(
+                "response",
+                lambda response: (
+                    network_requests.append(item)
+                    if len(network_requests) < 120 and (
+                        item := _sanitize_network_request(
+                            response.request.method,
+                            response.url,
+                            response.status,
+                            response.request.resource_type,
+                        )
+                    )
+                    else None
+                ),
+            )
             timeout_ms = max(3000, min(wait_ms or DEFAULT_TIMEOUT, 60000))
             await page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
             await page.wait_for_timeout(min(max(timeout_ms // 8, 300), 2500))
@@ -653,11 +1091,16 @@ class BrowserPool:
                       return text.length > limit ? text.slice(0, limit - 3) + "..." : text;
                     };
                     const allowed = (allowedDomains || [])
-                      .map((d) => String(d || "").toLowerCase().replace(/^https?:\\/\\//, "").replace(/\\/$/, ""));
+                      .flatMap((d) => {
+                        const host = String(d || "").toLowerCase().replace(/^https?:\\/\\//, "").replace(/\\/$/, "");
+                        if (!host) return [];
+                        return host.startsWith("www.") ? [host, host.slice(4)] : [host, `www.${host}`];
+                      });
                     const isAllowed = (href) => {
                       try {
                         const host = new URL(href, location.href).hostname.toLowerCase();
-                        return allowed.some((domain) => host === domain || host.endsWith("." + domain));
+                        const candidates = host.startsWith("www.") ? [host, host.slice(4)] : [host];
+                        return candidates.some((candidate) => allowed.some((domain) => candidate === domain || candidate.endsWith("." + domain)));
                       } catch {
                         return false;
                       }
@@ -784,11 +1227,119 @@ class BrowserPool:
             )
 
             payload = payload if isinstance(payload, dict) else {}
+            runtime = await page.evaluate(
+                """() => {
+                    const clean = (value) => String(value || "").replace(/\\s+/g, " ").trim();
+                    const short = (value, limit = 240) => {
+                      const text = clean(value);
+                      return text.length > limit ? text.slice(0, limit - 3) + "..." : text;
+                    };
+                    const visible = (el) => {
+                      if (!el) return false;
+                      const style = getComputedStyle(el);
+                      const rect = el.getBoundingClientRect();
+                      return style.display !== "none" && style.visibility !== "hidden" && style.opacity !== "0" && rect.width > 0 && rect.height > 0;
+                    };
+                    const selectorFor = (el) => {
+                      if (!el || !el.tagName) return "";
+                      const tag = el.tagName.toLowerCase();
+                      if (el.id) return `${tag}#${el.id}`;
+                      const name = el.getAttribute("name");
+                      if (name) return `${tag}[name="${name}"]`;
+                      return tag;
+                    };
+                    const bannerSelectors = [
+                      '[id*="cookie" i]', '[class*="cookie" i]',
+                      '[id*="consent" i]', '[class*="consent" i]',
+                      '[id*="tarteaucitron" i]', '[class*="tarteaucitron" i]',
+                      '[id*="didomi" i]', '[class*="didomi" i]',
+                      '[id*="onetrust" i]', '[class*="onetrust" i]',
+                      '[aria-label*="cookie" i]', '[aria-label*="consent" i]'
+                    ];
+                    let consentBanner = null;
+                    for (const selector of bannerSelectors) {
+                      const el = Array.from(document.querySelectorAll(selector)).find(visible);
+                      if (!el) continue;
+                      const controls = Array.from(el.querySelectorAll('button, a, input[type="button"], input[type="submit"], [role="button"], input[type="checkbox"]'));
+                      const labels = controls.map((node) => clean(node.innerText || node.value || node.getAttribute("aria-label") || ""));
+                      const hasAccept = labels.some((txt) => /accept|agree|autoriser|accepter|j.?accepte|allow/i.test(txt));
+                      const hasReject = labels.some((txt) => /reject|decline|deny|refus|rejeter|tout refuser|non merci/i.test(txt));
+                      const hasManage = labels.some((txt) => /manage|settings|param|personnalis|choisir|preferences/i.test(txt));
+                      const precheckedToggles = Array.from(el.querySelectorAll('input[type="checkbox"]')).filter((input) => input.checked && !input.disabled).length;
+                      consentBanner = {
+                        selector,
+                        visible: true,
+                        text: short(el.innerText || el.textContent || "", 500),
+                        has_accept: hasAccept,
+                        has_reject: hasReject,
+                        has_manage: hasManage,
+                        reject_symmetry: hasAccept && hasReject,
+                        prechecked_toggles: precheckedToggles,
+                        source: "rendered_discovery",
+                      };
+                      break;
+                    }
+
+                    const shadow = {host_count: 0, text: "", links: [], forms: [], aria_roles: []};
+                    const visitShadowRoots = (root) => {
+                      Array.from(root.querySelectorAll("*")).forEach((el) => {
+                        if (!el.shadowRoot) return;
+                        shadow.host_count += 1;
+                        shadow.text += "\\n" + clean(el.shadowRoot.innerText || el.shadowRoot.textContent || "");
+                        Array.from(el.shadowRoot.querySelectorAll("a[href]")).forEach((a) => shadow.links.push(a.href));
+                        Array.from(el.shadowRoot.querySelectorAll("form")).forEach((form) => shadow.forms.push({
+                          selector: selectorFor(form),
+                          action: form.getAttribute("action") || "",
+                          method: String(form.getAttribute("method") || "get").toUpperCase(),
+                          text: short(form.innerText || "", 220),
+                        }));
+                        Array.from(el.shadowRoot.querySelectorAll("[role], [aria-label], [aria-expanded], [aria-controls]")).forEach((node) => shadow.aria_roles.push({
+                          role: node.getAttribute("role") || "",
+                          aria_label: node.getAttribute("aria-label") || "",
+                          aria_expanded: node.getAttribute("aria-expanded") || "",
+                          selector: selectorFor(node),
+                        }));
+                        visitShadowRoots(el.shadowRoot);
+                      });
+                    };
+                    visitShadowRoots(document);
+                    shadow.text = short(shadow.text, 8000);
+                    shadow.links = Array.from(new Set(shadow.links)).slice(0, 80);
+                    shadow.forms = shadow.forms.slice(0, 30);
+                    shadow.aria_roles = shadow.aria_roles.slice(0, 80);
+
+                    const bodyText = clean(document.body ? document.body.innerText : "");
+                    const passwordFields = document.querySelectorAll('input[type="password"]').length;
+                    const authReasons = [];
+                    if (/\\/login|\\/signin|\\/connexion|\\/auth/i.test(location.pathname)) authReasons.push("login_url");
+                    if (passwordFields > 0) authReasons.push("password_form");
+                    if (/connexion requise|authentification requise|login required|sign in to continue|connectez-vous/i.test(bodyText)) authReasons.push("auth_required_text");
+                    if (bodyText.length < 120 && passwordFields > 0) authReasons.push("empty_gated_content");
+                    const authWall = {
+                      detected: authReasons.length > 0,
+                      reasons: authReasons,
+                      password_field_count: passwordFields,
+                      final_url: location.href,
+                      source: "rendered_discovery",
+                    };
+                    return {consent_banner: consentBanner, shadow_dom: shadow, auth_wall: authWall};
+                }"""
+            )
+            runtime = runtime if isinstance(runtime, dict) else {}
+            payload.update(runtime)
+            if payload.get("shadow_dom", {}).get("text"):
+                payload["visible_text"] = (payload.get("visible_text") or "") + "\n" + payload["shadow_dom"]["text"]
+            if payload.get("auth_wall", {}).get("detected"):
+                payload["risk_flags"] = list(dict.fromkeys((payload.get("risk_flags") or []) + ["auth_wall"]))
+            payload["network_requests"] = network_requests[:120]
             forms = payload.get("forms") or []
             links = payload.get("internal_links") or []
             confidence = "high" if forms else ("medium" if links else "low")
             self._pages_served += 1
-            self._success_count += 1
+            if engine == "obscura":
+                self._obscura_success_count += 1
+            else:
+                self._success_count += 1
             return DiscoveryResult(
                 status=PageStatus.SUCCESS,
                 url=url,
@@ -805,21 +1356,37 @@ class BrowserPool:
                 risk_flags=payload.get("risk_flags") or [],
                 candidate_messages=payload.get("candidate_messages") or [],
                 detection_sources=["obscura_rendered" if engine == "obscura" else "chromium_rendered"],
+                network_requests=payload.get("network_requests") or [],
+                consent_banner=payload.get("consent_banner"),
+                shadow_dom=payload.get("shadow_dom"),
+                auth_wall=payload.get("auth_wall"),
                 confidence=confidence,
             )
         except asyncio.TimeoutError:
-            self._timeout_count += 1
+            if engine == "obscura":
+                self._obscura_timeout_count += 1
+            else:
+                self._timeout_count += 1
             return DiscoveryResult(status=PageStatus.TIMEOUT, url=url, engine=engine, error=f"Navigation timeout after {wait_ms} ms")
         except Exception as exc:
             st = self._classify_error(exc)
             if st == PageStatus.TIMEOUT:
-                self._timeout_count += 1
+                if engine == "obscura":
+                    self._obscura_timeout_count += 1
+                else:
+                    self._timeout_count += 1
+            if engine == "obscura" and self._should_reset_obscura_browser(exc):
+                await self._reset_obscura_browser()
             return DiscoveryResult(status=st, url=url, engine=engine, error=str(exc))
         finally:
             await self._safe_close_page(page)
             await self._safe_close_context(context)
-            self._active_sessions -= 1
-            self._semaphore.release()
+            if engine == "obscura":
+                self._obscura_active_sessions -= 1
+                self._release_obscura("discovery")
+            else:
+                self._active_sessions -= 1
+                self._semaphore.release()
 
     async def screenshot(
         self,
@@ -982,4 +1549,21 @@ class BrowserPool:
             "crash_count":     self._crash_count,
             "browser_alive":   alive,
             "ignore_https_errors": _BROWSER_POOL_IGNORE_HTTPS_ERRORS,
+            "obscura_discovery_enabled": _ENABLE_OBSCURA_DISCOVERY,
+            "obscura_render_enabled": _OBSCURA_RENDER_ENABLED,
+            "obscura_enabled": bool((_ENABLE_OBSCURA_DISCOVERY or _OBSCURA_RENDER_ENABLED) and _OBSCURA_CDP_URL),
+            "obscura_alive": bool(self._started and self._playwright and _OBSCURA_CDP_URL),
+            "obscura_cdp_url_configured": bool(_OBSCURA_CDP_URL),
+            "obscura_cdp_ws_url_configured": bool(_OBSCURA_CDP_WS_URL),
+            "obscura_cdp_connect_timeout_ms": _OBSCURA_CDP_CONNECT_TIMEOUT_MS,
+            "obscura_resolved_endpoint": self._obscura_endpoint_cache or _OBSCURA_CDP_WS_URL or _OBSCURA_CDP_URL,
+            "obscura_endpoint_last_error": self._obscura_endpoint_last_error,
+            "obscura_browser_connected": self._is_obscura_browser_connected(),
+            "obscura_active_sessions": self._obscura_active_sessions,
+            "obscura_max_sessions": _OBSCURA_MAX_SESSIONS,
+            "obscura_discovery_concurrency": _OBSCURA_DISCOVERY_CONCURRENCY,
+            "obscura_render_fallback_concurrency": _OBSCURA_RENDER_FALLBACK_CONCURRENCY,
+            "obscura_success_count": self._obscura_success_count,
+            "obscura_timeout_count": self._obscura_timeout_count,
+            "obscura_crash_count": self._obscura_crash_count,
         }

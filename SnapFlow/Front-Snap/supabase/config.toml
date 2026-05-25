@@ -18,6 +18,9 @@ verify_jwt = false
 [functions.fetch-redmine]
 verify_jwt = false
 
+[functions.redmine-login]
+verify_jwt = false
+
 [functions.form-workflows]
 verify_jwt = false
 

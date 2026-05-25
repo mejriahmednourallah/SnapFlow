@@ -4,6 +4,7 @@ psycopg2-binary==2.9.9
 textstat==0.7.4
 beautifulsoup4==4.12.3
 nltk==3.9.1
-spacy
+spacy==3.7.5
+fr-core-news-sm @ https://github.com/explosion/spacy-models/releases/download/fr_core_news_sm-3.7.0/fr_core_news_sm-3.7.0-py3-none-any.whl
 language-tool-python
 json5

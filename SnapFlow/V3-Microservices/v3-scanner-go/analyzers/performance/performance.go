@@ -89,6 +89,8 @@ type NonFunctionalButtonDetail struct {
 
 type HeadlessResult struct {
 	URL                  string                   `json:"url"`
+	Available            bool                     `json:"available"`
+	MeasurementStatus    string                   `json:"measurement_status,omitempty"`
 	FCPMS                float64                  `json:"fcp_ms"`
 	LCPMS                float64                  `json:"lcp_ms"`
 	CLS                  float64                  `json:"cls"`
@@ -118,9 +120,16 @@ type HeadlessResult struct {
 	NonFunctionalButtonCount   int                         `json:"non_functional_button_count"`
 	ButtonKPIPassed            bool                        `json:"button_kpi_passed"`
 	// Phase H: mobile performance trace
-	MobileMetrics *MobilePerformanceResult `json:"mobile_metrics,omitempty"`
-	RenderedHTML  string                   `json:"-"`
-	Error         string                   `json:"error,omitempty"`
+	MobileMetrics   *MobilePerformanceResult `json:"mobile_metrics,omitempty"`
+	RenderEngine    string                   `json:"render_engine,omitempty"`
+	FallbackEngine  string                   `json:"fallback_engine,omitempty"`
+	Estimated       bool                     `json:"estimated,omitempty"`
+	Confidence      string                   `json:"confidence,omitempty"`
+	WaitUntil       string                   `json:"wait_until,omitempty"`
+	Attempts        []map[string]interface{} `json:"attempts,omitempty"`
+	ScoreMultiplier float64                  `json:"score_multiplier,omitempty"`
+	RenderedHTML    string                   `json:"-"`
+	Error           string                   `json:"error,omitempty"`
 }
 
 // MobilePerformanceResult holds metrics captured from a 3G mobile emulation of the homepage.
@@ -312,15 +321,13 @@ func renderPagesViaBrowserPool(urls []string, concurrency int) []HeadlessResult 
 				ConsoleErrorKPIPassed: true,
 				ButtonKPIPassed:       true,
 			}
-			renderResult, err := browserpool.Render(context.Background(), targetURL, 45000, "networkidle")
-			if err != nil {
-				renderResult, err = browserpool.Render(context.Background(), targetURL, 30000, "domcontentloaded")
-			} else if renderResult != nil && renderResult.Error != "" {
-				fallbackResult, fallbackErr := browserpool.Render(context.Background(), targetURL, 30000, "domcontentloaded")
-				if fallbackErr == nil && fallbackResult != nil && fallbackResult.Error == "" {
-					renderResult = fallbackResult
-				}
-			}
+			renderResult, err := browserpool.RenderWithOptions(context.Background(), targetURL, browserpool.RenderOptions{
+				TimeoutMS:            45000,
+				WaitUntil:            "domcontentloaded",
+				Engine:               "chromium",
+				AllowObscuraFallback: true,
+				SettleMS:             1000,
+			})
 			if err != nil {
 				res.Error = fmt.Sprintf("Browser-pool render failed: %v", err)
 				results[idx] = res
@@ -359,13 +366,37 @@ func renderPagesViaBrowserPool(urls []string, concurrency int) []HeadlessResult 
 			res.ConsoleErrorCount = renderResult.ConsoleErrorCount
 			res.TrackerTimeline = renderResult.TrackerTimeline
 			res.CMPBanner = renderResult.CMPBanner
+			res.RenderEngine = renderResult.RenderEngine
+			res.FallbackEngine = renderResult.FallbackEngine
+			res.Estimated = renderResult.Estimated
+			res.Confidence = renderResult.Confidence
+			res.WaitUntil = renderResult.WaitUntil
+			res.Attempts = renderResult.Attempts
+			// Pre-set availability from browser-pool's explicit flag (preferred over heuristic).
+			if renderResult.MetricsAvailable {
+				res.Available = true
+				res.MeasurementStatus = "measured"
+			}
+			res.ScoreMultiplier = 1.0
+			if res.Estimated || res.FallbackEngine == "obscura" {
+				res.ScoreMultiplier = 0.90
+			}
 			if res.ConsoleErrorCount == 0 && len(res.ConsoleErrors) > 0 {
 				res.ConsoleErrorCount = len(res.ConsoleErrors)
 			}
 			res.ConsoleErrorKPIPassed = res.ConsoleErrorCount == 0
 			if res.FCPMS > 0 && res.LCPMS > 0 {
+				res.Available = true
+				res.MeasurementStatus = "measured"
 				res.SpeedIndexMS = math.Round((res.FCPMS*0.3+res.LCPMS*0.7)*10) / 10
 				res.SpeedIndexSynthetic = true
+			} else {
+				res.Available = false
+				if res.Error != "" {
+					res.MeasurementStatus = "failed:" + res.Error
+				} else {
+					res.MeasurementStatus = "zero_metrics"
+				}
 			}
 			if res.DOMNodes > 0 || res.HTTPRequests > 0 || res.TransferSizeKB > 0 {
 				res.EcoIndex, res.EcoScore = calculateEcoIndex(res.DOMNodes, res.HTTPRequests, res.TransferSizeKB)
@@ -848,6 +879,19 @@ func analyzePageHeadless(browser *rod.Browser, targetURL string) HeadlessResult 
 		if !math.IsNaN(si) && !math.IsInf(si, 0) && si > 0 {
 			result.SpeedIndexMS = math.Round(si)
 			result.SpeedIndexSynthetic = true
+		}
+	}
+
+	// Mark availability: only when both FCP and LCP were captured.
+	if result.FCPMS > 0 && result.LCPMS > 0 {
+		result.Available = true
+		result.MeasurementStatus = "measured"
+	} else {
+		result.Available = false
+		if result.Error != "" {
+			result.MeasurementStatus = "failed:" + result.Error
+		} else {
+			result.MeasurementStatus = "zero_metrics"
 		}
 	}
 

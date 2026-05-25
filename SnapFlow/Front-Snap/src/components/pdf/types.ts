@@ -100,8 +100,8 @@ function cleanPdfText(value: string | undefined): string {
     .replace(/\bCVE\b/gi, 'vulnerabilite connue')
     .replace(/\bCMS\b/g, 'systeme de gestion du site')
     .replace(/\bSSL\b/g, 'certificat de securite')
-    .replace(/\bRGPD\b/gi, 'protection des donnees')
-    .replace(/\bSEO\b/gi, 'referencement')
+    .replace(/\bRGPD\b/gi, 'protection des données')
+    .replace(/\bSEO\b/gi, 'SEO')
     .replace(/\bJS\b/g, 'JavaScript')
     .replace(/KPI valide\.? Maintenir ce niveau de conformite\.?/gi, 'Controle conforme.')
     .replace(/KPI validé\.? Maintenir ce niveau de conformité\.?/gi, 'Controle conforme.');

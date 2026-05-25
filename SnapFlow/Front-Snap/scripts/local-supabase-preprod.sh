@@ -17,6 +17,7 @@ SUPABASE_ENV_FILE="$FRONT_DIR/supabase/.env.local"
 V3_ENV_FILE="$V3_DIR/.env.local"
 SCANNER_BASE_URL="${SCANNER_BASE_URL:-http://host.docker.internal:8080}"
 DB_PASS="${DB_PASS:-snapflow}"
+DEFAULT_REDMINE_BASE_URL="https://maintenance.medianet.tn"
 
 CLEAN=false
 SEED_RANDOM_ADMIN=false
@@ -33,6 +34,10 @@ Options:
 Environment overrides:
   SCANNER_BASE_URL     Defaults to http://host.docker.internal:8080.
   DB_PASS              Defaults to snapflow for V3 local preprod Postgres.
+  REDMINE_BASE_URL     Defaults to https://maintenance.medianet.tn.
+  REDMINE_API_KEY      Admin API key used by local Redmine Edge Functions.
+  REDMINE_LOGIN_RATE_LIMIT_SALT
+                      Local-only salt for Redmine login rate-limit hashes.
 EOF
 }
 
@@ -57,6 +62,39 @@ for arg in "$@"; do
 done
 
 cd "$FRONT_DIR"
+
+read_env_value() {
+  local key="$1"
+  shift
+
+  local file line value
+  for file in "$@"; do
+    if [ ! -f "$file" ]; then
+      continue
+    fi
+
+    line="$(grep -E "^${key}=" "$file" | tail -n 1 || true)"
+    if [ -z "$line" ]; then
+      continue
+    fi
+
+    value="${line#*=}"
+    value="${value%\"}"
+    value="${value#\"}"
+    value="${value%\'}"
+    value="${value#\'}"
+    printf '%s' "$value"
+    return 0
+  done
+
+  return 0
+}
+
+REDMINE_BASE_URL="${REDMINE_BASE_URL:-$(read_env_value REDMINE_BASE_URL "$SUPABASE_ENV_FILE" "$V3_ENV_FILE" "$FRONT_DIR/.env" "$V3_DIR/.env.preprod")}"
+REDMINE_BASE_URL="${REDMINE_BASE_URL:-$DEFAULT_REDMINE_BASE_URL}"
+REDMINE_API_KEY="${REDMINE_API_KEY:-$(read_env_value REDMINE_API_KEY "$SUPABASE_ENV_FILE" "$V3_ENV_FILE" "$FRONT_DIR/.env" "$V3_DIR/.env.preprod")}"
+REDMINE_LOGIN_RATE_LIMIT_SALT="${REDMINE_LOGIN_RATE_LIMIT_SALT:-$(read_env_value REDMINE_LOGIN_RATE_LIMIT_SALT "$SUPABASE_ENV_FILE" "$V3_ENV_FILE" "$FRONT_DIR/.env" "$V3_DIR/.env.preprod")}"
+REDMINE_LOGIN_RATE_LIMIT_SALT="${REDMINE_LOGIN_RATE_LIMIT_SALT:-snapflow-local-redmine-login}"
 
 get_status_var() {
   local key="$1"
@@ -126,6 +164,9 @@ write_env_files() {
 DB_PASS=$DB_PASS
 VITE_SUPABASE_URL=$api_url
 VITE_SUPABASE_PUBLISHABLE_KEY=$anon_key
+REDMINE_BASE_URL=$REDMINE_BASE_URL
+REDMINE_API_KEY=$REDMINE_API_KEY
+REDMINE_LOGIN_RATE_LIMIT_SALT=$REDMINE_LOGIN_RATE_LIMIT_SALT
 EOF
 
   cat > "$SUPABASE_ENV_FILE" <<EOF
@@ -137,6 +178,9 @@ SUPABASE_ANON_KEY=$anon_key
 SUPABASE_SERVICE_ROLE_KEY=$service_role_key
 SCANNER_BASE_URL=$SCANNER_BASE_URL
 AUDIT_API_URL=$SCANNER_BASE_URL
+REDMINE_BASE_URL=$REDMINE_BASE_URL
+REDMINE_API_KEY=$REDMINE_API_KEY
+REDMINE_LOGIN_RATE_LIMIT_SALT=$REDMINE_LOGIN_RATE_LIMIT_SALT
 EOF
 }
 
@@ -177,6 +221,9 @@ seed_random_admin() {
   echo "Target : $api_url"
   if SUPABASE_URL="$api_url" \
     SUPABASE_SERVICE_ROLE_KEY="$service_role_key" \
+    REDMINE_BASE_URL="$REDMINE_BASE_URL" \
+    REDMINE_API_KEY="$REDMINE_API_KEY" \
+    REDMINE_LOGIN_RATE_LIMIT_SALT="$REDMINE_LOGIN_RATE_LIMIT_SALT" \
     node "./scripts/seed-local-admin.mjs"; then
     return 0
   fi
@@ -216,6 +263,12 @@ echo "=== 4/6 Writing local env files ==="
 write_env_files "$SUPABASE_API_URL" "$SUPABASE_ANON_KEY_VALUE" "$SUPABASE_SERVICE_ROLE_KEY_VALUE"
 echo "Wrote: $V3_ENV_FILE"
 echo "Wrote: $SUPABASE_ENV_FILE"
+echo "Redmine base URL: $REDMINE_BASE_URL"
+if [ -n "$REDMINE_API_KEY" ]; then
+  echo "Redmine admin API key: configured"
+else
+  echo "Redmine admin API key: missing (set REDMINE_API_KEY before running this script)"
+fi
 echo ""
 
 if [ "$SEED_RANDOM_ADMIN" = true ]; then

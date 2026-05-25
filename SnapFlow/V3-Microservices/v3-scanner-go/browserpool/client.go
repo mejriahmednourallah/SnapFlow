@@ -74,6 +74,13 @@ type RenderResult struct {
 	ConsoleErrorCount int                      `json:"console_error_count"`
 	TrackerTimeline   []map[string]interface{} `json:"tracker_timeline"`
 	CMPBanner         map[string]interface{}   `json:"cmp_banner"`
+	MetricsAvailable  bool                     `json:"metrics_available"`
+	RenderEngine      string                   `json:"render_engine"`
+	FallbackEngine    string                   `json:"fallback_engine"`
+	Estimated         bool                     `json:"estimated"`
+	Confidence        string                   `json:"confidence"`
+	WaitUntil         string                   `json:"wait_until"`
+	Attempts          []map[string]interface{} `json:"attempts"`
 	Error             string                   `json:"error"`
 }
 
@@ -131,31 +138,50 @@ type DiscoverRenderedResult struct {
 	RiskFlags         []string                 `json:"risk_flags"`
 	CandidateMessages []string                 `json:"candidate_messages"`
 	DetectionSources  []string                 `json:"detection_sources"`
+	NetworkRequests   []map[string]interface{} `json:"network_requests"`
+	ConsentBanner     map[string]interface{}   `json:"consent_banner"`
+	ShadowDOM         map[string]interface{}   `json:"shadow_dom"`
+	AuthWall          map[string]interface{}   `json:"auth_wall"`
 	Confidence        string                   `json:"confidence"`
 	Error             string                   `json:"error"`
 }
 
 // HealthResult mirrors the /health response body.
 type HealthResult struct {
-	Status         string `json:"status"`
-	PoolSize       int    `json:"pool_size"`
-	ActiveSessions int    `json:"active_sessions"`
-	PagesServed    int    `json:"pages_served"`
-	SuccessCount   int    `json:"success_count"`
-	TimeoutCount   int    `json:"timeout_count"`
-	CrashCount     int    `json:"crash_count"`
-	BrowserAlive   bool   `json:"browser_alive"`
+	Status                           string `json:"status"`
+	PoolSize                         int    `json:"pool_size"`
+	ActiveSessions                   int    `json:"active_sessions"`
+	PagesServed                      int    `json:"pages_served"`
+	SuccessCount                     int    `json:"success_count"`
+	TimeoutCount                     int    `json:"timeout_count"`
+	CrashCount                       int    `json:"crash_count"`
+	BrowserAlive                     bool   `json:"browser_alive"`
+	ObscuraEnabled                   bool   `json:"obscura_enabled"`
+	ObscuraAlive                     bool   `json:"obscura_alive"`
+	ObscuraActiveSessions            int    `json:"obscura_active_sessions"`
+	ObscuraMaxSessions               int    `json:"obscura_max_sessions"`
+	ObscuraDiscoveryConcurrency      int    `json:"obscura_discovery_concurrency"`
+	ObscuraRenderFallbackConcurrency int    `json:"obscura_render_fallback_concurrency"`
+	ObscuraSuccessCount              int    `json:"obscura_success_count"`
+	ObscuraTimeoutCount              int    `json:"obscura_timeout_count"`
 }
 
 // ── Internal HTTP helper ───────────────────────────────────────────────────────
 
 func post(ctx context.Context, path string, payload interface{}) ([]byte, error) {
+	return postWithTimeout(ctx, path, payload, httpTimeout())
+}
+
+func postWithTimeout(ctx context.Context, path string, payload interface{}, timeout time.Duration) ([]byte, error) {
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return nil, fmt.Errorf("browserpool: marshal: %w", err)
 	}
+	if timeout <= 0 {
+		timeout = httpTimeout()
+	}
 
-	reqCtx, cancel := context.WithTimeout(ctx, httpTimeout())
+	reqCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost,
@@ -180,6 +206,24 @@ func post(ctx context.Context, path string, payload interface{}) ([]byte, error)
 			path, resp.StatusCode, string(data))
 	}
 	return data, nil
+}
+
+func renderHTTPTimeout(timeoutMS int, allowFallback bool, engine string) time.Duration {
+	base := httpTimeout()
+	if timeoutMS <= 0 {
+		timeoutMS = 30000
+	}
+	renderBudget := time.Duration(timeoutMS)*time.Millisecond + 20*time.Second
+	if allowFallback || engine == "auto" {
+		// Chromium may consume its full navigation timeout before Obscura gets a
+		// chance to run. Keep the client alive long enough to receive the
+		// fallback result instead of aborting the /render request mid-flight.
+		renderBudget = 2*time.Duration(timeoutMS)*time.Millisecond + 45*time.Second
+	}
+	if renderBudget > base {
+		return renderBudget
+	}
+	return base
 }
 
 func get(ctx context.Context, path string) ([]byte, error) {
@@ -210,18 +254,48 @@ func Health(ctx context.Context) (*HealthResult, error) {
 	return &r, json.Unmarshal(data, &r)
 }
 
-// Render asks the pool to navigate to url and return the fully rendered HTML.
-// waitUntil is one of "load", "domcontentloaded", "networkidle" (default: "networkidle").
+type RenderOptions struct {
+	TimeoutMS            int
+	WaitUntil            string
+	Engine               string
+	AllowObscuraFallback bool
+	SettleMS             int
+}
+
+// Render asks the pool to navigate to url and return rendered HTML.
+// waitUntil is one of "load", "domcontentloaded", "networkidle" (default: "domcontentloaded").
 func Render(ctx context.Context, url string, timeoutMS int, waitUntil string) (*RenderResult, error) {
+	return RenderWithOptions(ctx, url, RenderOptions{
+		TimeoutMS: timeoutMS,
+		WaitUntil: waitUntil,
+		Engine:    "chromium",
+	})
+}
+
+func RenderWithOptions(ctx context.Context, url string, opts RenderOptions) (*RenderResult, error) {
+	timeoutMS := opts.TimeoutMS
+	waitUntil := opts.WaitUntil
 	if waitUntil == "" {
-		waitUntil = "networkidle"
+		waitUntil = "domcontentloaded"
+	}
+	if timeoutMS <= 0 {
+		timeoutMS = 30000
+	}
+	engine := opts.Engine
+	if engine == "" {
+		engine = "chromium"
 	}
 	payload := map[string]interface{}{
-		"url":        url,
-		"timeout_ms": timeoutMS,
-		"wait_until": waitUntil,
+		"url":                    url,
+		"timeout_ms":             timeoutMS,
+		"wait_until":             waitUntil,
+		"engine":                 engine,
+		"allow_obscura_fallback": opts.AllowObscuraFallback,
 	}
-	data, err := post(ctx, "/render", payload)
+	if opts.SettleMS > 0 {
+		payload["settle_ms"] = opts.SettleMS
+	}
+	data, err := postWithTimeout(ctx, "/render", payload, renderHTTPTimeout(timeoutMS, opts.AllowObscuraFallback, engine))
 	if err != nil {
 		return nil, err
 	}

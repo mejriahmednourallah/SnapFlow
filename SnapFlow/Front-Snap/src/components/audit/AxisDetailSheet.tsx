@@ -130,19 +130,19 @@ export function AxisDetailSheet({ axis, open, onClose }: AxisDetailSheetProps) {
                             </span>
                           );
                         }
+                        if (f.kpiLabels?.statut === 'À vérifier') {
+                          return (
+                            <span className="inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded border flex-shrink-0 mt-0.5 text-yellow-300 bg-yellow-500/10 border-yellow-500/20">
+                              <FlaskConical className="w-3 h-3" />
+                              <span>À vérifier</span>
+                            </span>
+                          );
+                        }
                         if (isNonTested) {
                           return (
                             <span className="inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded border flex-shrink-0 mt-0.5 text-yellow-400 bg-yellow-500/10 border-yellow-500/20">
                               <FlaskConical className="w-3 h-3" />
                               <span>Non testé</span>
-                            </span>
-                          );
-                        }
-                        if (f.origin === 'RGPD') {
-                          return (
-                            <span className="inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded border flex-shrink-0 mt-0.5 text-orange-400 bg-orange-500/10 border-orange-500/20">
-                              <ShieldAlert className="w-3 h-3" />
-                              <span>Protection des données</span>
                             </span>
                           );
                         }
@@ -164,7 +164,7 @@ export function AxisDetailSheet({ axis, open, onClose }: AxisDetailSheetProps) {
                       <div className="flex-1 min-w-0">
                         <p className="text-base font-semibold leading-snug">{f.title}</p>
                       </div>
-                      <CriticalityBadge level={f.criticality} />
+                      {!isPassing && <CriticalityBadge level={f.criticality} />}
                     </div>
                   </AccordionTrigger>
 

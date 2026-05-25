@@ -53,6 +53,7 @@ export function TabDetails({ audit, selectedAxisId, isEditMode = false, onUpdate
   };
 
   const canEditFindings = Boolean(isEditMode && onUpdateFinding);
+  const showInlineEvidenceLists = false;
 
   const critFilters: Array<Criticality | 'all'> = ['all', 'critical', 'high', 'medium', 'low'];
   const stateFilters: Array<FindingStatus | 'all'> = ['all', 'pass', 'fail', 'not_measured'];
@@ -360,6 +361,14 @@ export function TabDetails({ audit, selectedAxisId, isEditMode = false, onUpdate
                             </Button>
                           )}
                           {(() => {
+                            if (f.kpiLabels?.statut === 'À vérifier') {
+                              return (
+                                <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border text-yellow-300 bg-yellow-500/10 border-yellow-500/20">
+                                  <FlaskConical className="w-3 h-3" />
+                                  <span>À vérifier</span>
+                                </span>
+                              );
+                            }
                             if (f.status === 'pass' || f.origin === 'passing_kpi') {
                               return (
                                 <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border text-emerald-400 bg-emerald-500/10 border-emerald-500/20">
@@ -373,14 +382,6 @@ export function TabDetails({ audit, selectedAxisId, isEditMode = false, onUpdate
                                 <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border text-yellow-400 bg-yellow-500/10 border-yellow-500/20">
                                   <FlaskConical className="w-3 h-3" />
                                   <span>Non testé</span>
-                                </span>
-                              );
-                            }
-                            if (f.origin === 'compliance' || f.origin === 'RGPD') {
-                              return (
-                                <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border text-orange-400 bg-orange-500/10 border-orange-500/20">
-                                  <ShieldAlert className="w-3 h-3" />
-                                  <span>Protection des données</span>
                                 </span>
                               );
                             }
@@ -399,7 +400,7 @@ export function TabDetails({ audit, selectedAxisId, isEditMode = false, onUpdate
                               </span>
                             );
                           })()}
-                          <CriticalityBadge level={f.criticality} />
+                          {f.status !== 'pass' && f.origin !== 'passing_kpi' && <CriticalityBadge level={f.criticality} />}
                           {f.status !== 'pass' && <PriorityBadge priority={f.priority} />}
                         </div>
                       </div>
@@ -463,7 +464,7 @@ export function TabDetails({ audit, selectedAxisId, isEditMode = false, onUpdate
                         </div>
                       )}
 
-                      {f.affectedCount != null && f.affectedCount > 0 && (
+                      {showInlineEvidenceLists && f.affectedCount != null && f.affectedCount > 0 && (
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className="text-xs px-2 py-0.5 rounded-full border border-amber-500/20 bg-amber-500/10 text-amber-400">
                             {f.affectedCount} page{f.affectedCount > 1 ? 's' : ''} ou élément{f.affectedCount > 1 ? 's' : ''} à vérifier
@@ -471,7 +472,7 @@ export function TabDetails({ audit, selectedAxisId, isEditMode = false, onUpdate
                         </div>
                       )}
 
-                      {f.exampleUrls && f.exampleUrls.length > 0 && (
+                      {showInlineEvidenceLists && f.exampleUrls && f.exampleUrls.length > 0 && (
                         <div className="p-3 rounded-md bg-muted/20 border border-border/20">
                           <p className="text-xs font-semibold mb-1.5 flex items-center gap-1.5">
                             <ExternalLink className="w-3.5 h-3.5 text-muted-foreground" /> Exemples de pages ({f.exampleUrls.length})

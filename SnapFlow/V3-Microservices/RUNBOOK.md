@@ -26,10 +26,16 @@ From the server repository:
 cd V3-Microservices
 ```
 
-Normal preprod start/rebuild:
+Normal preprod start/rebuild. Obscura rendered discovery is enabled by default:
 
 ```bash
 ./run-all.sh
+```
+
+Disable Obscura and use only the local Chromium pool:
+
+```bash
+./run-all.sh --no-obscura
 ```
 
 Rebuild service images without Docker cache, but reuse existing base images:
@@ -82,6 +88,12 @@ Then run the local microservices:
 ```bash
 cd ../V3-Microservices
 ./run-all.sh --local
+```
+
+Disable Obscura locally and use only the local Chromium pool:
+
+```bash
+./run-all.sh --local --no-obscura
 ```
 
 Rebuild local service images without Docker cache, while reusing base images:
