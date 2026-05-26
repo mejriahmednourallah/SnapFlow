@@ -882,6 +882,18 @@ class BrowserPool:
                 self._obscura_success_count += 1
             else:
                 self._success_count += 1
+            metrics_available = bool(metrics.get("fcp_ms", 0) > 0 and metrics.get("lcp_ms", 0) > 0)
+            if not metrics_available:
+                logger.warning(
+                    "render metrics unavailable url=%s engine=%s final_url=%s fcp=%s lcp=%s requests=%s transfer_kb=%s",
+                    url,
+                    engine,
+                    final_url,
+                    metrics.get("fcp_ms", 0),
+                    metrics.get("lcp_ms", 0),
+                    metrics.get("http_requests", 0),
+                    metrics.get("transfer_size_kb", 0.0),
+                )
             return RenderResult(
                 status=PageStatus.SUCCESS,
                 url=url,
@@ -905,7 +917,7 @@ class BrowserPool:
                 console_error_count=len(console_errors),
                 tracker_timeline=metrics.get("tracker_timeline") or [],
                 cmp_banner=metrics.get("cmp_banner") or None,
-                metrics_available=bool(metrics.get("fcp_ms", 0) > 0 and metrics.get("lcp_ms", 0) > 0),
+                metrics_available=metrics_available,
                 render_engine=engine,
                 wait_until=wait_until,
             )

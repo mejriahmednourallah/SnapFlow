@@ -111,6 +111,14 @@ def _to_float(value, default=0.0):
         return default
 
 
+def _positive_float_or_none(value):
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if number > 0 else None
+
+
 def _jsonb_object(value, default: Optional[dict] = None) -> Optional[dict]:
     """Return a dict from a JSONB/text payload without raising on driver quirks."""
     fallback = default if default is not None else None
@@ -2767,20 +2775,21 @@ def build_report(scan_id: str, enrichment_artifacts: Optional[dict] = None) -> d
         # Headless (stored per page in metrics under "headless" key or as legacy flat)
         headless = m.get("headless", {})
         if headless:
+            headless_available = bool(headless.get("available")) and _positive_float_or_none(headless.get("fcp_ms")) is not None and _positive_float_or_none(headless.get("lcp_ms")) is not None
             fallback_engine = str(headless.get("fallback_engine") or "").strip()
             estimated_render = bool(headless.get("estimated")) or fallback_engine == "obscura"
             if estimated_render:
                 headless_fallback_count += 1
-            if headless.get("fcp_ms"):
+            if headless_available and _positive_float_or_none(headless.get("fcp_ms")) is not None:
                 headless_fcp.append(headless["fcp_ms"])
-            if headless.get("lcp_ms"):
+            if headless_available and _positive_float_or_none(headless.get("lcp_ms")) is not None:
                 headless_lcp.append(headless["lcp_ms"])
-            if headless.get("cls") is not None:
+            if headless_available and headless.get("cls") is not None:
                 headless_cls.append(headless["cls"])
             speed_index_ms = headless.get("speed_index_ms")
-            if speed_index_ms is not None and speed_index_ms > 0:
+            if headless_available and _positive_float_or_none(speed_index_ms) is not None:
                 headless_speed.append(speed_index_ms)
-            if headless.get("eco_index") is not None:
+            if headless_available and _positive_float_or_none(headless.get("eco_index")) is not None:
                 headless_eco.append(headless["eco_index"])
             if headless.get("invisible_links", 0) > 0:
                 ux_invisible_links_total += headless["invisible_links"]
@@ -2907,19 +2916,19 @@ def build_report(scan_id: str, enrichment_artifacts: Optional[dict] = None) -> d
                     mobile_metrics_data = headless["mobile_metrics"]
             headless_sample.append({
                 "url": page_url,
-                "fcp_ms": headless.get("fcp_ms") if headless.get("fcp_ms") and headless.get("fcp_ms") > 0 else None,
-                "lcp_ms": headless.get("lcp_ms") if headless.get("lcp_ms") and headless.get("lcp_ms") > 0 else None,
-                "cls": headless.get("cls"),
-                "speed_index_ms": headless.get("speed_index_ms"),
-                "eco_score": headless.get("eco_score"),
-                "eco_index": headless.get("eco_index"),
-                "available": headless.get("available", headless.get("fcp_ms", 0) > 0 and headless.get("lcp_ms", 0) > 0),
-                "measurement_status": headless.get("measurement_status", "measured" if (headless.get("fcp_ms", 0) > 0 and headless.get("lcp_ms", 0) > 0) else "zero_metrics"),
-                "mobile_overflow": headless.get("mobile_overflow"),
-                "tablet_overflow": headless.get("tablet_overflow"),
-                "invisible_links": headless.get("invisible_links", 0),
-                "unused_js_kb": round(headless.get("unused_js_bytes", 0) / 1024, 1),
-                "unused_css_kb": round(headless.get("unused_css_bytes", 0) / 1024, 1),
+                "fcp_ms": _positive_float_or_none(headless.get("fcp_ms")) if headless_available else None,
+                "lcp_ms": _positive_float_or_none(headless.get("lcp_ms")) if headless_available else None,
+                "cls": headless.get("cls") if headless_available else None,
+                "speed_index_ms": _positive_float_or_none(headless.get("speed_index_ms")) if headless_available else None,
+                "eco_score": headless.get("eco_score") if headless_available else None,
+                "eco_index": _positive_float_or_none(headless.get("eco_index")) if headless_available else None,
+                "available": headless_available,
+                "measurement_status": headless.get("measurement_status", "measured" if headless_available else "metrics_unavailable"),
+                "mobile_overflow": headless.get("mobile_overflow") if headless_available else None,
+                "tablet_overflow": headless.get("tablet_overflow") if headless_available else None,
+                "invisible_links": headless.get("invisible_links", 0) if headless_available else None,
+                "unused_js_kb": round(headless.get("unused_js_bytes", 0) / 1024, 1) if headless_available else None,
+                "unused_css_kb": round(headless.get("unused_css_bytes", 0) / 1024, 1) if headless_available else None,
                 "render_engine": headless.get("render_engine"),
                 "fallback_engine": fallback_engine or None,
                 "estimated": estimated_render,

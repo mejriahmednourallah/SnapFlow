@@ -482,6 +482,45 @@ func evidenceProvenanceFromHeadless(hr performance.HeadlessResult) string {
 	return "static"
 }
 
+func headlessMetricsPayload(hr performance.HeadlessResult) map[string]interface{} {
+	payload := map[string]interface{}{}
+	if raw, err := json.Marshal(hr); err == nil {
+		_ = json.Unmarshal(raw, &payload)
+	}
+	payload["available"] = hr.Available && hr.FCPMS > 0 && hr.LCPMS > 0
+	if status := strings.TrimSpace(hr.MeasurementStatus); status != "" {
+		payload["measurement_status"] = status
+	} else if payload["available"] == true {
+		payload["measurement_status"] = "measured"
+	} else {
+		payload["measurement_status"] = "metrics_unavailable"
+	}
+	if payload["available"] != true {
+		for _, key := range []string{
+			"fcp_ms",
+			"lcp_ms",
+			"cls",
+			"speed_index_ms",
+			"eco_index",
+			"eco_score",
+			"emissions_per_page_load",
+			"dom_nodes",
+			"http_requests",
+			"transfer_size_kb",
+			"asset_breakdown",
+			"mobile_overflow",
+			"tablet_overflow",
+			"desktop_overflow",
+			"invisible_links",
+			"unused_js_bytes",
+			"unused_css_bytes",
+		} {
+			payload[key] = nil
+		}
+	}
+	return payload
+}
+
 func getAppEnv() string {
 	for _, key := range []string{"APP_ENV", "SNAPFLOW_ENV", "ENV"} {
 		if v := strings.TrimSpace(strings.ToLower(os.Getenv(key))); v != "" {
@@ -2281,8 +2320,15 @@ func startScan(ctx context.Context, config ScannerConfig) {
 	homepageRenderedHTML := ""
 
 	for _, hr := range headlessResults {
-		if hr.Error != "" {
-			fmt.Printf("  ⚠ Headless error on %s: %s\n", hr.URL, hr.Error)
+		if !hr.Available || hr.Error != "" {
+			reason := strings.TrimSpace(hr.Error)
+			if reason == "" {
+				reason = strings.TrimSpace(hr.MeasurementStatus)
+			}
+			if reason == "" {
+				reason = "metrics_unavailable"
+			}
+			fmt.Printf("  ⚠ Headless error on %s: %s\n", hr.URL, reason)
 		} else {
 			fmt.Printf("  ✅ %s → FCP:%.0fms LCP:%.0fms CLS:%.3f Eco:%s\n", hr.URL, hr.FCPMS, hr.LCPMS, hr.CLS, hr.EcoScore)
 			// BL-09: Pass the hydrated Playwright HTML directly into scan_pages so v3-nlp-worker gets it
@@ -2304,7 +2350,7 @@ func startScan(ctx context.Context, config ScannerConfig) {
 			htmlSource = "headless"
 		}
 		if err := db.MergePageMetrics(scanID, hr.URL, map[string]interface{}{
-			"headless":            hr,
+			"headless":            headlessMetricsPayload(hr),
 			"evidence_provenance": evidenceProvenanceFromHeadless(hr),
 			"html_source":         htmlSource,
 		}); err != nil {

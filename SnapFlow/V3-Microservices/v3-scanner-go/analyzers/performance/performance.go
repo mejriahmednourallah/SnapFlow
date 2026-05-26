@@ -395,7 +395,7 @@ func renderPagesViaBrowserPool(urls []string, concurrency int) []HeadlessResult 
 				if res.Error != "" {
 					res.MeasurementStatus = "failed:" + res.Error
 				} else {
-					res.MeasurementStatus = "zero_metrics"
+					res.MeasurementStatus = "metrics_unavailable"
 				}
 			}
 			if res.DOMNodes > 0 || res.HTTPRequests > 0 || res.TransferSizeKB > 0 {
@@ -891,7 +891,7 @@ func analyzePageHeadless(browser *rod.Browser, targetURL string) HeadlessResult 
 		if result.Error != "" {
 			result.MeasurementStatus = "failed:" + result.Error
 		} else {
-			result.MeasurementStatus = "zero_metrics"
+			result.MeasurementStatus = "metrics_unavailable"
 		}
 	}
 
