@@ -17,6 +17,18 @@ interface EvidenceDetailsDialogProps {
 function cleanLine(value: string): string {
   const normalized = String(value ?? '').replace(/\s+/g, ' ').trim();
   if (!normalized) return '';
+  const comparable = normalized
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+  if (
+    comparable.startsWith('formule:') ||
+    comparable.startsWith('formule du score:') ||
+    comparable.includes('formule conforme=100') ||
+    comparable.includes('formule conforme 100')
+  ) {
+    return '';
+  }
   if (/^(VALID|PARTIAL|MISSING)$/i.test(normalized)) return '';
   if (normalized.startsWith('{') || normalized.startsWith('[')) {
     return 'Donnee technique structuree disponible dans les preuves tabulaires.';
@@ -58,6 +70,16 @@ function cleanColumnLabel(value: string): string {
     .replace(/\bfcp ms\b/gi, 'premier affichage visible')
     .replace(/\bcls\b/gi, 'stabilite visuelle')
     .replace(/\bthreshold ms\b/gi, 'seuil attendu');
+}
+
+function shouldShowEvidenceColumn(value: string): boolean {
+  const normalized = String(value ?? '')
+    .replace(/_/g, ' ')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim();
+  return normalized !== 'score formula' && normalized !== 'formule' && normalized !== 'formule du score';
 }
 
 function csvEscape(value: unknown): string {
@@ -134,17 +156,20 @@ export function EvidenceDetailsDialog({
   );
 
   const evidenceRows = useMemo(
-    () => (finding.evidenceRows ?? []).slice(0, 10),
+    () => (finding.evidenceRows ?? [])
+      .map((row) => Object.fromEntries(Object.entries(row).filter(([key]) => shouldShowEvidenceColumn(key))))
+      .slice(0, 10),
     [finding.evidenceRows],
   );
 
   const csvRows = useMemo(
-    () => (finding.evidenceCsvRows ?? finding.evidenceRows ?? []) as Record<string, unknown>[],
+    () => ((finding.evidenceCsvRows ?? finding.evidenceRows ?? []) as Record<string, unknown>[])
+      .map((row) => Object.fromEntries(Object.entries(row).filter(([key]) => shouldShowEvidenceColumn(key)))),
     [finding.evidenceCsvRows, finding.evidenceRows],
   );
 
   const csvColumns = useMemo(() => {
-    const configured = (finding.evidenceCsvColumns ?? []).filter(Boolean);
+    const configured = (finding.evidenceCsvColumns ?? []).filter(Boolean).filter(shouldShowEvidenceColumn);
     if (configured.length > 0) return configured;
     const first = csvRows[0];
     return first ? Object.keys(first) : [];
@@ -177,7 +202,7 @@ export function EvidenceDetailsDialog({
             <section className="grid grid-cols-3 gap-3">
               <div className="rounded-lg bg-muted/20 border border-border/30 p-3 text-center">
                 <p className="text-xs text-muted-foreground mb-1">Statut</p>
-                <span className={finding.kpiLabels.statut === 'Concluant' ? 'text-emerald-400 font-semibold' : (finding.kpiLabels.statut === 'Non testé' || finding.kpiLabels.statut === 'À vérifier') ? 'text-yellow-400 font-semibold' : 'text-red-400 font-semibold'}>
+                <span className={finding.kpiLabels.statut === 'Concluant' ? 'text-emerald-400 font-semibold' : finding.kpiLabels.statut === 'Non testé' ? 'text-yellow-400 font-semibold' : 'text-red-400 font-semibold'}>
                   {finding.kpiLabels.statut}
                 </span>
               </div>

@@ -6,7 +6,7 @@ import { AxisIcon } from '@/components/audit/AxisIcon';
 import { EvidenceDetailsDialog } from '@/components/audit/EvidenceDetailsDialog';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
-import { AlertTriangle, Bug, CheckCircle, ExternalLink, FlaskConical, Lightbulb, ShieldAlert, XCircle } from 'lucide-react';
+import { AlertTriangle, Bug, CheckCircle, FlaskConical, Lightbulb, ShieldAlert, XCircle } from 'lucide-react';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -127,14 +127,6 @@ export function AxisDetailSheet({ axis, open, onClose }: AxisDetailSheetProps) {
                             <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded border flex-shrink-0 mt-0.5 text-emerald-300 bg-emerald-500/20 border-emerald-500/40 font-semibold">
                               <CheckCircle className="w-3 h-3" />
                               <span>Validé</span>
-                            </span>
-                          );
-                        }
-                        if (f.kpiLabels?.statut === 'À vérifier') {
-                          return (
-                            <span className="inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded border flex-shrink-0 mt-0.5 text-yellow-300 bg-yellow-500/10 border-yellow-500/20">
-                              <FlaskConical className="w-3 h-3" />
-                              <span>À vérifier</span>
                             </span>
                           );
                         }
@@ -259,31 +251,6 @@ export function AxisDetailSheet({ axis, open, onClose }: AxisDetailSheetProps) {
                           </div>
                         );
                       */}
-
-                      {f.affectedCount != null && f.affectedCount > 0 && (
-                        <div className="flex items-center gap-2 flex-wrap mt-2">
-                          <span className="text-xs px-2 py-0.5 rounded-full border border-amber-500/20 bg-amber-500/10 text-amber-400">
-                            {f.affectedCount} page{f.affectedCount > 1 ? 's' : ''} ou élément{f.affectedCount > 1 ? 's' : ''} à vérifier
-                          </span>
-                        </div>
-                      )}
-
-                      {f.exampleUrls && f.exampleUrls.length > 0 && (
-                        <div className="p-3 rounded-md bg-muted/20 border border-border/20 mt-2">
-                          <p className="text-xs font-semibold mb-1.5 flex items-center gap-1.5">
-                            <ExternalLink className="w-3.5 h-3.5 text-muted-foreground" /> Exemples de pages ({f.exampleUrls.length})
-                          </p>
-                          <ul className="space-y-1">
-                            {f.exampleUrls.map((url, i) => (
-                              <li key={i}>
-                                <a href={url} target="_blank" rel="noopener noreferrer" className="text-xs text-primary hover:underline flex items-center gap-1 break-all">
-                                  {url} <ExternalLink className="w-3 h-3 flex-shrink-0" />
-                                </a>
-                              </li>
-                            ))}
-                          </ul>
-                        </div>
-                      )}
 
                       {f.testCases && f.testCases.length > 0 && (
                         <div className="p-3 rounded-md bg-muted/30 border border-border/20">

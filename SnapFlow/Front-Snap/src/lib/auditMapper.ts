@@ -51,7 +51,7 @@ export interface ApiResponse {
 /* Canonical triplet helpers */
 const OK_DEFAULT:  KpiLabels = { statut: 'Concluant',    typeLabel: 'Conforme',        priorite: 'Normale'  };
 const NT_DEFAULT:  KpiLabels = { statut: 'Non testé',    typeLabel: 'Indéterminé',     priorite: 'Normale'   };
-const REVIEW_DEFAULT: KpiLabels = { statut: 'À vérifier', typeLabel: 'Indéterminé',     priorite: 'Normale'   };
+const REVIEW_DEFAULT: KpiLabels = { statut: 'Non concluant', typeLabel: 'Recommandation', priorite: 'Normale'   };
 
 const KO_BUG_MAJ:  KpiLabels = { statut: 'Non concluant', typeLabel: 'Bug',             priorite: 'Majeure'   };
 const KO_BUG_MIN:  KpiLabels = { statut: 'Non concluant', typeLabel: 'Bug',             priorite: 'Mineure'   };
@@ -1126,7 +1126,11 @@ function cleanEvidenceLines(lines: string[] | undefined, finding: AuditFinding):
       const label = normalizeForComparison(String(line).split(':')[0] || line);
       const whole = normalizeForComparison(line);
       return !label.startsWith('source') &&
+        label !== 'formule' &&
+        label !== 'formule du score' &&
+        label !== 'score formula' &&
         !whole.includes('scanner aggregation') &&
+        !whole.includes('formule conforme 100 alerte 50') &&
         !whole.includes('stack fingerprint') &&
         whole !== 'scan automatique' &&
         whole !== 'empreinte technique';
@@ -1544,7 +1548,7 @@ function humanizeEvidenceLabel(label: string): string {
     risk: 'Risque',
     recommendation: 'Recommandation',
     score_formula: 'Formule du score',
-    score_value: 'Score calcule',
+    score_value: 'Score ecologique',
     measurement_status: 'Statut de mesure',
     affected_pages: 'Pages concernees',
     affected_page_urls_all: 'Pages concernees',

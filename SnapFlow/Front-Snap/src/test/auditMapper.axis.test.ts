@@ -239,7 +239,7 @@ describe('Axis Mapping', () => {
             server: {
               kpi_id: 'tech_server_version',
               type: null,
-              name: 'Version Langage de Programmation',
+              name: 'Version serveur',
               status: 'passing',
               evidence_digest: { quality: 'VALID', proof_lines: ['Serveur detecte: Apache 2.4'] },
             },
@@ -276,9 +276,10 @@ describe('Axis Mapping', () => {
       expect(breakdown.x).toBe(1);
       expect(breakdown.y).toBe(5);
       expect(nonTested).toHaveLength(4);
-      expect(nonTested.filter((finding) => finding.kpiLabels?.statut === 'À vérifier')).toHaveLength(2);
+      expect(nonTested.filter((finding) => finding.kpiLabels?.statut === 'Non concluant')).toHaveLength(2);
       expect(nonTested.filter((finding) => finding.kpiLabels?.statut === 'Non testé')).toHaveLength(2);
-      expect(nonTested.every((finding) => finding.kpiLabels?.typeLabel === 'Indéterminé')).toBe(true);
+      expect(nonTested.filter((finding) => finding.kpiLabels?.typeLabel === 'Recommandation')).toHaveLength(2);
+      expect(nonTested.filter((finding) => finding.kpiLabels?.typeLabel === 'Indéterminé')).toHaveLength(2);
       expect(report.bugs.some((item) => item.source_kpi === 'tech_cve_check')).toBe(false);
       expect(report.recommendations.some((item) => item.source_kpi === 'tech_programming_language')).toBe(false);
     });
@@ -636,7 +637,7 @@ describe('Axis Mapping', () => {
               type: 'recommendation',
               status: 'warning',
               severity: 'medium',
-              name: 'Version Langage de Programmation',
+              name: 'Version serveur',
               constat: 'Le serveur Apache a ete partiellement detecte, mais la version exploitable manque pour conclure son niveau de risque.',
               impact: 'Versions obsoletes exposent a des vulnerabilites connues',
               evidence_digest: {
@@ -748,7 +749,7 @@ describe('Axis Mapping', () => {
 
       expect(finding?.title).toBe('Version des modules');
       expect(finding?.status).toBe('not_evaluated');
-      expect(finding?.kpiLabels?.statut).toBe('À vérifier');
+      expect(finding?.kpiLabels?.statut).toBe('Non concluant');
       expect(finding?.description).toContain('3 modules');
       expect(finding?.description).toContain('version exploitable');
       expect(finding?.recommendation).not.toContain('Controle conforme');

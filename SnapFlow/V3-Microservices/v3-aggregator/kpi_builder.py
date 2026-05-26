@@ -525,7 +525,7 @@ _KPI_META = {
     # — Audit Technique —
     "Version CMS/Framework":              ("tech_cms_version",        "medium", "aggregate"),
     "Version Modules Installés":          ("tech_modules_versions",   "low",    "aggregate"),
-    "Version Langage de Programmation":   ("tech_server_version",     "medium", "aggregate"),
+    "Version serveur":                    ("tech_server_version",     "medium", "aggregate"),
     "Langage de Programmation":           ("tech_programming_language","low",    "aggregate"),
     "Vérification du Code":               ("tech_cve_check",          "high",   "aggregate"),
     # — Check Sécurité —
@@ -1924,8 +1924,7 @@ def _build_curated_evidence_digest(kpi_id: str, kpi_name: str, status: str, evid
         if kpi_id == "perf_compression":
             _append_digest_line(lines, f"Compression HTTP: {_digest_str(data.get('html_compression_applied'))}")
         if kpi_id == "eco_index_score":
-            _append_digest_line(lines, f"Score calcule: {_safe_int(evidence.get('score_value'))} %")
-            _append_digest_line(lines, f"Formule: {_digest_str(evidence.get('score_formula')) or 'Conforme=100, alerte=50, non teste ou non conforme=0'}")
+            _append_digest_line(lines, f"Score ecologique du KPI: {_safe_int(evidence.get('score_value'))} %")
 
     elif kpi_id.startswith("ux_"):
         rows = _unique_digest_rows(_safe_list(data.get("rows") or data.get("items") or data.get("evidence")))
@@ -2881,11 +2880,17 @@ def _build_contract_evidence(kpi_id: str, kpi_obj: dict, pages_scanned: int, dom
         return evidence, data_quality, status_override, confidence_penalty
 
     if kpi_id in {"tech_cms_version", "tech_server_version"}:
-        product = _clean_text(data.get("cms_name") or data.get("server_tech") or data.get("programming_language"))
-        version = _clean_text(data.get("cms_version") or data.get("server_version") or data.get("programming_language_version"))
+        if kpi_id == "tech_server_version":
+            product = _clean_text(data.get("server_tech"))
+            version = _clean_text(data.get("server_version"))
+            eol = None
+            explicit_support_status = _clean_text(data.get("server_support_status"))
+        else:
+            product = _clean_text(data.get("cms_name"))
+            version = _clean_text(data.get("cms_version"))
+            eol = data.get("cms_eol")
+            explicit_support_status = _clean_text(data.get("cms_support_status"))
         version_label = "Branche detectee" if re.match(r"^\d+\.x$", version, re.IGNORECASE) else "Version detectee"
-        eol = data.get("cms_eol")
-        explicit_support_status = _clean_text(data.get("cms_support_status"))
         support_status = explicit_support_status or ("end_of_life" if eol is True else "supported" if eol is False else _missing_field("Le statut de support n'a pas été déterminé par le scan"))
         latest = _lookup_latest_version(product)
         latest_version = latest.get("latest_known_version") if latest else None
@@ -3260,7 +3265,6 @@ def _make_kpi_v2(kpi_name: str, kpi_obj: dict, axis: str, pages_scanned: int, do
     )
     status = status_override or _compute_v2_status(kpi_id, v1_status, evidence_quality, base_confidence)
     if kpi_id == "eco_index_score":
-        evidence["score_formula"] = "Conforme=100, alerte=50, non teste ou non conforme=0"
         evidence["score_value"] = _compute_eco_status_score(status)
     evidence_digest = _build_curated_evidence_digest(
         kpi_id, kpi_name, status, evidence, kpi_obj, domain_url
@@ -3295,7 +3299,6 @@ def _make_kpi_v2(kpi_name: str, kpi_obj: dict, axis: str, pages_scanned: int, do
     severity = _cap_severity_by_confidence(severity, confidence)
     score = _compute_eco_status_score(status) if kpi_id == "eco_index_score" else _compute_contract_score(status, severity, data_quality)
     if kpi_id == "eco_index_score":
-        evidence["score_formula"] = "Conforme=100, alerte=50, non teste ou non conforme=0"
         evidence["score_value"] = score
 
     return {
@@ -3656,7 +3659,7 @@ def build_kpi_centric_report(report: dict) -> dict:
                 "module_verification": module_verification,
             }
         },
-        "Version Langage de Programmation": {
+        "Version serveur": {
             "info": server_version_info,
             "impact": "Versions obsolètes exposent à des vulnérabilités connues",
             "pages_affected": 1 if server_version_status in ("passing", "failing") else 0,

@@ -145,8 +145,6 @@ export function TabTableau({ audit }: TabTableauProps) {
                       <td className="p-3 text-center">
                         {(() => {
                           const origin: FindingOrigin | undefined = f.origin;
-                          if (f.kpiLabels?.statut === 'À vérifier')
-                            return <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border text-yellow-300 bg-yellow-500/10 border-yellow-500/20"><FlaskConical className="w-3 h-3" />À vérifier</span>;
                           if (isNonTestedFinding(f))
                             return <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border text-yellow-400 bg-yellow-500/10 border-yellow-500/20"><FlaskConical className="w-3 h-3" />Non testé</span>;
                           if (origin === 'passing_kpi' || f.status === 'pass')
