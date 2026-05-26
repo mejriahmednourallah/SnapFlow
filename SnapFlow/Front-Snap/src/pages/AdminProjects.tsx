@@ -52,8 +52,62 @@ interface RedmineProject {
   name: string;
   identifier: string;
   homepage?: string;
+  redmine_url?: string;
+  url?: string;
   existing?: boolean;
+  audit_url_needs_review?: boolean;
+  access_level?: string;
 }
+
+const extractProjectIdentifier = (value: unknown): string => {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  try {
+    const parsed = new URL(raw);
+    const match = parsed.pathname.match(/\/projects\/([^/]+)/);
+    return match ? decodeURIComponent(match[1]) : '';
+  } catch {
+    const match = raw.match(/\/projects\/([^/]+)/);
+    return match ? decodeURIComponent(match[1]) : '';
+  }
+};
+
+const isRedmineProjectUrl = (value: unknown): boolean => {
+  const raw = String(value || '').trim().toLowerCase();
+  return raw.includes('maintenance.medianet.tn/projects/') || raw.includes('/projects/');
+};
+
+const normalizeRedmineProject = (project: any): RedmineProject => {
+  const redmineUrl = String(project?.redmine_url || '').trim();
+  const identifier = String(
+    project?.identifier ||
+    project?.redmine_identifier ||
+    extractProjectIdentifier(redmineUrl || project?.url) ||
+    ''
+  ).trim();
+  const name = String(
+    project?.name ||
+    project?.site_name ||
+    project?.project_name ||
+    identifier ||
+    `Projet Redmine ${project?.id || project?.redmine_project_id || ''}`
+  ).trim();
+  const rawHomepage = String(project?.homepage || '').trim();
+  const rawUrl = String(project?.url || '').trim();
+  const homepage = rawHomepage || (rawUrl && !isRedmineProjectUrl(rawUrl) ? rawUrl : '');
+
+  return {
+    id: Number(project?.id || project?.redmine_project_id || 0),
+    name,
+    identifier,
+    homepage: homepage || undefined,
+    redmine_url: redmineUrl || (identifier ? `https://maintenance.medianet.tn/projects/${identifier}` : undefined),
+    url: rawUrl || homepage || undefined,
+    existing: Boolean(project?.existing),
+    audit_url_needs_review: Boolean(project?.audit_url_needs_review),
+    access_level: project?.access_level,
+  };
+};
 
 const AdminProjects = () => {
   const { user, isAdmin, userRole } = useAuth();
@@ -351,7 +405,9 @@ const AdminProjects = () => {
         });
         if (error) throw error;
         if (data?.error) throw new Error(data.error);
-        const incoming = (data?.projects || []) as RedmineProject[];
+        const incoming = ((data?.projects || []) as any[])
+          .map(normalizeRedmineProject)
+          .filter((project) => project.id && project.identifier);
         setRedmineProjects(incoming);
         setShowRedmine(true);
         if (incoming.length === 0) {
@@ -377,7 +433,9 @@ const AdminProjects = () => {
       if (projectError) throw projectError;
       if (cacheError) throw cacheError;
 
-      const allRedmineProjects: RedmineProject[] = projectData.projects || [];
+      const allRedmineProjects: RedmineProject[] = ((projectData.projects || []) as any[])
+        .map(normalizeRedmineProject)
+        .filter((project) => project.id && project.identifier);
       const allowedIdentifiers = new Set<string>((cacheData?.identifiers || []) as string[]);
 
       const userScopedProjects = filterUserId
@@ -727,7 +785,7 @@ const AdminProjects = () => {
               .filter(rp => {
                 const keywords = redmineSearch.toLowerCase().split(/\s+/).filter(Boolean);
                 if (keywords.length === 0) return true;
-                const text = `${rp.name} ${rp.identifier}`.toLowerCase();
+                const text = `${rp.name || ''} ${rp.identifier || ''}`.toLowerCase();
                 return keywords.every(kw => text.includes(kw));
               })
               .map(rp => (
@@ -740,12 +798,15 @@ const AdminProjects = () => {
                 />
                 <span className="font-medium">{rp.name}</span>
                 <span className="text-xs text-muted-foreground">({rp.identifier})</span>
+                {rp.audit_url_needs_review && (
+                  <span className="text-xs text-amber-600">URL audit à vérifier</span>
+                )}
               </label>
             ))}
             {redmineProjects.filter(rp => {
               const keywords = redmineSearch.toLowerCase().split(/\s+/).filter(Boolean);
               if (keywords.length === 0) return true;
-              const text = `${rp.name} ${rp.identifier}`.toLowerCase();
+              const text = `${rp.name || ''} ${rp.identifier || ''}`.toLowerCase();
               return keywords.every(kw => text.includes(kw));
             }).length === 0 && (
               <p className="text-xs text-muted-foreground text-center py-2">

@@ -981,6 +981,8 @@ serve(async (req) => {
         if (dryRun) {
           matchedProjects.push({
             id: project.id,
+            name: project.name,
+            identifier: project.identifier,
             local_project_id: localProject?.id || null,
             redmine_project_id: project.id,
             site_name: project.name,
@@ -1044,6 +1046,8 @@ serve(async (req) => {
 
         matchedProjects.push({
           id: localProject.id,
+          name: project.name,
+          identifier: project.identifier,
           site_name: project.name,
           redmine_identifier: project.identifier,
           redmine_url: redmineUrl,
