@@ -6,75 +6,58 @@ import { Input } from '@/components/ui/input';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog';
-
-// ─── Props ────────────────────────────────────────────────────────────────────
+import { PDF_THEMES } from '@/components/pdf/pdfStyles';
 
 export interface PdfExportModalProps {
   open: boolean;
   onOpenChange: (v: boolean) => void;
-
-  // Sections
   pdfSections: Record<string, boolean>;
   setPdfSections: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
-
-  // Advanced visibility toggle
   showAdvanced: boolean;
   setShowAdvanced: (v: boolean) => void;
-
-  // Color
+  selectedThemeId: string;
+  setSelectedThemeId: (v: string) => void;
   pdfColor: string;
   setPdfColor: (c: string) => void;
-
-  // Cover KPIs
   coverKpis: Record<string, boolean>;
   setCoverKpis: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
-
-  // Branding & contact
   pdfBrandLeft: string;  setPdfBrandLeft:  (v: string) => void;
   pdfBrandRight: string; setPdfBrandRight: (v: string) => void;
   pdfContactEmail: string; setPdfContactEmail: (v: string) => void;
   pdfContactWeb: string;   setPdfContactWeb:   (v: string) => void;
   pdfContactWeb2: string;  setPdfContactWeb2:  (v: string) => void;
-
-  // Export state
   isExporting: boolean;
   doExportPDF: () => void;
 }
 
-// ─── Section definitions ──────────────────────────────────────────────────────
-
 const COVER_KPI_DEFS = [
-  { key: 'total',    label: 'Total' },
-  { key: 'open',     label: 'En cours' },
-  { key: 'resolved', label: 'Résolues' },
+  { key: 'total', label: 'Total' },
+  { key: 'open', label: 'En cours' },
+  { key: 'resolved', label: 'Resolus' },
   { key: 'critical', label: 'Critiques' },
-  { key: 'blocked',  label: 'Bloquées' },
-  { key: 'closure',  label: 'Délai clôture' },
+  { key: 'blocked', label: 'Bloques' },
+  { key: 'closure', label: 'Delai' },
 ] as const;
 
 const SECTION_DEFS = [
-  { key: 'sommaire',    label: 'Sommaire (table des matières)' },
-  { key: 'separateurs', label: 'Diapositives de séparation' },
-  { key: 'perimetre',   label: 'Périmètre du projet' },
-  { key: 'indicateurs', label: 'Indicateurs globaux' },
-  { key: 'statuts',     label: 'Répartition par statut' },
-  { key: 'perStatus',   label: 'Détail par statut (une diapo / statut)' },
-  { key: 'bloqueSynth', label: 'Synthèse tickets bloqués' },
-  { key: 'reunions',    label: 'Réunions et points d\'échange' },
-  { key: 'evolution',   label: 'Évolution temporelle' },
-  { key: 'trackers',    label: 'Répartition par catégorie' },
-  { key: 'priorities',  label: 'Répartition par priorité' },
-  { key: 'health',      label: 'Score de santé / radargram' },
-  { key: 'insights',    label: 'Recommandations automatiques' },
-  { key: 'merci',       label: 'Page de clôture' },
+  { key: 'sommaire', label: 'Table des matieres' },
+  { key: 'indicateurs', label: 'Grille des indicateurs' },
+  { key: 'statuts', label: 'Repartition par statut' },
+  { key: 'trackers', label: 'Categories et trackers' },
+  { key: 'priorities', label: 'Priorites' },
+  { key: 'evolution', label: 'Evolution temporelle' },
+  { key: 'bloqueSynth', label: 'Tickets bloques' },
+  { key: 'validation', label: 'Validation client' },
+  { key: 'insights', label: 'Recommandations' },
+  { key: 'appendix', label: 'Annexe tickets' },
+  { key: 'merci', label: 'Page de cloture' },
 ] as const;
-
-// ─── Component ────────────────────────────────────────────────────────────────
 
 export function PdfExportModal({
   open, onOpenChange,
   pdfSections, setPdfSections,
   showAdvanced, setShowAdvanced,
+  selectedThemeId, setSelectedThemeId,
   pdfColor, setPdfColor,
   coverKpis, setCoverKpis,
   pdfBrandLeft, setPdfBrandLeft,
@@ -84,24 +67,43 @@ export function PdfExportModal({
   pdfContactWeb2, setPdfContactWeb2,
   isExporting, doExportPDF,
 }: PdfExportModalProps) {
-  // ── helpers ────────────────────────────────────────────────────────────────
   const toggleSection = (key: string) =>
     setPdfSections(prev => ({ ...prev, [key]: !prev[key] }));
 
   const toggleKpi = (key: string) =>
     setCoverKpis(prev => ({ ...prev, [key]: !prev[key] }));
 
-  // ── render ─────────────────────────────────────────────────────────────────
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle className="text-lg font-bold">Exporter en PDF</DialogTitle>
+          <DialogTitle className="text-lg font-bold">Exporter le rapport activite</DialogTitle>
         </DialogHeader>
 
-        {/* ── Sections to include ─────────────────────────────────────────── */}
+        <div>
+          <p className="text-sm font-semibold text-stone-700 mb-2">Theme du rapport</p>
+          <div className="grid grid-cols-2 gap-2">
+            {PDF_THEMES.map(theme => (
+              <button
+                key={theme.id}
+                type="button"
+                onClick={() => {
+                  setSelectedThemeId(theme.id);
+                  setPdfColor(theme.primary);
+                }}
+                className={`text-left rounded-lg border p-2 transition ${selectedThemeId === theme.id ? 'border-primary bg-primary/5' : 'border-stone-200 hover:bg-stone-50'}`}
+              >
+                <div className="h-7 rounded-md mb-2" style={{ background: theme.heroBg }} />
+                <div className="text-xs font-semibold text-stone-700">{theme.name}</div>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <hr className="my-3 border-stone-200" />
+
         <div className="space-y-1">
-          <p className="text-sm font-semibold text-stone-700 mb-2">Diapositives à inclure</p>
+          <p className="text-sm font-semibold text-stone-700 mb-2">Pages a inclure</p>
           {SECTION_DEFS.map(({ key, label }) => (
             <div key={key} className="flex items-center justify-between py-1">
               <Label htmlFor={`sec-${key}`} className="text-sm text-stone-600 cursor-pointer">{label}</Label>
@@ -116,9 +118,8 @@ export function PdfExportModal({
 
         <hr className="my-3 border-stone-200" />
 
-        {/* ── Cover KPIs ──────────────────────────────────────────────────── */}
         <div>
-          <p className="text-sm font-semibold text-stone-700 mb-2">KPIs sur la page de couverture</p>
+          <p className="text-sm font-semibold text-stone-700 mb-2">Indicateurs sur la couverture</p>
           <div className="grid grid-cols-3 gap-2">
             {COVER_KPI_DEFS.map(({ key, label }) => (
               <label key={key} className="flex items-center gap-2 text-sm text-stone-600 cursor-pointer">
@@ -136,19 +137,17 @@ export function PdfExportModal({
 
         <hr className="my-3 border-stone-200" />
 
-        {/* ── Advanced options collapsible ─────────────────────────────────── */}
         <button
           type="button"
           className="flex items-center gap-2 text-sm font-semibold text-stone-700 w-full"
           onClick={() => setShowAdvanced(!showAdvanced)}
         >
           <ChevronDown className={`w-4 h-4 transition-transform ${showAdvanced ? 'rotate-180' : ''}`} />
-          Options avancées
+          Options avancees
         </button>
 
         {showAdvanced && (
           <div className="mt-3 space-y-4">
-            {/* Color */}
             <div className="flex items-center gap-4">
               <Label className="text-sm text-stone-600 w-32 flex-shrink-0">Couleur principale</Label>
               <label className="flex items-center gap-3 cursor-pointer">
@@ -169,53 +168,24 @@ export function PdfExportModal({
               </label>
             </div>
 
-            {/* Branding */}
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1">
-                <Label className="text-xs text-stone-500">Marque (gauche)</Label>
-                <Input
-                  value={pdfBrandLeft}
-                  onChange={e => setPdfBrandLeft(e.target.value)}
-                  placeholder="Ex : MEDIANET"
-                  className="h-8 text-sm"
-                />
+                <Label className="text-xs text-stone-500">Marque gauche</Label>
+                <Input value={pdfBrandLeft} onChange={e => setPdfBrandLeft(e.target.value)} className="h-8 text-sm" />
               </div>
               <div className="space-y-1">
-                <Label className="text-xs text-stone-500">Marque (droite)</Label>
-                <Input
-                  value={pdfBrandRight}
-                  onChange={e => setPdfBrandRight(e.target.value)}
-                  placeholder="Ex : RUN SERVICES"
-                  className="h-8 text-sm"
-                />
+                <Label className="text-xs text-stone-500">Marque droite</Label>
+                <Input value={pdfBrandRight} onChange={e => setPdfBrandRight(e.target.value)} className="h-8 text-sm" />
               </div>
             </div>
 
-            {/* Contact info */}
             <div className="space-y-2">
               <p className="text-xs font-semibold text-stone-500 uppercase tracking-wide">
-                Contact (page Merci)
+                Contact
               </p>
-              <div className="space-y-2">
-                <Input
-                  value={pdfContactEmail}
-                  onChange={e => setPdfContactEmail(e.target.value)}
-                  placeholder="Email de contact"
-                  className="h-8 text-sm"
-                />
-                <Input
-                  value={pdfContactWeb}
-                  onChange={e => setPdfContactWeb(e.target.value)}
-                  placeholder="Site web principal"
-                  className="h-8 text-sm"
-                />
-                <Input
-                  value={pdfContactWeb2}
-                  onChange={e => setPdfContactWeb2(e.target.value)}
-                  placeholder="Site web secondaire (optionnel)"
-                  className="h-8 text-sm"
-                />
-              </div>
+              <Input value={pdfContactEmail} onChange={e => setPdfContactEmail(e.target.value)} placeholder="Email de contact" className="h-8 text-sm" />
+              <Input value={pdfContactWeb} onChange={e => setPdfContactWeb(e.target.value)} placeholder="Site web principal" className="h-8 text-sm" />
+              <Input value={pdfContactWeb2} onChange={e => setPdfContactWeb2(e.target.value)} placeholder="Site web secondaire" className="h-8 text-sm" />
             </div>
           </div>
         )}
@@ -229,7 +199,7 @@ export function PdfExportModal({
             disabled={isExporting}
             style={{ background: pdfColor, color: '#fff', border: 'none' }}
           >
-            {isExporting ? 'Export en cours…' : 'Exporter le PDF'}
+            {isExporting ? 'Export en cours...' : 'Exporter le PDF'}
           </Button>
         </DialogFooter>
       </DialogContent>

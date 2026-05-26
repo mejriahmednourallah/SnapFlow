@@ -1,4 +1,4 @@
-import { useRef, useMemo, useState, useCallback } from 'react';
+import { useMemo, useState, useCallback } from 'react';
 import {
   PieChart, Pie, Cell, Tooltip as ReTooltip, ResponsiveContainer,
   AreaChart, Area, XAxis, YAxis, CartesianGrid,
@@ -10,8 +10,6 @@ import {
   Lightbulb, AlertTriangle, CheckCircle, Info, Archive, X, HelpCircle,
 } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { PdfSlides } from './pdf/PdfSlides';
-import { PdfExportModal } from './pdf/PdfExportModal';
 import { format, differenceInDays, startOfWeek } from 'date-fns';
 import { fr } from 'date-fns/locale';
 import { Button } from '@/components/ui/button';
@@ -75,6 +73,8 @@ interface Props {
   dateTo?: string;
   isLoading?: boolean;
   onSnapshotSaved?: () => void;
+  onExportPdf?: () => void;
+  isExportingPdf?: boolean;
 }
 
 type FilterDimension = 'status' | 'tracker' | 'priority';
@@ -246,31 +246,11 @@ function LegendDot({ color, label, count, active, hidden, onClick, onDoubleClick
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
-export function ActivityDashboard({ issues, totalCount, project, dateFrom, dateTo, isLoading, onSnapshotSaved }: Props) {
-  const dashboardRef = useRef<HTMLDivElement>(null);
-  const pdfContainerRef = useRef<HTMLDivElement>(null);
-  const [isExporting, setIsExporting] = useState(false);
+export function ActivityDashboard({ issues, totalCount, project, dateFrom, dateTo, isLoading, onSnapshotSaved, onExportPdf, isExportingPdf }: Props) {
   const [isSaving, setIsSaving] = useState(false);
   const [activeFilter, setActiveFilter] = useState<ActiveFilter>(null);
   const [hiddenItems, setHiddenItems] = useState<Set<string>>(new Set());
   const [hoveredPieIndex, setHoveredPieIndex] = useState<number | null>(null);
-  const [showPdfModal, setShowPdfModal] = useState(false);
-  const [pdfSections, setPdfSections] = useState<Record<string, boolean>>({
-    separateurs: true, perimetre: true, indicateurs: true,
-    sommaire: true, statuts: true, perStatus: true, bloqueSynth: true, reunions: true,
-    evolution: true, trackers: true,
-    priorities: true, health: true, insights: true, merci: true,
-  });
-  const [showAdvanced, setShowAdvanced] = useState(false);
-  const [pdfColor, setPdfColor]         = useState(BRAND);
-  const [coverKpis, setCoverKpis]       = useState<Record<string, boolean>>({
-    total: true, open: true, resolved: true, critical: true, blocked: true, closure: true,
-  });
-  const [pdfBrandLeft,  setPdfBrandLeft]  = useState("RAPPORT D'ACTIVIT\u00C9");
-  const [pdfBrandRight, setPdfBrandRight] = useState('SNAPFLOW');
-  const [pdfContactEmail, setPdfContactEmail] = useState('');
-  const [pdfContactWeb,   setPdfContactWeb]   = useState('');
-  const [pdfContactWeb2,  setPdfContactWeb2]  = useState('');
 
   // ── Filtered dataset ─────────────────────────────────────────────────────
 
@@ -533,33 +513,6 @@ export function ActivityDashboard({ issues, totalCount, project, dateFrom, dateT
 
   // ── PDF export ───────────────────────────────────────────────────────────
 
-  const handleExportPDF = (): void => { setShowPdfModal(true); };
-
-  const doExportPDF = async (): Promise<void> => {
-    if (!pdfContainerRef.current) return;
-    setShowPdfModal(false);
-    setIsExporting(true);
-    try {
-      const html2canvas = (await import('html2canvas')).default;
-      const { jsPDF } = await import('jspdf');
-      const pdf = new jsPDF('l', 'mm', 'a4');
-      const pw = pdf.internal.pageSize.getWidth();
-      const ph = pdf.internal.pageSize.getHeight();
-      const slides = Array.from(pdfContainerRef.current.querySelectorAll<HTMLElement>('[data-pdf-slide]'))
-        .filter(el => {
-          const key = el.getAttribute('data-pdf-slide');
-          return key === 'cover' || pdfSections[key ?? ''] === true;
-        });
-      for (let i = 0; i < slides.length; i++) {
-        const canvas = await html2canvas(slides[i], { scale: 2, useCORS: true, backgroundColor: '#ffffff', logging: false });
-        if (i > 0) pdf.addPage();
-        pdf.addImage(canvas.toDataURL('image/png'), 'PNG', 0, 0, pw, ph);
-      }
-      pdf.save(`rapport-${project.site_name.replace(/\s+/g, '-').toLowerCase()}-${format(new Date(), 'yyyy-MM-dd')}.pdf`);
-    } catch (err) { console.error('PDF export failed', err); }
-    finally { setIsExporting(false); }
-  };
-
   // ── Save snapshot ────────────────────────────────────────────────────────
 
   const handleSaveSnapshot = async (): Promise<void> => {
@@ -653,32 +606,6 @@ export function ActivityDashboard({ issues, totalCount, project, dateFrom, dateT
         </div>
       </div>
 
-      {/* PDF Export Modal */}
-      <PdfExportModal
-        open={showPdfModal}
-        onOpenChange={setShowPdfModal}
-        pdfSections={pdfSections}
-        setPdfSections={setPdfSections}
-        showAdvanced={showAdvanced}
-        setShowAdvanced={setShowAdvanced}
-        pdfColor={pdfColor}
-        setPdfColor={setPdfColor}
-        coverKpis={coverKpis}
-        setCoverKpis={setCoverKpis}
-        pdfBrandLeft={pdfBrandLeft}
-        setPdfBrandLeft={setPdfBrandLeft}
-        pdfBrandRight={pdfBrandRight}
-        setPdfBrandRight={setPdfBrandRight}
-        pdfContactEmail={pdfContactEmail}
-        setPdfContactEmail={setPdfContactEmail}
-        pdfContactWeb={pdfContactWeb}
-        setPdfContactWeb={setPdfContactWeb}
-        pdfContactWeb2={pdfContactWeb2}
-        setPdfContactWeb2={setPdfContactWeb2}
-        isExporting={isExporting}
-        doExportPDF={doExportPDF}
-      />
-
       {/* Toolbar */}
       <div className="flex items-center justify-end flex-wrap gap-2">
         <Button variant="outline" size="sm" onClick={handleSaveSnapshot} disabled={isSaving}
@@ -686,10 +613,10 @@ export function ActivityDashboard({ issues, totalCount, project, dateFrom, dateT
           {isSaving ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : <Archive className="w-3.5 h-3.5 mr-1.5" />}
           Archiver
         </Button>
-        <Button variant="outline" size="sm" onClick={handleExportPDF} disabled={isExporting}
+        <Button variant="outline" size="sm" onClick={onExportPdf} disabled={isExportingPdf || !onExportPdf}
           className="border-stone-200 text-stone-700 hover:bg-stone-50">
-          {isExporting ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : <Download className="w-3.5 h-3.5 mr-1.5" />}
-          Export PDF
+          {isExportingPdf ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : <Download className="w-3.5 h-3.5 mr-1.5" />}
+          Rapport activite
         </Button>
       </div>
 
@@ -734,7 +661,7 @@ export function ActivityDashboard({ issues, totalCount, project, dateFrom, dateT
       )}
 
       {/* Dashboard capture zone */}
-      <div ref={dashboardRef} className="bg-stone-50 rounded-xl p-5 space-y-5">
+      <div className="bg-stone-50 rounded-xl p-5 space-y-5">
 
         {/* ── Intro summary ── */}
         <p className="text-xs text-stone-500 leading-relaxed border-l-2 pl-3" style={{ borderColor: BRAND }}>
@@ -1108,24 +1035,6 @@ export function ActivityDashboard({ issues, totalCount, project, dateFrom, dateT
       </div>
 
       {/* ─── Hidden PDF slides rendered off-screen ──────────────────────── */}
-      <PdfSlides
-        ref={pdfContainerRef}
-        cfg={{
-          pdfColor, pdfSections, coverKpis,
-          pdfBrandLeft, pdfBrandRight,
-          pdfContactEmail, pdfContactWeb, pdfContactWeb2,
-        }}
-        data={{
-          project, dateFrom, dateTo, dataMinDate, dataMaxDate,
-          totalCount, total, open, resolved, critical, blocked,
-          avgResolutionDays, avgClosureDays, avgDaysOpen,
-          statusData, timelineData, trackerData, priorityData, radarData,
-          filteredIssues, insights,
-          assignedTo: countBy(filteredIssues.filter(i => i.assigned_to), i => i.assigned_to!.name)[0]?.name,
-          statusColorOf,
-          countByFn: countBy,
-        }}
-      />
     </div>
   );
 }

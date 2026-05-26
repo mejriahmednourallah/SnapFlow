@@ -35,8 +35,9 @@ def _normalize_wait_until(value: Optional[str], default: str = "domcontentloaded
     return wait_until
 
 
-POOL_CONCURRENCY = int(os.getenv("BROWSER_POOL_CONCURRENCY", "15"))
-RECYCLE_AFTER    = int(os.getenv("BROWSER_POOL_RECYCLE_AFTER", "50"))
+POOL_CONCURRENCY     = int(os.getenv("BROWSER_POOL_CONCURRENCY", "15"))
+RECYCLE_AFTER        = int(os.getenv("BROWSER_POOL_RECYCLE_AFTER", "50"))
+BROWSER_POOL_WORKERS = max(1, int(os.getenv("BROWSER_POOL_WORKERS", "1")))
 DEFAULT_TIMEOUT  = int(os.getenv("BROWSER_POOL_DEFAULT_TIMEOUT_MS", "30000"))
 _BROWSER_POOL_IGNORE_HTTPS_ERRORS = os.getenv("BROWSER_POOL_IGNORE_HTTPS_ERRORS", "").strip().lower() in ("1", "true", "yes", "on")
 DEFAULT_SCREENSHOT_WAIT_UNTIL = _normalize_wait_until(
@@ -312,7 +313,9 @@ def _resolve_obscura_cdp_endpoint_sync() -> str:
 class BrowserPool:
     def __init__(self) -> None:
         self._playwright:       Optional[Playwright] = None
-        self._browser:          Optional[Browser]    = None
+        self._browsers:         list                 = []   # one entry per BROWSER_POOL_WORKERS
+        self._worker_rr:        int                  = 0    # round-robin counter
+        self._worker_counters:  list                 = []   # pages-attempted per worker
         self._semaphore:        Optional[asyncio.Semaphore] = None
         self._obscura_semaphore: Optional[asyncio.Semaphore] = None
         self._obscura_discovery_semaphore: Optional[asyncio.Semaphore] = None
@@ -337,15 +340,16 @@ class BrowserPool:
 
     async def start(self) -> None:
         self._playwright = await async_playwright().start()
-        self._browser    = await self._launch()
+        self._browsers = [await self._launch() for _ in range(BROWSER_POOL_WORKERS)]
+        self._worker_counters = [0] * BROWSER_POOL_WORKERS
         self._semaphore  = asyncio.Semaphore(POOL_CONCURRENCY)
         self._obscura_semaphore = asyncio.Semaphore(_OBSCURA_MAX_SESSIONS)
         self._obscura_discovery_semaphore = asyncio.Semaphore(_OBSCURA_DISCOVERY_CONCURRENCY)
         self._obscura_render_semaphore = asyncio.Semaphore(_OBSCURA_RENDER_FALLBACK_CONCURRENCY)
         self._started    = True
         logger.info(
-            "BrowserPool ready: concurrency=%d  obscura_max_sessions=%d  obscura_discovery=%d  obscura_render_fallback=%d  recycle_after=%d  timeout_ms=%d  ignore_https_errors=%s",
-            POOL_CONCURRENCY, _OBSCURA_MAX_SESSIONS, _OBSCURA_DISCOVERY_CONCURRENCY, _OBSCURA_RENDER_FALLBACK_CONCURRENCY, RECYCLE_AFTER, DEFAULT_TIMEOUT, _BROWSER_POOL_IGNORE_HTTPS_ERRORS,
+            "BrowserPool ready: workers=%d  concurrency=%d  obscura_max_sessions=%d  obscura_discovery=%d  obscura_render_fallback=%d  recycle_after=%d  timeout_ms=%d  ignore_https_errors=%s",
+            BROWSER_POOL_WORKERS, POOL_CONCURRENCY, _OBSCURA_MAX_SESSIONS, _OBSCURA_DISCOVERY_CONCURRENCY, _OBSCURA_RENDER_FALLBACK_CONCURRENCY, RECYCLE_AFTER, DEFAULT_TIMEOUT, _BROWSER_POOL_IGNORE_HTTPS_ERRORS,
         )
 
     async def stop(self) -> None:
@@ -355,11 +359,13 @@ class BrowserPool:
             except Exception:
                 pass
             self._obscura_browser = None
-        if self._browser:
-            try:
-                await self._browser.close()
-            except Exception:
-                pass
+        for browser in self._browsers:
+            if browser is not None:
+                try:
+                    await browser.close()
+                except Exception:
+                    pass
+        self._browsers = []
         if self._playwright:
             await self._playwright.stop()
         self._started = False
@@ -375,25 +381,39 @@ class BrowserPool:
     async def _launch(self) -> Browser:
         return await self._playwright.chromium.launch(args=self._browser_args())
 
-    async def _maybe_recycle(self) -> None:
-        """Recycle the browser every RECYCLE_AFTER pages to cap memory growth."""
-        if (
-            self._pages_served > 0
-            and self._pages_served % RECYCLE_AFTER == 0
-            and self._active_sessions <= 1
-        ):
-            logger.info("Recycling browser after %d pages served", self._pages_served)
-            try:
-                await self._browser.close()
-            except Exception as e:
-                logger.warning("Error closing old browser: %s", e)
-                self._crash_count += 1
-            try:
-                self._browser = await self._launch()
-                logger.info("Browser recycled successfully")
-            except Exception as e:
-                logger.error("Browser recycle failed: %s", e)
-                self._crash_count += 1
+    async def _pick_browser(self):
+        """Round-robin select a browser worker, recycling it if due.
+
+        Returns (browser, worker_idx).  Must NOT be called while already holding
+        _recycle_lock — it acquires the lock internally.
+        """
+        async with self._recycle_lock:
+            idx = self._worker_rr % BROWSER_POOL_WORKERS
+            self._worker_rr += 1
+            self._worker_counters[idx] += 1
+            if (
+                self._worker_counters[idx] > 0
+                and self._worker_counters[idx] % RECYCLE_AFTER == 0
+                and self._active_sessions <= BROWSER_POOL_WORKERS
+            ):
+                await self._recycle_worker(idx)
+            return self._browsers[idx], idx
+
+    async def _recycle_worker(self, idx: int) -> None:
+        """Replace one browser worker process (caller must hold _recycle_lock)."""
+        logger.info("Recycling browser worker %d after %d pages", idx, self._worker_counters[idx])
+        try:
+            await self._browsers[idx].close()
+        except Exception as e:
+            logger.warning("Error closing browser worker %d: %s", idx, e)
+            self._crash_count += 1
+        try:
+            self._browsers[idx] = await self._launch()
+            self._worker_counters[idx] = 0
+            logger.info("Browser worker %d recycled successfully", idx)
+        except Exception as e:
+            logger.error("Browser worker %d recycle failed: %s", idx, e)
+            self._crash_count += 1
 
     async def _safe_close_page(self, page) -> None:
         if page is None:
@@ -750,9 +770,7 @@ class BrowserPool:
                                 error="All browser slots busy — queue timeout")
         self._active_sessions += 1
         try:
-            async with self._recycle_lock:
-                await self._maybe_recycle()
-                browser = self._browser
+            browser, _worker_idx = await self._pick_browser()
 
             context = None
             page = None
@@ -852,9 +870,7 @@ class BrowserPool:
                     ignore_https_errors=_BROWSER_POOL_IGNORE_HTTPS_ERRORS,
                 )
             else:
-                async with self._recycle_lock:
-                    await self._maybe_recycle()
-                    browser = self._browser
+                browser, _worker_idx = await self._pick_browser()
                 context = await browser.new_context(
                     viewport={"width": 1366, "height": 768},
                     ignore_https_errors=_BROWSER_POOL_IGNORE_HTTPS_ERRORS,
@@ -1023,10 +1039,10 @@ class BrowserPool:
         page = None
         engine = "chromium"
         network_requests: list[dict] = []
+        _local_browser = None
         try:
-            async with self._recycle_lock:
-                await self._maybe_recycle()
-                browser = self._browser
+            if not use_obscura:
+                _local_browser, _worker_idx = await self._pick_browser()
 
             try:
                 if use_obscura:
@@ -1037,7 +1053,7 @@ class BrowserPool:
                     )
                     engine = "obscura"
                 else:
-                    context = await browser.new_context(
+                    context = await _local_browser.new_context(
                         viewport={"width": 1366, "height": 768},
                         ignore_https_errors=_BROWSER_POOL_IGNORE_HTTPS_ERRORS,
                     )
@@ -1052,7 +1068,8 @@ class BrowserPool:
                     if not await self._acquire():
                         return DiscoveryResult(status=PageStatus.POOL_EXHAUSTED, url=url, error="All browser slots busy - queue timeout")
                     self._active_sessions += 1
-                context = await browser.new_context(
+                    _local_browser, _worker_idx = await self._pick_browser()
+                context = await _local_browser.new_context(
                     viewport={"width": 1366, "height": 768},
                     ignore_https_errors=_BROWSER_POOL_IGNORE_HTTPS_ERRORS,
                 )
@@ -1419,9 +1436,7 @@ class BrowserPool:
                                     error="All browser slots busy — queue timeout")
         self._active_sessions += 1
         try:
-            async with self._recycle_lock:
-                await self._maybe_recycle()
-                browser = self._browser
+            browser, _worker_idx = await self._pick_browser()
 
             context = None
             page = None
@@ -1547,13 +1562,17 @@ class BrowserPool:
     def health(self) -> dict:
         alive = (
             self._started
-            and self._browser is not None
-            and not getattr(self._browser, "_closed", False)
+            and len(self._browsers) > 0
+            and any(
+                b is not None and not getattr(b, "_closed", False)
+                for b in self._browsers
+            )
         )
         obscura_connected = self._is_obscura_browser_connected()
         return {
             "status":          "ok" if alive else "degraded",
             "pool_size":       POOL_CONCURRENCY,
+            "browser_workers": BROWSER_POOL_WORKERS,
             "active_sessions": self._active_sessions,
             "recycle_after":   RECYCLE_AFTER,
             "pages_served":    self._pages_served,

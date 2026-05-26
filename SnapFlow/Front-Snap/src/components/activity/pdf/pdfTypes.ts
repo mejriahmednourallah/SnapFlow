@@ -1,5 +1,7 @@
 // ─── Shared types + palette for PDF report slides ────────────────────────────
 
+import type { PdfTheme } from '@/components/pdf/theme';
+
 export const BRAND   = '#0e9fb0';
 export const GREEN   = '#16a34a';
 export const RED     = '#dc2626';
@@ -58,6 +60,19 @@ export interface PdfConfig {
   pdfContactEmail: string;
   pdfContactWeb: string;
   pdfContactWeb2: string;
+}
+
+export interface ActivityPdfOptions {
+  theme?: PdfTheme;
+  themeId: string;
+  pdfColor: string;
+  sections: Record<string, boolean>;
+  coverKpis: Record<string, boolean>;
+  brandLeft: string;
+  brandRight: string;
+  contactEmail: string;
+  contactWeb: string;
+  contactWeb2: string;
 }
 
 export interface PdfData {

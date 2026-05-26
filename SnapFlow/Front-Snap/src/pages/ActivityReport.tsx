@@ -11,6 +11,9 @@ import {
 } from 'lucide-react';
 import { ActivityDashboard } from '@/components/activity/ActivityDashboard';
 import { TicketHistorySheet } from '@/components/activity/TicketHistorySheet';
+import { PdfExportModal } from '@/components/activity/pdf/PdfExportModal';
+import { PDF_THEMES } from '@/components/pdf/pdfStyles';
+import type { ActivityPdfOptions } from '@/components/activity/pdf/pdfTypes';
 import { format } from 'date-fns';
 import { fr } from 'date-fns/locale';
 
@@ -36,6 +39,29 @@ interface ProjectInfo {
   redmine_url?: string | null;
 }
 
+const DEFAULT_ACTIVITY_PDF_SECTIONS: Record<string, boolean> = {
+  sommaire: true,
+  indicateurs: true,
+  statuts: true,
+  trackers: true,
+  priorities: true,
+  evolution: true,
+  bloqueSynth: true,
+  validation: true,
+  insights: true,
+  appendix: true,
+  merci: true,
+};
+
+const DEFAULT_ACTIVITY_COVER_KPIS: Record<string, boolean> = {
+  total: true,
+  open: true,
+  resolved: true,
+  critical: true,
+  blocked: true,
+  closure: true,
+};
+
 const ActivityReport = () => {
   const { id: projectId } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -44,6 +70,17 @@ const ActivityReport = () => {
 
   const [project, setProject] = useState<ProjectInfo | null>(null);
   const [isExporting, setIsExporting] = useState(false);
+  const [pdfModalOpen, setPdfModalOpen] = useState(false);
+  const [pdfSections, setPdfSections] = useState<Record<string, boolean>>(DEFAULT_ACTIVITY_PDF_SECTIONS);
+  const [coverKpis, setCoverKpis] = useState<Record<string, boolean>>(DEFAULT_ACTIVITY_COVER_KPIS);
+  const [showPdfAdvanced, setShowPdfAdvanced] = useState(false);
+  const [selectedThemeId, setSelectedThemeId] = useState(PDF_THEMES[0]?.id || 'slate');
+  const [pdfColor, setPdfColor] = useState(PDF_THEMES[0]?.primary || '#1E3A5F');
+  const [pdfBrandLeft, setPdfBrandLeft] = useState("RAPPORT D'ACTIVITE");
+  const [pdfBrandRight, setPdfBrandRight] = useState('SNAPFLOW');
+  const [pdfContactEmail, setPdfContactEmail] = useState('');
+  const [pdfContactWeb, setPdfContactWeb] = useState('');
+  const [pdfContactWeb2, setPdfContactWeb2] = useState('');
   const [statuses, setStatuses] = useState<FilterOption[]>([]);
   const [trackers, setTrackers] = useState<FilterOption[]>([]);
   const [savedReports, setSavedReports] = useState<SavedActivityReport[]>([]);
@@ -195,66 +232,68 @@ const ActivityReport = () => {
     }
   };
 
-  const handleExportPDF = async () => {
+  const openActivityPdfPicker = () => {
+    if ((allIssuesForStats.length || issues.length) === 0) {
+      toast({ title: 'Aucun ticket', description: 'Aucun ticket ne correspond aux filtres actifs.', variant: 'destructive' });
+      return;
+    }
+    setPdfModalOpen(true);
+  };
+
+  const doExportActivityPDF = async () => {
+    if (!project || !redmineIdentifier) return;
     setIsExporting(true);
     try {
-      const { jsPDF } = await import('jspdf');
-      const pdf = new jsPDF('l', 'mm', 'a4');
-      const pdfWidth = pdf.internal.pageSize.getWidth();
-
-      pdf.setFontSize(16);
-      pdf.text(`Rapport d'activité — ${project?.site_name || ''}`, 14, 18);
-      pdf.setFontSize(9);
-      pdf.setTextColor(120);
-      const filtersText = [
-        filters.status && `Statut: ${statuses.find(s => String(s.id) === filters.status)?.name || filters.status}`,
-        filters.tracker && `Tracker: ${trackers.find(t => String(t.id) === filters.tracker)?.name || filters.tracker}`,
-        filters.dateFrom && `Du: ${filters.dateFrom}`,
-        filters.dateTo && `Au: ${filters.dateTo}`,
-      ].filter(Boolean).join(' | ');
-      if (filtersText) pdf.text(`Filtres: ${filtersText}`, 14, 24);
-      pdf.text(`Généré le ${format(new Date(), 'dd/MM/yyyy à HH:mm')}`, 14, filtersText ? 29 : 24);
-      pdf.setTextColor(0);
-
-      const startY = filtersText ? 35 : 30;
-      const cols = ['#', 'Sujet', 'Tracker', 'Statut', 'Priorité', 'Assigné à', '%', 'Créé le'];
-      const colWidths = [12, 80, 30, 30, 28, 45, 18, 28];
-      let y = startY;
-
-      pdf.setFontSize(8);
-      pdf.setFillColor(240, 240, 245);
-      pdf.rect(14, y - 4, pdfWidth - 28, 7, 'F');
-      let x = 14;
-      cols.forEach((col, i) => {
-        pdf.setFont('helvetica', 'bold');
-        pdf.text(col, x + 1, y);
-        x += colWidths[i];
+      const selectedTheme = PDF_THEMES.find(theme => theme.id === selectedThemeId) || PDF_THEMES[0];
+      const currentKey = `${filters.status}|${filters.tracker}|${filters.dateFrom}|${filters.dateTo}`;
+      let exportIssues = allIssuesForStats.length > 0 && statsFilterKey === currentKey ? allIssuesForStats : [];
+      if (exportIssues.length === 0) {
+        const result = await fetchAllIssues({
+          projectIdentifier: redmineIdentifier,
+          statusId: filters.status || undefined,
+          trackerId: filters.tracker || undefined,
+          dateFrom: filters.dateFrom || undefined,
+          dateTo: filters.dateTo || undefined,
+          limit: 500,
+          offset: 0,
+        });
+        exportIssues = result.issues;
+        setAllIssuesForStats(result.issues);
+        setStatsFilterKey(currentKey);
+      }
+      if (exportIssues.length === 0) {
+        toast({ title: 'Aucun ticket', description: 'Aucun ticket ne correspond aux filtres actifs.', variant: 'destructive' });
+        return;
+      }
+      const { generateActivityPdf } = await import('@/lib/generateActivityPdf');
+      const options: ActivityPdfOptions = {
+        theme: selectedTheme,
+        themeId: selectedTheme.id,
+        pdfColor,
+        sections: pdfSections,
+        coverKpis,
+        brandLeft: pdfBrandLeft,
+        brandRight: pdfBrandRight,
+        contactEmail: pdfContactEmail,
+        contactWeb: pdfContactWeb,
+        contactWeb2: pdfContactWeb2,
+      };
+      await generateActivityPdf({
+        project,
+        issues: exportIssues,
+        totalCount,
+        filters: {
+          status: filters.status,
+          tracker: filters.tracker,
+          dateFrom: filters.dateFrom,
+          dateTo: filters.dateTo,
+          statusLabel: filters.status ? statuses.find(s => String(s.id) === filters.status)?.name || filters.status : undefined,
+          trackerLabel: filters.tracker ? trackers.find(t => String(t.id) === filters.tracker)?.name || filters.tracker : undefined,
+        },
+        options,
       });
-      y += 7;
-
-      pdf.setFont('helvetica', 'normal');
-      issues.forEach(issue => {
-        if (y > pdf.internal.pageSize.getHeight() - 15) { pdf.addPage(); y = 15; }
-        x = 14;
-        const row = [
-          `#${issue.id}`,
-          issue.subject.length > 50 ? issue.subject.substring(0, 50) + '…' : issue.subject,
-          issue.tracker.name,
-          issue.status.name,
-          issue.priority.name,
-          issue.assigned_to?.name || '—',
-          `${issue.done_ratio}%`,
-          format(new Date(issue.created_on), 'dd/MM/yyyy'),
-        ];
-        row.forEach((cell, i) => { pdf.text(cell, x + 1, y); x += colWidths[i]; });
-        y += 5;
-      });
-
-      pdf.setFontSize(8);
-      pdf.setTextColor(150);
-      pdf.text(`${issues.length} ticket(s) exporté(s) sur ${totalCount} au total`, 14, y + 5);
-      pdf.save(`rapport-activite-${project?.site_name?.replace(/\s+/g, '-').toLowerCase()}-${format(new Date(), 'yyyy-MM-dd')}.pdf`);
-      toast({ title: 'PDF téléchargé', description: `${issues.length} tickets exportés.` });
+      setPdfModalOpen(false);
+      toast({ title: 'PDF telecharge', description: `${exportIssues.length} tickets exportes.` });
     } catch (err) {
       toast({ title: 'Erreur', description: "Impossible d'exporter le PDF.", variant: 'destructive' });
     } finally {
@@ -286,6 +325,32 @@ const ActivityReport = () => {
         issueId={historyIssueId}
         redmineBaseUrl={redmineBase}
         onClose={() => setHistoryIssueId(null)}
+      />
+      <PdfExportModal
+        open={pdfModalOpen}
+        onOpenChange={setPdfModalOpen}
+        pdfSections={pdfSections}
+        setPdfSections={setPdfSections}
+        showAdvanced={showPdfAdvanced}
+        setShowAdvanced={setShowPdfAdvanced}
+        selectedThemeId={selectedThemeId}
+        setSelectedThemeId={setSelectedThemeId}
+        pdfColor={pdfColor}
+        setPdfColor={setPdfColor}
+        coverKpis={coverKpis}
+        setCoverKpis={setCoverKpis}
+        pdfBrandLeft={pdfBrandLeft}
+        setPdfBrandLeft={setPdfBrandLeft}
+        pdfBrandRight={pdfBrandRight}
+        setPdfBrandRight={setPdfBrandRight}
+        pdfContactEmail={pdfContactEmail}
+        setPdfContactEmail={setPdfContactEmail}
+        pdfContactWeb={pdfContactWeb}
+        setPdfContactWeb={setPdfContactWeb}
+        pdfContactWeb2={pdfContactWeb2}
+        setPdfContactWeb2={setPdfContactWeb2}
+        isExporting={isExporting}
+        doExportPDF={doExportActivityPDF}
       />
       {/* View toggle */}
       <div className="flex items-center gap-2 sm:gap-4 overflow-x-auto pb-1">
@@ -387,9 +452,9 @@ const ActivityReport = () => {
               <Button variant="outline" size="sm" onClick={handleSaveReport} disabled={issues.length === 0}>
                 <Archive className="w-3.5 h-3.5 mr-1.5" /> Sauvegarder
               </Button>
-              <Button variant="outline" size="sm" onClick={handleExportPDF} disabled={isExporting || issues.length === 0}>
+              <Button variant="outline" size="sm" onClick={openActivityPdfPicker} disabled={isExporting || issues.length === 0}>
                 {isExporting ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : <Download className="w-3.5 h-3.5 mr-1.5" />}
-                PDF
+                Rapport activite
               </Button>
             </div>
           </div>
@@ -593,6 +658,8 @@ const ActivityReport = () => {
           dateTo={filters.dateTo}
           isLoading={dashboardLoading}
           onSnapshotSaved={refreshSavedReports}
+          onExportPdf={openActivityPdfPicker}
+          isExportingPdf={isExporting}
         />
       )}
     </div>
