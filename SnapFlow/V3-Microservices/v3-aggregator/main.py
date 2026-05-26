@@ -119,6 +119,20 @@ def _positive_float_or_none(value):
     return number if number > 0 else None
 
 
+def _truthy_flag(value) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    if isinstance(value, str):
+        text = value.strip().lower()
+        if text in {"1", "true", "yes", "oui", "available", "measured"}:
+            return True
+        if text in {"0", "false", "no", "non", "none", "null", "not_available", "metrics_unavailable", "zero_metrics"}:
+            return False
+    return False
+
+
 def _jsonb_object(value, default: Optional[dict] = None) -> Optional[dict]:
     """Return a dict from a JSONB/text payload without raising on driver quirks."""
     fallback = default if default is not None else None
@@ -2394,6 +2408,7 @@ def build_report(scan_id: str, enrichment_artifacts: Optional[dict] = None) -> d
             "os_hint":          raw_tech.get("os_hint", ""),
             "language":         raw_tech.get("language", ""),
             "language_version": raw_tech.get("language_version", ""),
+            "language_inferred": bool(raw_tech.get("language_inferred", False)),
             # Gap #5: CVE severity breakdown
             "cve_severity": {
                 "critical": raw_tech.get("cve_severity", {}).get("critical", 0),
@@ -2775,7 +2790,11 @@ def build_report(scan_id: str, enrichment_artifacts: Optional[dict] = None) -> d
         # Headless (stored per page in metrics under "headless" key or as legacy flat)
         headless = m.get("headless", {})
         if headless:
-            headless_available = bool(headless.get("available")) and _positive_float_or_none(headless.get("fcp_ms")) is not None and _positive_float_or_none(headless.get("lcp_ms")) is not None
+            headless_available = (
+                _truthy_flag(headless.get("available"))
+                and _positive_float_or_none(headless.get("fcp_ms")) is not None
+                and _positive_float_or_none(headless.get("lcp_ms")) is not None
+            )
             fallback_engine = str(headless.get("fallback_engine") or "").strip()
             estimated_render = bool(headless.get("estimated")) or fallback_engine == "obscura"
             if estimated_render:
@@ -3158,14 +3177,23 @@ def build_report(scan_id: str, enrichment_artifacts: Optional[dict] = None) -> d
                         "meta_description": meta_desc.get("meta_description_text"),
                         "length": title_quality.get("title_length"),
                     })
-                if not meta_desc.get("meta_description_present", True):
+                if meta_desc.get("meta_description_present", True):
+                    if meta_desc.get("meta_description_too_short"):
+                        seo_meta_nlp_rows.append({
+                            "page_url": page_url,
+                            "issue": "meta_too_short",
+                            "meta_description": meta_desc.get("meta_description_text"),
+                            "length": meta_desc.get("meta_description_length"),
+                        })
+                    if meta_desc.get("meta_description_too_long"):
+                        seo_meta_nlp_rows.append({
+                            "page_url": page_url,
+                            "issue": "meta_too_long",
+                            "meta_description": meta_desc.get("meta_description_text"),
+                            "length": meta_desc.get("meta_description_length"),
+                        })
+                else:
                     nlp_seo_meta_missing_pages += 1
-                    seo_meta_nlp_rows.append({
-                        "page_url": page_url,
-                        "issue": "meta_missing",
-                        "meta_description": meta_desc.get("meta_description_text"),
-                        "length": meta_desc.get("meta_description_length"),
-                    })
                 if links_kpi.get("has_no_internal_links"):
                     nlp_seo_no_internal_links_pages += 1
                 if schema_kpi.get("schema_faq_present"):
@@ -3488,6 +3516,12 @@ def build_report(scan_id: str, enrichment_artifacts: Optional[dict] = None) -> d
             "nlp_seo_meta_kpi": {
                 "title_too_long_pages": nlp_seo_title_too_long_pages,
                 "meta_missing_pages": nlp_seo_meta_missing_pages,
+                "meta_quality_issue_pages": len({
+                    str(row.get("page_url") or "")
+                    for row in seo_meta_nlp_rows
+                    if row.get("issue") in {"title_too_long", "meta_too_short", "meta_too_long"}
+                }),
+                "meta_missing_owned_by": "seo_meta_tags",
                 "rows": seo_meta_nlp_rows[:200],
             },
             "nlp_seo_ai_readiness_kpi": {

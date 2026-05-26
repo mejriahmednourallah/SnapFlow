@@ -968,6 +968,11 @@ function cleanFindingTitle(finding: AuditFinding): string {
   return stripSectionPrefix(toPlainDisplayText(finding.title).replace(/\s*\(NLP\)/gi, '')).trim();
 }
 
+function isCmsVersionFinding(finding: AuditFinding): boolean {
+  const source = `${finding.id} ${finding.sourceKpi ?? ''} ${finding.title}`.toLowerCase();
+  return source.includes('tech_cms_version') || source.includes('version cms') || source.includes('cms/framework');
+}
+
 function fallbackImpactByFamily(finding: AuditFinding): string {
   switch (findingFamily(finding)) {
     case 'technique':
@@ -1114,7 +1119,7 @@ function fallbackIssueByFamily(finding: AuditFinding): string {
 }
 
 function cleanEvidenceLines(lines: string[] | undefined, finding: AuditFinding): string[] {
-  const base = (lines ?? [])
+  let base = (lines ?? [])
     .map((line) => toPlainDisplayText(sanitizeEvidenceLine(line)))
     .filter(Boolean)
     .filter((line) => {
@@ -1126,6 +1131,19 @@ function cleanEvidenceLines(lines: string[] | undefined, finding: AuditFinding):
         whole !== 'scan automatique' &&
         whole !== 'empreinte technique';
     });
+
+  if (isCmsVersionFinding(finding)) {
+    base = base.map((line) => {
+      const splitIdx = line.indexOf(':');
+      if (splitIdx <= 0) return line;
+      const label = normalizeForComparison(line.slice(0, splitIdx));
+      const value = line.slice(splitIdx + 1).trim();
+      if ((label === 'version detectee' || label === 'version') && /^\d+\.x$/i.test(value)) {
+        return `Branche detectee : ${value}`;
+      }
+      return line;
+    });
+  }
 
   if (!isServerVersionFinding(finding)) {
     if (isProgrammingLanguageFinding(finding)) {
@@ -1269,14 +1287,8 @@ function scoreLineForFinding(finding: AuditFinding): string | undefined {
   if (source.includes('perf mobile speed') || source.includes('mobile')) {
     return `Score mobile estime : ${score} %.`;
   }
-  if (source.includes('perf image')) {
-    return `Score images estime : ${score} %.`;
-  }
   if (source.includes('eco index')) {
-    return `Score ecologique estime : ${score} %. Formule : conforme=100, alerte=50, non teste ou non conforme=0.`;
-  }
-  if (source.includes('perf')) {
-    return `Score estime : ${score} %.`;
+    return `Score ecologique : ${score} %.`;
   }
   return undefined;
 }

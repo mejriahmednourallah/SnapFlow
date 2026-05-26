@@ -101,3 +101,22 @@ func TestBootstrapAcceptsOwnedQueryVersion(t *testing.T) {
 		t.Fatalf("expected Bootstrap version 4.2.1, got %q", version)
 	}
 }
+
+func TestJQueryDoesNotInheritQueryVersionFromRelatedAssets(t *testing.T) {
+	html := `
+		<link href="/core/assets/vendor/jquery.ui/themes/base/theme.css?ver=4.3.0" rel="stylesheet" />
+		<script src="/core/assets/vendor/jquery/jquery.min.js?ver=3.6.3"></script>
+	`
+
+	versions := collectModuleVersions(html, nil)
+	found := map[string]string{}
+	for _, version := range versions {
+		found[version.Name] = version.Version
+		if version.Name == "jQuery" && version.Version == "4.3.0" {
+			t.Fatalf("unexpected jQuery version inherited from a related CSS asset: %+v", version)
+		}
+	}
+	if found["jQuery"] != "3.6.3" {
+		t.Fatalf("expected exact jQuery asset version 3.6.3, got %q", found["jQuery"])
+	}
+}

@@ -18,7 +18,7 @@ sys.modules.setdefault("psycopg2.extras", psycopg2_extras_stub)
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from kpi_builder import build_kpi_centric_report
+from kpi_builder import _build_curated_evidence_digest, build_kpi_centric_report
 
 
 class TestKPICentricReport(unittest.TestCase):
@@ -175,6 +175,48 @@ class TestKPICentricReport(unittest.TestCase):
                 if digest["quality"] == "MISSING":
                     self.assertEqual(kpi["status"], "not_evaluated", f"{axis}/{kpi_name} missing evidence should be not_evaluated")
                     self.assertIn("missing_reason", digest, f"{axis}/{kpi_name} missing digest.missing_reason")
+
+    def test_performance_digest_counts_only_valid_measurements(self):
+        rows = [
+            {"url": "https://example.test/ok-1", "available": True, "fcp_ms": 1200, "lcp_ms": 1800},
+            {"url": "https://example.test/ok-2", "available": "oui", "fcp_ms": 1300, "lcp_ms": 1900},
+        ]
+        rows.extend(
+            {"url": f"https://example.test/fail-{idx}", "available": "non", "fcp_ms": None, "lcp_ms": None, "measurement_status": "zero_metrics"}
+            for idx in range(98)
+        )
+
+        digest = _build_curated_evidence_digest(
+            "perf_desktop_speed",
+            "Temps de Chargement Desktop",
+            "failing",
+            {"data_quality": "PARTIAL", "pages_checked": 2},
+            {"data": {"rows": rows}},
+            "https://example.test",
+        )
+
+        self.assertIn("Pages testees: 2, mesures valides: 2", digest["proof_lines"])
+        self.assertEqual(len(digest["rows"]), 2)
+
+    def test_seo_meta_nlp_does_not_reown_missing_meta_descriptions(self):
+        report = json.loads(json.dumps(self.report))
+        seo = report.setdefault("site_metrics", {}).setdefault("seo", {})
+        seo["nlp_seo_meta_kpi"] = {
+            "meta_missing_pages": 51,
+            "meta_missing_owned_by": "seo_meta_tags",
+            "meta_quality_issue_pages": 0,
+            "title_too_long_pages": 0,
+            "rows": [
+                {"page_url": "https://example.test/a", "issue": "meta_missing"},
+            ],
+        }
+
+        rebuilt = build_kpi_centric_report(report)
+        kpi = self._find_kpi(rebuilt, "seo_meta_nlp")
+
+        self.assertEqual(kpi["status"], "passing")
+        self.assertEqual(kpi["evidence"]["meta_missing_owned_by"], "seo_meta_tags")
+        self.assertEqual(kpi["evidence_digest"]["rows"], [])
 
     def test_row_required_issue_without_rows_becomes_not_evaluated(self):
         report = json.loads(json.dumps(self.report))

@@ -107,6 +107,7 @@ type TechResult struct {
 	Server           string         `json:"server,omitempty"`
 	Language         string         `json:"language,omitempty"`
 	LanguageVersion  string         `json:"language_version,omitempty"`
+	LanguageInferred bool           `json:"language_inferred,omitempty"`
 	// Gap #2: module versions extracted from stack
 	ModuleVersions []ModuleVersion `json:"module_versions"`
 	// Gap #3: server/language version from response headers
@@ -511,12 +512,12 @@ func extractModuleVersionFromAsset(assetURL, moduleName string) (string, bool) {
 	if !assetBelongsToLibrary(moduleName, parsed) {
 		return "", false
 	}
-	if q := queryVersionRE.FindStringSubmatch(assetURL); len(q) > 1 {
-		return strings.TrimSpace(q[1]), true
-	}
 	baseName := strings.ToLower(path.Base(parsed.Path))
 	if !looksLikeExactLibraryAsset(moduleName, baseName) {
 		return "", false
+	}
+	if q := queryVersionRE.FindStringSubmatch(assetURL); len(q) > 1 {
+		return strings.TrimSpace(q[1]), true
 	}
 	if re, ok := moduleSrcVersionPatterns[moduleName]; ok {
 		if m := re.FindStringSubmatch(baseName); len(m) > 1 {
@@ -620,6 +621,7 @@ func Analyze(targetURL string, html string, headers *http.Header) TechResult {
 
 	cms, server, lang := "", "", ""
 	langVersion := ""
+	languageInferred := false
 	var cmsVersion string
 	for _, t := range stack {
 		switch t.Category {
@@ -661,6 +663,7 @@ func Analyze(targetURL string, html string, headers *http.Header) TechResult {
 		if inferredLang, inferredVersion := inferLanguageFromCMS(cms, cmsVersion); inferredLang != "" {
 			lang = inferredLang
 			langVersion = inferredVersion
+			languageInferred = true
 		}
 	}
 
@@ -735,6 +738,7 @@ func Analyze(targetURL string, html string, headers *http.Header) TechResult {
 		Server:           server,
 		Language:         lang,
 		LanguageVersion:  langVersion,
+		LanguageInferred: languageInferred,
 		ModuleVersions:   moduleVersions,
 		ServerTech:       serverTech,
 		ServerVersion:    serverVersion,

@@ -1107,6 +1107,46 @@ def _digest_str(value) -> str:
     return _clean_text(value)
 
 
+def _digest_bool(value) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    if isinstance(value, str):
+        text = value.strip().lower()
+        if text in {"1", "true", "yes", "oui", "available", "measured"}:
+            return True
+        if text in {"0", "false", "no", "non", "none", "null", "not_available", "metrics_unavailable", "zero_metrics"}:
+            return False
+    return False
+
+
+def _positive_digest_number(value) -> bool:
+    try:
+        return float(value) > 0
+    except (TypeError, ValueError):
+        return False
+
+
+def _performance_digest_rows(data: dict) -> list[dict]:
+    rows = _safe_list(data.get("headless_rows") or data.get("sample_rows") or data.get("rows"))
+    if not rows and any(key in data for key in ("fcp_ms", "lcp_ms", "available", "measurement_status")):
+        rows = [data]
+    return [_safe_dict(row) for row in rows if isinstance(row, dict)]
+
+
+def _is_valid_performance_digest_row(row: dict) -> bool:
+    source = _safe_dict(row)
+    if not source:
+        return False
+    measurement_status = _clean_text(source.get("measurement_status")).lower()
+    if measurement_status in {"zero_metrics", "metrics_unavailable", "failed:zero_metrics", "unavailable", "timeout"}:
+        return False
+    if source.get("available") is not None and not _digest_bool(source.get("available")):
+        return False
+    return _positive_digest_number(source.get("fcp_ms")) or _positive_digest_number(source.get("lcp_ms"))
+
+
 def _mask_digest_value(key: str, value):
     """Keep proof useful while avoiding secret/token/personal-data leakage."""
     if _is_missing_field(value):
@@ -1532,7 +1572,7 @@ def _build_curated_evidence_digest(kpi_id: str, kpi_name: str, status: str, evid
         source = ", ".join(_safe_list(evidence.get("detection_source")) or _contract_detection_sources(kpi_id))
         _append_digest_line(lines, f"{detection_label}: {product or 'non détecté'}".strip())
         if version:
-            version_label = "Version serveur" if kpi_id == "tech_server_version" else "Version du langage" if kpi_id == "tech_programming_language" else "Version détectée"
+            version_label = _digest_str(evidence.get("version_label")) or ("Version serveur" if kpi_id == "tech_server_version" else "Version du langage" if kpi_id == "tech_programming_language" else "Version détectée")
             _append_digest_line(lines, f"{version_label}: {version}")
         if support:
             _append_digest_line(lines, f"Statut de support: {support}")
@@ -1793,6 +1833,13 @@ def _build_curated_evidence_digest(kpi_id: str, kpi_name: str, status: str, evid
 
     elif kpi_id in {"seo_multi_browser", "seo_external_linking", "seo_h1_quality", "seo_meta_nlp"}:
         rows = _unique_digest_rows(_safe_list(data.get("rows") or data.get("items") or data.get("browser_matrix")))
+        if kpi_id == "seo_meta_nlp":
+            quality_rows = [
+                _safe_dict(row)
+                for row in _safe_list(data.get("rows") or data.get("items"))
+                if _safe_dict(row).get("issue") in {"title_too_long", "meta_too_short", "meta_too_long"}
+            ]
+            rows = _unique_digest_rows(quality_rows)
         if kpi_id == "seo_multi_browser":
             _append_digest_line(lines, f"Statut multi-navigateurs: {_digest_str(data.get('status')) or 'non evalue'}")
             _append_digest_line(lines, f"Navigateurs: {_digest_str(data.get('engines'))}")
@@ -1803,8 +1850,10 @@ def _build_curated_evidence_digest(kpi_id: str, kpi_name: str, status: str, evid
             _append_digest_line(lines, f"H1 manquants: {_safe_int(data.get('h1_missing_pages'))}")
             _append_digest_line(lines, f"H1 multiples: {_safe_int(data.get('h1_multiple_pages'))}")
         elif kpi_id == "seo_meta_nlp":
-            _append_digest_line(lines, f"Meta NLP manquantes: {_safe_int(data.get('meta_missing_pages'))}")
+            _append_digest_line(lines, f"Meta descriptions a optimiser: {_safe_int(data.get('meta_quality_issue_pages'))}")
             _append_digest_line(lines, f"Titres trop longs: {_safe_int(data.get('title_too_long_pages'))}")
+            if _safe_int(data.get("meta_missing_pages")) > 0:
+                _append_digest_line(lines, "Meta descriptions manquantes: suivies dans le KPI Balises META.")
 
     elif kpi_id in {"seo_sitemap", "seo_robots_txt", "seo_ai_readiness"}:
         url_key = "sitemap_url" if kpi_id == "seo_sitemap" else "robots_url" if kpi_id == "seo_robots_txt" else "llms_url"
@@ -1817,7 +1866,12 @@ def _build_curated_evidence_digest(kpi_id: str, kpi_name: str, status: str, evid
         rows = _unique_digest_rows(_safe_list(data.get("rows") or data.get("items")))
 
     elif kpi_id in {"perf_desktop_speed", "perf_mobile_speed", "perf_image_optim", "perf_cache", "perf_compression", "perf_console_errors", "eco_index_score"}:
-        rows = _unique_digest_rows(_safe_list(data.get("rows") or data.get("unoptimised_images") or data.get("broken_buttons") or data.get("homepage_console_errors")))
+        raw_perf_rows = _performance_digest_rows(data) if kpi_id in {"perf_desktop_speed", "perf_mobile_speed"} else []
+        valid_perf_rows = [row for row in raw_perf_rows if _is_valid_performance_digest_row(row)]
+        rows = _unique_digest_rows(
+            valid_perf_rows if kpi_id in {"perf_desktop_speed", "perf_mobile_speed"} else
+            _safe_list(data.get("rows") or data.get("unoptimised_images") or data.get("broken_buttons") or data.get("homepage_console_errors"))
+        )
         if not rows and kpi_id == "perf_cache":
             rows = _unique_digest_rows([{
                 "url": domain_url,
@@ -1833,7 +1887,7 @@ def _build_curated_evidence_digest(kpi_id: str, kpi_name: str, status: str, evid
                 "content_encoding": data.get("content_encoding"),
                 "compressed": data.get("html_compression_applied"),
             }])
-        if not rows and kpi_id == "perf_mobile_speed" and data.get("available") is True:
+        if not rows and kpi_id == "perf_mobile_speed" and _is_valid_performance_digest_row(data):
             rows = _unique_digest_rows([{
                 "url": data.get("url") or domain_url,
                 "profile": data.get("profile") or "mobile",
@@ -1851,8 +1905,17 @@ def _build_curated_evidence_digest(kpi_id: str, kpi_name: str, status: str, evid
             if value:
                 _append_digest_line(lines, f"{label}: {value}")
         if kpi_id in {"perf_desktop_speed", "perf_mobile_speed"}:
-            checked = _safe_int(evidence.get("pages_checked", 0))
-            available = sum(1 for row in _safe_list(data.get("rows", [])) if _safe_dict(row).get("available") not in (False, None) and _safe_dict(row).get("fcp_ms", 0) > 0)
+            checked = _safe_int(
+                evidence.get("pages_checked")
+                or data.get("pages_checked")
+                or data.get("headless_sample_size")
+                or data.get("sample_size")
+            )
+            if checked <= 0:
+                checked = len(valid_perf_rows) or len(raw_perf_rows)
+            available = len(valid_perf_rows)
+            if checked > 0:
+                available = min(available, checked)
             _append_digest_line(lines, f"Pages testees: {checked}, mesures valides: {available}")
         if kpi_id == "perf_console_errors":
             _append_digest_line(lines, f"Pages avec erreurs console: {_safe_int(data.get('pages_with_console_errors'))}")
@@ -2080,11 +2143,11 @@ _LATEST_VERSION_CATALOG = {
 
 _MODULE_VERSION_RULES = {
     "jquery": {
-        "latest_known_version": "3.7.1",
+        "latest_known_version": "4.0.0",
         "minimum_safe_version": "3.5.0",
-        "source": "offline_module_catalog_2026_04",
+        "source": "official_jquery_cdn_2026_05",
         "risk": "Ancienne branche jQuery associee a des vulnerabilites de script connues.",
-        "recommendation": "Mettre a jour jQuery vers une version 3.7.x ou plus recente.",
+        "recommendation": "Mettre a jour jQuery vers une version maintenue (3.7.1 ou 4.0.0 selon compatibilite).",
     },
     "bootstrap": {
         "latest_known_version": "5.3.3",
@@ -2260,7 +2323,7 @@ def _verify_module_version(module: dict) -> dict:
         result["verification_result"] = "risque_confirme"
         result["risk"] = rule.get("risk", "Version inferieure au seuil de securite local.")
         result["recommendation"] = rule.get("recommendation", "Mettre a jour le module.")
-    elif cmp_latest in {0, 1}:
+    elif cmp_latest == 0:
         result["verification_result"] = "verifie_conforme"
         result["risk"] = "Aucun risque connu dans le catalogue local pour cette version."
         result["recommendation"] = "Maintenir la veille de securite sur ce module."
@@ -2390,6 +2453,64 @@ def _build_contract_evidence(kpi_id: str, kpi_obj: dict, pages_scanned: int, dom
     data_quality = "VALID"
     status_override = None
     confidence_penalty = 0
+
+    if kpi_id in {"perf_desktop_speed", "perf_mobile_speed"}:
+        rows = _performance_digest_rows(data)
+        valid_rows = [row for row in rows if _is_valid_performance_digest_row(row)]
+        pages_checked = _safe_int(
+            data.get("pages_checked")
+            or data.get("headless_sample_size")
+            or data.get("sample_size")
+            or len(rows)
+        )
+        if pages_checked <= 0:
+            pages_checked = len(valid_rows)
+        if not valid_rows:
+            data_quality = "MISSING"
+            status_override = "not_evaluated"
+            confidence_penalty = 2
+        elif pages_checked > len(valid_rows):
+            data_quality = "PARTIAL"
+            confidence_penalty = 1
+        evidence.update({
+            "data_quality": data_quality,
+            "pages_checked": pages_checked,
+            "valid_measurement_count": len(valid_rows),
+            "measurement_row_count": len(rows),
+            "valid_measurement_rows": valid_rows[:200],
+        })
+        return evidence, data_quality, status_override, confidence_penalty
+
+    if kpi_id == "seo_meta_nlp":
+        rows = _safe_list(data.get("rows") or data.get("items"))
+        quality_rows = [
+            _safe_dict(row)
+            for row in rows
+            if _safe_dict(row).get("issue") in {"title_too_long", "meta_too_short", "meta_too_long"}
+        ]
+        meta_missing_pages = _safe_int(data.get("meta_missing_pages"))
+        quality_issue_pages = _safe_int(data.get("meta_quality_issue_pages"))
+        if quality_issue_pages <= 0:
+            quality_issue_pages = len({
+                _clean_text(row.get("page_url"))
+                for row in quality_rows
+                if _clean_text(row.get("page_url"))
+            })
+        if quality_issue_pages > 0:
+            status_override = "failing"
+        else:
+            status_override = "passing"
+        evidence.update({
+            "data_quality": data_quality,
+            "pages_checked": max(_safe_int(data.get("pages_checked")), len(rows), quality_issue_pages, 1),
+            "affected_pages": quality_issue_pages,
+            "meta_quality_issue_pages": quality_issue_pages,
+            "title_too_long_pages": _safe_int(data.get("title_too_long_pages")),
+            "meta_missing_pages": meta_missing_pages,
+            "meta_missing_owned_by": data.get("meta_missing_owned_by") or "seo_meta_tags",
+            "quality_rows": quality_rows[:200],
+        })
+        return evidence, data_quality, status_override, confidence_penalty
 
     if kpi_id == "func_forms":
         forms_detected = _safe_int(data.get("forms_detected") or data.get("unique_transactional_forms_detected") or data.get("total_forms"))
@@ -2762,6 +2883,7 @@ def _build_contract_evidence(kpi_id: str, kpi_obj: dict, pages_scanned: int, dom
     if kpi_id in {"tech_cms_version", "tech_server_version"}:
         product = _clean_text(data.get("cms_name") or data.get("server_tech") or data.get("programming_language"))
         version = _clean_text(data.get("cms_version") or data.get("server_version") or data.get("programming_language_version"))
+        version_label = "Branche detectee" if re.match(r"^\d+\.x$", version, re.IGNORECASE) else "Version detectee"
         eol = data.get("cms_eol")
         explicit_support_status = _clean_text(data.get("cms_support_status"))
         support_status = explicit_support_status or ("end_of_life" if eol is True else "supported" if eol is False else _missing_field("Le statut de support n'a pas été déterminé par le scan"))
@@ -2784,6 +2906,7 @@ def _build_contract_evidence(kpi_id: str, kpi_obj: dict, pages_scanned: int, dom
             "data_quality": data_quality,
             "detected_product": _value_or_missing(product, "Produit ou technologie non détecté(e)"),
             "detected_version": _value_or_missing(version, "Version non détectée"),
+            "version_label": version_label,
             "support_status": support_status,
             "eol": eol if eol is not None else _missing_field("Fin de support inconnue"),
             "latest_known_version": latest_version if latest_version else _missing_field("Aucune version de référence maintenue localement pour ce produit"),
@@ -2795,6 +2918,7 @@ def _build_contract_evidence(kpi_id: str, kpi_obj: dict, pages_scanned: int, dom
     if kpi_id == "tech_programming_language":
         language = _clean_text(data.get("language") or data.get("programming_language"))
         language_version = _clean_text(data.get("language_version") or data.get("programming_language_version"))
+        language_inferred = bool(data.get("language_inferred"))
         server_tech = _clean_text(data.get("server_tech"))
         server_version = _clean_text(data.get("server_version"))
         cms_name = _clean_text(data.get("cms_name"))
@@ -2813,7 +2937,14 @@ def _build_contract_evidence(kpi_id: str, kpi_obj: dict, pages_scanned: int, dom
             "latest_version_source": latest.get("latest_version_source") if latest else _missing_field("Catalogue local absent pour ce runtime"),
             "comparison_result": _missing_field("Comparaison impossible sans version de référence fiable"),
         })
-        if not language and context_product:
+        if language_inferred:
+            evidence["detection_label"] = "Langage infere"
+            evidence["detection_note"] = "Langage deduit depuis le systeme de gestion du site; version a verifier."
+            evidence["language_inferred"] = True
+            data_quality = "PARTIAL"
+            status_override = "not_evaluated"
+            confidence_penalty = 1
+        elif not language and context_product:
             data_quality = "PARTIAL"
             confidence_penalty = 1
         elif not language:
@@ -3128,6 +3259,9 @@ def _make_kpi_v2(kpi_name: str, kpi_obj: dict, axis: str, pages_scanned: int, do
         kpi_id, kpi_obj, pages_scanned, domain_url
     )
     status = status_override or _compute_v2_status(kpi_id, v1_status, evidence_quality, base_confidence)
+    if kpi_id == "eco_index_score":
+        evidence["score_formula"] = "Conforme=100, alerte=50, non teste ou non conforme=0"
+        evidence["score_value"] = _compute_eco_status_score(status)
     evidence_digest = _build_curated_evidence_digest(
         kpi_id, kpi_name, status, evidence, kpi_obj, domain_url
     )
@@ -3443,6 +3577,7 @@ def build_kpi_centric_report(report: dict) -> dict:
     cms_detected_version = str(cms_kpi.get("cms_version") or "").strip()
     programming_language = str(cms_kpi.get("language") or "").strip()
     programming_language_version = str(cms_kpi.get("language_version") or "").strip()
+    programming_language_inferred = bool(cms_kpi.get("language_inferred"))
     cve_severity = _safe_dict(cms_kpi.get("cve_severity"))
     server_critical = _safe_int(cve_severity.get("critical"))
     server_high = _safe_int(cve_severity.get("high"))
@@ -3456,7 +3591,7 @@ def build_kpi_centric_report(report: dict) -> dict:
             programming_language_info = f"Langage détecté: {programming_language} {programming_language_version}"
         else:
             programming_language_info = f"Langage détecté: {programming_language} (version non détectée)"
-        programming_language_status = "passing"
+        programming_language_status = "non_evalue" if programming_language_inferred else "passing"
     elif server_tech:
         version_text = f" {server_version}" if server_version else " (version serveur non détectée)"
         programming_language_info = f"Langage non exposé directement; serveur détecté: {server_tech}{version_text}"
@@ -3549,6 +3684,7 @@ def build_kpi_centric_report(report: dict) -> dict:
             "data": {
                 "language": cms_kpi.get("language"),
                 "language_version": cms_kpi.get("language_version"),
+                "language_inferred": cms_kpi.get("language_inferred"),
                 "server_tech": cms_kpi.get("server_tech"),
                 "server_version": cms_kpi.get("server_version"),
                 "cms_name": cms_kpi.get("cms_detected"),
