@@ -1538,6 +1538,7 @@ class BrowserPool:
             and self._browser is not None
             and not getattr(self._browser, "_closed", False)
         )
+        obscura_connected = self._is_obscura_browser_connected()
         return {
             "status":          "ok" if alive else "degraded",
             "pool_size":       POOL_CONCURRENCY,
@@ -1552,13 +1553,13 @@ class BrowserPool:
             "obscura_discovery_enabled": _ENABLE_OBSCURA_DISCOVERY,
             "obscura_render_enabled": _OBSCURA_RENDER_ENABLED,
             "obscura_enabled": bool((_ENABLE_OBSCURA_DISCOVERY or _OBSCURA_RENDER_ENABLED) and _OBSCURA_CDP_URL),
-            "obscura_alive": bool(self._started and self._playwright and _OBSCURA_CDP_URL),
+            "obscura_alive": bool(obscura_connected),
             "obscura_cdp_url_configured": bool(_OBSCURA_CDP_URL),
             "obscura_cdp_ws_url_configured": bool(_OBSCURA_CDP_WS_URL),
             "obscura_cdp_connect_timeout_ms": _OBSCURA_CDP_CONNECT_TIMEOUT_MS,
             "obscura_resolved_endpoint": self._obscura_endpoint_cache or _OBSCURA_CDP_WS_URL or _OBSCURA_CDP_URL,
             "obscura_endpoint_last_error": self._obscura_endpoint_last_error,
-            "obscura_browser_connected": self._is_obscura_browser_connected(),
+            "obscura_browser_connected": obscura_connected,
             "obscura_active_sessions": self._obscura_active_sessions,
             "obscura_max_sessions": _OBSCURA_MAX_SESSIONS,
             "obscura_discovery_concurrency": _OBSCURA_DISCOVERY_CONCURRENCY,

@@ -492,6 +492,194 @@ serve(async (req) => {
       return allProjects;
     };
 
+    const buildRedmineUserName = (user: any): string => {
+      const first = String(user?.firstname || "").trim();
+      const last = String(user?.lastname || "").trim();
+      const full = `${first} ${last}`.trim();
+      return full || String(user?.name || user?.login || `Redmine #${user?.id || ""}`).trim();
+    };
+
+    const normalizeAppRole = (role: unknown): "admin" | "charge_de_projet" | "testeur" | "rapporteur" => {
+      const normalized = String(role || "").trim().toLowerCase();
+      if (normalized === "admin") return "admin";
+      if (normalized === "testeur") return "testeur";
+      if (normalized === "rapporteur" || normalized === "reporter") return "rapporteur";
+      if (normalized === "account" || normalized === "account 3") return "charge_de_projet";
+      return "charge_de_projet";
+    };
+
+    const fetchAllRedmineUsers = async () => {
+      if (!REDMINE_KEY) {
+        throw new Error("REDMINE_API_KEY is required to fetch Redmine users.");
+      }
+
+      const allUsers: any[] = [];
+      const limit = 100;
+      let offset = 0;
+
+      while (true) {
+        const res = await fetch(`${REDMINE_BASE}/users.json?key=${REDMINE_KEY}&limit=${limit}&offset=${offset}&status=1`);
+        const data = await safeJson(res, { users: [], total_count: 0 });
+        const batch = Array.isArray(data?.users) ? data.users : [];
+        if (batch.length === 0) break;
+
+        allUsers.push(...batch);
+        offset += limit;
+        if (data.total_count && offset >= data.total_count) break;
+      }
+
+      return allUsers
+        .map((user: any) => {
+          const email = String(user?.mail || user?.email || "").trim();
+          return {
+            id: Number(user?.id || 0),
+            login: String(user?.login || "").trim(),
+            mail: email,
+            email,
+            firstname: String(user?.firstname || "").trim(),
+            lastname: String(user?.lastname || "").trim(),
+            name: buildRedmineUserName(user),
+          };
+        })
+        .filter((user) => user.id > 0)
+        .sort((a, b) => a.name.localeCompare(b.name));
+    };
+
+    const fetchRedmineUserDetail = async (redmineUserId: number) => {
+      const res = await fetch(`${REDMINE_BASE}/users/${redmineUserId}.json?key=${REDMINE_KEY}&include=groups,memberships`);
+      const data = await safeJson(res, { user: null });
+      return data?.user || null;
+    };
+
+    const findAuthUserByEmail = async (serviceClient: ReturnType<typeof createClient>, email: string) => {
+      const wanted = email.trim().toLowerCase();
+      if (!wanted) return null;
+      for (let page = 1; page <= 20; page += 1) {
+        const { data, error } = await serviceClient.auth.admin.listUsers({ page, perPage: 100 });
+        if (error) throw error;
+        const users = data?.users || [];
+        const found = users.find((authUser: any) => String(authUser?.email || "").toLowerCase() === wanted);
+        if (found) return found;
+        if (users.length < 100) break;
+      }
+      return null;
+    };
+
+    const importOrLinkRedmineUser = async (
+      serviceClient: ReturnType<typeof createClient>,
+      params: {
+        redmineUserId: number;
+        email: string;
+        password?: string;
+        role: "admin" | "charge_de_projet" | "testeur" | "rapporteur";
+        fallbackName?: string;
+      }
+    ) => {
+      const detail = await fetchRedmineUserDetail(params.redmineUserId);
+      if (!detail?.id) {
+        throw new Error("Utilisateur Redmine introuvable ou inaccessible.");
+      }
+
+      const redmineEmail = String(detail?.mail || detail?.email || "").trim();
+      const email = String(params.email || redmineEmail || "").trim().toLowerCase();
+      if (!email) {
+        throw new Error("Email requis pour creer ou lier un utilisateur Redmine.");
+      }
+
+      const fullName = buildRedmineUserName(detail) || params.fallbackName || email;
+      const redmineLogin = String(detail?.login || "").trim();
+      let userId = "";
+
+      const { data: existingProfile, error: profileLookupErr } = await serviceClient
+        .from("profiles")
+        .select("id")
+        .eq("email", email)
+        .maybeSingle();
+      if (profileLookupErr) throw profileLookupErr;
+
+      if (existingProfile?.id) {
+        userId = existingProfile.id;
+      } else {
+        const existingAuthUser = await findAuthUserByEmail(serviceClient, email);
+        if (existingAuthUser?.id) {
+          userId = existingAuthUser.id;
+        } else {
+          if (!params.password || String(params.password).length < 6) {
+            throw new Error("Mot de passe requis pour creer un nouvel utilisateur.");
+          }
+          const { data: created, error: createErr } = await serviceClient.auth.admin.createUser({
+            email,
+            password: params.password,
+            email_confirm: true,
+            user_metadata: { full_name: fullName, redmine_user_id: detail.id, redmine_login: redmineLogin },
+          });
+          if (createErr) throw createErr;
+          userId = created.user?.id || "";
+        }
+      }
+
+      if (!userId) {
+        throw new Error("Impossible de creer ou retrouver l'utilisateur Supabase.");
+      }
+
+      const { error: profileErr } = await serviceClient
+        .from("profiles")
+        .upsert({ id: userId, email, full_name: fullName }, { onConflict: "id" });
+      if (profileErr) throw profileErr;
+
+      const { error: deleteRoleErr } = await serviceClient
+        .from("user_roles")
+        .delete()
+        .eq("user_id", userId);
+      if (deleteRoleErr) throw deleteRoleErr;
+
+      const { error: roleErr } = await serviceClient
+        .from("user_roles")
+        .insert({ user_id: userId, role: params.role });
+      if (roleErr) throw roleErr;
+
+      const { error: deleteIdentityByUserErr } = await serviceClient
+        .from("redmine_user_identities")
+        .delete()
+        .eq("user_id", userId);
+      if (deleteIdentityByUserErr) throw deleteIdentityByUserErr;
+
+      const { error: deleteIdentityByRedmineErr } = await serviceClient
+        .from("redmine_user_identities")
+        .delete()
+        .eq("redmine_user_id", Number(detail.id));
+      if (deleteIdentityByRedmineErr) throw deleteIdentityByRedmineErr;
+
+      if (redmineLogin) {
+        const { error: deleteIdentityByLoginErr } = await serviceClient
+          .from("redmine_user_identities")
+          .delete()
+          .eq("redmine_login", redmineLogin);
+        if (deleteIdentityByLoginErr) throw deleteIdentityByLoginErr;
+      }
+
+      const { error: identityErr } = await serviceClient
+        .from("redmine_user_identities")
+        .insert({
+          user_id: userId,
+          redmine_user_id: Number(detail.id),
+          redmine_login: redmineLogin,
+          redmine_email: redmineEmail || email,
+          redmine_display_name: fullName,
+          last_login_at: new Date().toISOString(),
+        });
+      if (identityErr) throw identityErr;
+
+      return {
+        user_id: userId,
+        email,
+        full_name: fullName,
+        role: params.role,
+        redmine_user_id: Number(detail.id),
+        redmine_login: redmineLogin,
+      };
+    };
+
     const syncCachedAccountDataFromRedmine = async (serviceClient: ReturnType<typeof createClient>) => {
       const redmineProjects = await fetchAllRedmineProjects();
       const concurrency = 6;
@@ -676,7 +864,11 @@ serve(async (req) => {
           imported: 0,
           revoked: 0,
           projects: [],
-          message: "No linked Redmine identity for this user.",
+          message: "Aucune identite Redmine n'est liee a cet utilisateur.",
+          linked_redmine_user_id: null,
+          matched_memberships_count: 0,
+          matched_role_names: [],
+          filtered_out_reason: "no_linked_redmine_identity",
         };
       }
 
@@ -721,6 +913,12 @@ serve(async (req) => {
 
       const matchedProjects: any[] = [];
       const assignmentRows: any[] = [];
+      let matchedMembershipsCount = 0;
+      const matchedRoleNames = new Set<string>();
+      const filteredOutCounts: Record<string, number> = {};
+      const markFiltered = (reason: string) => {
+        filteredOutCounts[reason] = (filteredOutCounts[reason] || 0) + 1;
+      };
       const concurrency = 6;
 
       await mapWithConcurrency(redmineProjects, concurrency, async (project) => {
@@ -733,7 +931,11 @@ serve(async (req) => {
           return memberUserId === redmineUserId || (memberGroupId && redmineGroupIds.includes(memberGroupId));
         });
 
-        if (matchingMemberships.length === 0) return null;
+        if (matchingMemberships.length === 0) {
+          markFiltered("no_redmine_membership");
+          return null;
+        }
+        matchedMembershipsCount += matchingMemberships.length;
 
         const roleIds = new Set<number>();
         const roleNames = new Set<string>();
@@ -751,9 +953,17 @@ serve(async (req) => {
 
         const importableRoleIds = Array.from(roleIds).filter((roleId) => {
           const mapping = mappingByRoleId.get(roleId);
-          return mapping ? mapping.can_import !== false : true;
+          return mapping ? mapping.can_import !== false : false;
         });
-        if (importableRoleIds.length === 0 && roleIds.size > 0) return null;
+        if (roleIds.size === 0) {
+          markFiltered("no_redmine_roles");
+          return null;
+        }
+        if (importableRoleIds.length === 0 && roleIds.size > 0) {
+          markFiltered("role_mapping_blocked_import");
+          return null;
+        }
+        for (const roleName of roleNames) matchedRoleNames.add(roleName);
 
         const accessLevel = Array.from(roleIds).some((roleId) => mappingByRoleId.get(roleId)?.access_level === "full")
           ? "full"
@@ -882,10 +1092,31 @@ serve(async (req) => {
         }
       }
 
+      let filteredOutReason: string | null = null;
+      if (matchedMembershipsCount === 0) {
+        filteredOutReason = "no_redmine_memberships";
+      } else if (matchedProjects.length === 0 && filteredOutCounts.role_mapping_blocked_import) {
+        filteredOutReason = "role_mapping_blocked_import";
+      } else if (matchedProjects.length === 0) {
+        filteredOutReason = "no_importable_redmine_projects";
+      }
+
       return {
         imported: assignmentRows.length,
         revoked: staleProjectIds.length,
         projects: matchedProjects,
+        message: filteredOutReason === "no_redmine_memberships"
+          ? "Aucune appartenance Redmine ne correspond a cet utilisateur ou a ses groupes."
+          : filteredOutReason === "role_mapping_blocked_import"
+            ? "Les appartenances Redmine existent, mais le parametrage des roles bloque l'import."
+            : filteredOutReason === "no_importable_redmine_projects"
+              ? "Aucun projet Redmine importable n'a ete trouve pour cet utilisateur."
+              : null,
+        linked_redmine_user_id: redmineUserId,
+        matched_memberships_count: matchedMembershipsCount,
+        matched_role_names: Array.from(matchedRoleNames),
+        filtered_out_reason: filteredOutReason,
+        filtered_out_counts: filteredOutCounts,
       };
     };
 
@@ -905,37 +1136,50 @@ serve(async (req) => {
     }
 
     if (type === "users") {
-      // Alternative approach: extract unique users from issues (assigned_to, author)
-      // since /users.json requires admin privileges
-      const usersMap = new Map<number, { id: number; name: string }>();
-      let offset = 0;
-      const batchLimit = 100;
-      const maxPages = 5; // Cap at 500 issues to avoid timeout
-
-      for (let page = 0; page < maxPages; page++) {
-        const res = await fetch(
-          `${REDMINE_BASE}/issues.json?key=${REDMINE_KEY}&limit=${batchLimit}&offset=${offset}&status_id=*&sort=updated_on:desc`
-        );
-        const data = await safeJson(res, { issues: [], total_count: 0 });
-        if (!data.issues || data.issues.length === 0) break;
-
-        for (const issue of data.issues) {
-          if (issue.assigned_to?.id && !usersMap.has(issue.assigned_to.id)) {
-            usersMap.set(issue.assigned_to.id, { id: issue.assigned_to.id, name: issue.assigned_to.name });
-          }
-          if (issue.author?.id && !usersMap.has(issue.author.id)) {
-            usersMap.set(issue.author.id, { id: issue.author.id, name: issue.author.name });
-          }
-        }
-
-        offset += batchLimit;
-        if (offset >= data.total_count) break;
+      const serviceClient = getServiceClient();
+      const callerIsAdmin = await isCallerAdmin(serviceClient);
+      if (!callerIsAdmin) {
+        return new Response(JSON.stringify({ error: "Admin access required" }), {
+          status: 403,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
       }
 
-      const users = Array.from(usersMap.values()).sort((a, b) => a.name.localeCompare(b.name));
-      console.log('Extracted users from issues:', users.length);
+      const users = await fetchAllRedmineUsers();
+      console.log("Fetched Redmine users via admin API:", users.length);
 
       return new Response(JSON.stringify({ users }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    if (type === "import_redmine_user") {
+      const serviceClient = getServiceClient();
+      const callerIsAdmin = await isCallerAdmin(serviceClient);
+      if (!callerIsAdmin) {
+        return new Response(JSON.stringify({ error: "Admin access required" }), {
+          status: 403,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      const redmineUserId = Number(body?.redmine_user_id || body?.redmineUserId || body?.redmine_user?.id || 0);
+      if (!redmineUserId) {
+        return new Response(JSON.stringify({ error: "redmine_user_id is required" }), {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      const imported = await importOrLinkRedmineUser(serviceClient, {
+        redmineUserId,
+        email: String(body?.email || body?.redmine_user?.email || body?.redmine_user?.mail || "").trim(),
+        password: String(body?.password || ""),
+        role: normalizeAppRole(body?.role),
+        fallbackName: String(body?.full_name || body?.redmine_user?.name || "").trim(),
+      });
+
+      return new Response(JSON.stringify({ success: true, user: imported }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
@@ -1849,6 +2093,11 @@ serve(async (req) => {
         projects: result.projects,
         total_count: result.projects.length,
         message: result.message || null,
+        linked_redmine_user_id: result.linked_redmine_user_id || null,
+        matched_memberships_count: result.matched_memberships_count || 0,
+        matched_role_names: result.matched_role_names || [],
+        filtered_out_reason: result.filtered_out_reason || null,
+        filtered_out_counts: result.filtered_out_counts || {},
       }), {
         status: 200,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -1878,6 +2127,11 @@ serve(async (req) => {
         user_id: callerClaims!.sub,
         imported: result.imported,
         projects: result.projects,
+        message: result.message || null,
+        linked_redmine_user_id: result.linked_redmine_user_id || null,
+        matched_memberships_count: result.matched_memberships_count || 0,
+        matched_role_names: result.matched_role_names || [],
+        filtered_out_reason: result.filtered_out_reason || null,
         synced_at: new Date().toISOString(),
       }), {
         status: 200,
@@ -1898,6 +2152,11 @@ serve(async (req) => {
         revoked: result.revoked,
         projects: result.projects,
         message: result.message || null,
+        linked_redmine_user_id: result.linked_redmine_user_id || null,
+        matched_memberships_count: result.matched_memberships_count || 0,
+        matched_role_names: result.matched_role_names || [],
+        filtered_out_reason: result.filtered_out_reason || null,
+        filtered_out_counts: result.filtered_out_counts || {},
         synced_at: new Date().toISOString(),
       }), {
         status: 200,

@@ -1421,8 +1421,85 @@ func startScan(ctx context.Context, config ScannerConfig) {
 		}
 	}
 	parallelDiscoveryApplied := false
+	mergeRenderedDiscovery := func(discovery *browserpool.DiscoverRenderedResult, requestedURL, provenance string, replaceFirst bool, insertPage bool) bool {
+		if discovery == nil || discovery.Error != "" {
+			return false
+		}
+		renderedHTML := strings.TrimSpace(discovery.RenderedHTML)
+		finalURL := strings.TrimSpace(discovery.FinalURL)
+		if finalURL == "" {
+			finalURL = strings.TrimSpace(requestedURL)
+		}
+		if renderedHTML == "" {
+			return false
+		}
+		renderedSEO := seo.Analyze(finalURL, renderedHTML, hasSitemap, hasRobots)
+		renderedUX := ux.Analyze(finalURL, renderedHTML, baseURL)
+		mu.Lock()
+		if replaceFirst {
+			if len(allSEOResults) == 0 {
+				allSEOResults = append(allSEOResults, renderedSEO)
+			} else {
+				allSEOResults[0] = renderedSEO
+			}
+			if len(allUXResults) == 0 {
+				allUXResults = append(allUXResults, renderedUX)
+			} else {
+				allUXResults[0] = renderedUX
+			}
+		} else if insertPage {
+			allSEOResults = append(allSEOResults, renderedSEO)
+			allUXResults = append(allUXResults, renderedUX)
+		}
+		for _, f := range formfuzzer.ExtractForms(finalURL, renderedHTML) {
+			formKey := f.PageURL + "|" + f.FormID + "|" + f.ActionURL
+			if seenDiscoveredForms[formKey] {
+				continue
+			}
+			seenDiscoveredForms[formKey] = true
+			discoveredForms = append(discoveredForms, f)
+		}
+		mu.Unlock()
+
+		pageMetrics := map[string]interface{}{
+			"seo":                 renderedSEO,
+			"ux":                  renderedUX,
+			"rendered_discovery":  discovery,
+			"evidence_provenance": provenance + "_rendered_discovery",
+			"html_source":         provenance + "_rendered_discovery",
+		}
+		if insertPage {
+			if err := db.InsertPage(scanID, baseURL, finalURL, renderedHTML, pageMetrics); err != nil {
+				log.Printf("%s rendered discovery InsertPage failed for %s: %v", provenance, finalURL, err)
+			}
+		} else {
+			if err := db.UpdatePageHTML(scanID, finalURL, renderedHTML); err != nil {
+				log.Printf("%s rendered discovery UpdatePageHTML failed for %s: %v", provenance, finalURL, err)
+			}
+			if err := db.MergePageMetrics(scanID, finalURL, pageMetrics); err != nil {
+				log.Printf("%s rendered discovery MergePageMetrics failed for %s: %v", provenance, finalURL, err)
+			}
+		}
+		return true
+	}
+	discoverRenderedWithChromiumFallback := func(targetURL string, maxLinks int, provenance string) (*browserpool.DiscoverRenderedResult, error) {
+		discovery, err := browserpool.DiscoverRendered(ctx, targetURL, config.AllowedDomains, maxLinks, true, envInt("RENDERED_DISCOVERY_TIMEOUT_MS", 45000))
+		if err == nil && discovery != nil && discovery.Error == "" {
+			return discovery, nil
+		}
+		reason := "unknown"
+		if err != nil {
+			reason = err.Error()
+		} else if discovery != nil && discovery.Error != "" {
+			reason = discovery.Error
+		}
+		log.Printf("%s rendered discovery auto engine failed for %s: %s; obscura_unavailable_chromium_fallback", provenance, targetURL, reason)
+		return browserpool.DiscoverRenderedWithOptions(ctx, targetURL, config.AllowedDomains, maxLinks, true, envInt("RENDERED_DISCOVERY_TIMEOUT_MS", 45000), browserpool.DiscoverRenderedOptions{
+			ForceChromium: true,
+		})
+	}
 	applyParallelDiscovery := func(provenance string) bool {
-		if cfFallbackMode || parallelDiscoveryApplied {
+		if parallelDiscoveryApplied {
 			return parallelDiscoveryApplied
 		}
 		if parallelDiscoveryErr != nil {
@@ -1436,37 +1513,13 @@ func startScan(ctx context.Context, config ScannerConfig) {
 			log.Printf("%s rendered discovery returned error: %s", provenance, parallelDiscovery.Error)
 			return false
 		}
-		renderedHTML := strings.TrimSpace(parallelDiscovery.RenderedHTML)
-		finalURL := strings.TrimSpace(parallelDiscovery.FinalURL)
-		if finalURL == "" {
-			finalURL = config.StartURL
-		}
-		if renderedHTML == "" {
+		if !mergeRenderedDiscovery(parallelDiscovery, config.StartURL, provenance, cfFallbackMode, false) {
 			return false
 		}
-		renderedSEO := seo.Analyze(finalURL, renderedHTML, hasSitemap, hasRobots)
-		renderedUX := ux.Analyze(finalURL, renderedHTML, baseURL)
-		for _, f := range formfuzzer.ExtractForms(finalURL, renderedHTML) {
-			formKey := f.PageURL + "|" + f.FormID + "|" + f.ActionURL
-			if seenDiscoveredForms[formKey] {
-				continue
-			}
-			seenDiscoveredForms[formKey] = true
-			discoveredForms = append(discoveredForms, f)
-		}
-		if err := db.UpdatePageHTML(scanID, finalURL, renderedHTML); err != nil {
-			log.Printf("%s rendered discovery UpdatePageHTML failed for %s: %v", provenance, finalURL, err)
-		}
-		if err := db.MergePageMetrics(scanID, finalURL, map[string]interface{}{
-			"seo":                 renderedSEO,
-			"ux":                  renderedUX,
-			"rendered_discovery":  parallelDiscovery,
-			"evidence_provenance": provenance + "_rendered_discovery",
-			"html_source":         provenance + "_rendered_discovery",
-		}); err != nil {
-			log.Printf("%s rendered discovery MergePageMetrics failed for %s: %v", provenance, finalURL, err)
-		}
 		parallelDiscoveryApplied = true
+		if cfFallbackMode {
+			atomic.StoreInt32(&pageCount, int32(len(allSEOResults)))
+		}
 		log.Printf("%s rendered discovery enriched homepage with %d link(s), %d form(s), engine=%s",
 			provenance, len(parallelDiscovery.InternalLinks), len(parallelDiscovery.Forms), parallelDiscovery.Engine)
 		return true
@@ -1483,116 +1536,134 @@ func startScan(ctx context.Context, config ScannerConfig) {
 		applyParallelDiscovery("parallel")
 	}
 	if cfFallbackMode && browserpool.IsEnabled() {
-		maxRenderedPages := envInt("RENDERED_DISCOVERY_MAX_PAGES", 8)
-		maxRenderedLinks := envInt("RENDERED_DISCOVERY_MAX_LINKS", 30)
-		renderedWaitMS := envInt("RENDERED_DISCOVERY_TIMEOUT_MS", 20000)
+		maxRenderedPages := envInt("RENDERED_DISCOVERY_MAX_PAGES", 100)
+		maxRenderedLinks := envInt("RENDERED_DISCOVERY_MAX_LINKS", 200)
 		if maxRenderedPages < 1 {
 			maxRenderedPages = 1
 		}
-		log.Printf("Rendered discovery fallback enabled after 0-page crawl (max_pages=%d max_links=%d)", maxRenderedPages, maxRenderedLinks)
-		discovery, err := browserpool.DiscoverRendered(ctx, config.StartURL, config.AllowedDomains, maxRenderedLinks, true, renderedWaitMS)
-		if err != nil {
-			log.Printf("rendered discovery fallback failed: %v", err)
-		} else if discovery.Error != "" {
-			log.Printf("rendered discovery fallback returned error: %s", discovery.Error)
+		if maxRenderedPages > 100 {
+			maxRenderedPages = 100
+		}
+		if config.MaxPages > 0 && maxRenderedPages > config.MaxPages {
+			maxRenderedPages = config.MaxPages
+		}
+		blockedConcurrency := envInt("OBSCURA_BLOCKED_CRAWL_CONCURRENCY", 48)
+		if blockedConcurrency < 1 {
+			blockedConcurrency = 1
+		}
+		if blockedConcurrency > maxRenderedPages {
+			blockedConcurrency = maxRenderedPages
+		}
+		log.Printf("Obscura rendered discovery recovery enabled after 0-page crawl (max_pages=%d max_links=%d concurrency=%d)", maxRenderedPages, maxRenderedLinks, blockedConcurrency)
+
+		if !parallelDiscoveryReady {
+			lateJoinMS := envInt("OBSCURA_PARALLEL_DISCOVERY_LATE_JOIN_MS", 15000)
+			select {
+			case <-parallelDiscoveryDone:
+				parallelDiscoveryReady = true
+			case <-time.After(time.Duration(lateJoinMS) * time.Millisecond):
+				log.Printf("Rendered discovery still running after blocked-crawl late join budget; starting dedicated recovery")
+			}
+		}
+
+		var discovery *browserpool.DiscoverRenderedResult
+		if parallelDiscoveryReady && parallelDiscoveryErr == nil && parallelDiscovery != nil && parallelDiscovery.Error == "" {
+			discovery = parallelDiscovery
+			applyParallelDiscovery("blocked_parallel")
 		} else {
-			renderedHTML := strings.TrimSpace(discovery.RenderedHTML)
+			var err error
+			discovery, err = discoverRenderedWithChromiumFallback(config.StartURL, maxRenderedLinks, "blocked_crawl")
+			if err != nil {
+				log.Printf("blocked crawl rendered discovery failed: %v", err)
+			} else if discovery == nil || discovery.Error != "" {
+				if discovery != nil {
+					log.Printf("blocked crawl rendered discovery returned error: %s", discovery.Error)
+				}
+			} else if mergeRenderedDiscovery(discovery, config.StartURL, "blocked_crawl", true, false) {
+				parallelDiscoveryApplied = true
+			}
+		}
+
+		if discovery != nil && discovery.Error == "" {
 			finalURL := strings.TrimSpace(discovery.FinalURL)
 			if finalURL == "" {
 				finalURL = config.StartURL
 			}
-			if renderedHTML != "" {
-				renderedSEO := seo.Analyze(finalURL, renderedHTML, hasSitemap, hasRobots)
-				renderedUX := ux.Analyze(finalURL, renderedHTML, baseURL)
-				mu.Lock()
-				if len(allSEOResults) == 0 {
-					allSEOResults = append(allSEOResults, renderedSEO)
-				} else {
-					allSEOResults[0] = renderedSEO
-				}
-				if len(allUXResults) == 0 {
-					allUXResults = append(allUXResults, renderedUX)
-				} else {
-					allUXResults[0] = renderedUX
-				}
-				for _, f := range formfuzzer.ExtractForms(finalURL, renderedHTML) {
-					formKey := f.PageURL + "|" + f.FormID + "|" + f.ActionURL
-					if seenDiscoveredForms[formKey] {
-						continue
-					}
-					seenDiscoveredForms[formKey] = true
-					discoveredForms = append(discoveredForms, f)
-				}
-				mu.Unlock()
-				_ = db.UpdatePageHTML(scanID, finalURL, renderedHTML)
-				_ = db.MergePageMetrics(scanID, finalURL, map[string]interface{}{
-					"seo":                 renderedSEO,
-					"ux":                  renderedUX,
-					"rendered_discovery":  discovery,
-					"evidence_provenance": "rendered_discovery",
-					"html_source":         "rendered_discovery",
-				})
-			}
-
 			seenRendered := map[string]bool{
 				strings.TrimRight(config.StartURL, "/"): true,
 				strings.TrimRight(finalURL, "/"):        true,
 			}
+			links := make([]string, 0, maxRenderedPages)
+			for _, rawLink := range discovery.InternalLinks {
+				if len(links) >= maxRenderedPages-1 {
+					break
+				}
+				link := strings.TrimSpace(rawLink)
+				key := strings.TrimRight(link, "/")
+				if link == "" || seenRendered[key] {
+					continue
+				}
+				seenRendered[key] = true
+				links = append(links, link)
+			}
+
+			type renderedRecoveryResult struct {
+				url       string
+				discovery *browserpool.DiscoverRenderedResult
+				err       error
+			}
+			jobs := make(chan string)
+			results := make(chan renderedRecoveryResult, len(links))
+			var renderedWg sync.WaitGroup
+			workerCount := blockedConcurrency
+			if workerCount > len(links) {
+				workerCount = len(links)
+			}
+			for i := 0; i < workerCount; i++ {
+				renderedWg.Add(1)
+				go func() {
+					defer renderedWg.Done()
+					for link := range jobs {
+						linkDiscovery, linkErr := discoverRenderedWithChromiumFallback(link, maxRenderedLinks, "blocked_crawl_link")
+						results <- renderedRecoveryResult{url: link, discovery: linkDiscovery, err: linkErr}
+					}
+				}()
+			}
+			go func() {
+				for _, link := range links {
+					jobs <- link
+				}
+				close(jobs)
+				renderedWg.Wait()
+				close(results)
+			}()
+
 			recoveredPages := 1
-			for _, link := range discovery.InternalLinks {
+			for result := range results {
 				if recoveredPages >= maxRenderedPages {
 					break
 				}
-				link = strings.TrimSpace(link)
-				if link == "" || seenRendered[strings.TrimRight(link, "/")] {
-					continue
-				}
-				seenRendered[strings.TrimRight(link, "/")] = true
-				linkDiscovery, linkErr := browserpool.DiscoverRendered(ctx, link, config.AllowedDomains, 8, true, renderedWaitMS)
-				if linkErr != nil || linkDiscovery == nil || linkDiscovery.Error != "" || strings.TrimSpace(linkDiscovery.RenderedHTML) == "" {
-					if linkErr != nil {
-						log.Printf("rendered discovery skipped %s: %v", link, linkErr)
+				if result.err != nil || result.discovery == nil || result.discovery.Error != "" || strings.TrimSpace(result.discovery.RenderedHTML) == "" {
+					if result.err != nil {
+						log.Printf("blocked crawl rendered discovery skipped %s: %v", result.url, result.err)
+					} else if result.discovery != nil && result.discovery.Error != "" {
+						log.Printf("blocked crawl rendered discovery skipped %s: %s", result.url, result.discovery.Error)
 					}
 					continue
 				}
-				linkFinalURL := strings.TrimSpace(linkDiscovery.FinalURL)
-				if linkFinalURL == "" {
-					linkFinalURL = link
+				if mergeRenderedDiscovery(result.discovery, result.url, "blocked_crawl", false, true) {
+					recoveredPages++
 				}
-				linkSEO := seo.Analyze(linkFinalURL, linkDiscovery.RenderedHTML, hasSitemap, hasRobots)
-				linkUX := ux.Analyze(linkFinalURL, linkDiscovery.RenderedHTML, baseURL)
-				mu.Lock()
-				allSEOResults = append(allSEOResults, linkSEO)
-				allUXResults = append(allUXResults, linkUX)
-				for _, f := range formfuzzer.ExtractForms(linkFinalURL, linkDiscovery.RenderedHTML) {
-					formKey := f.PageURL + "|" + f.FormID + "|" + f.ActionURL
-					if seenDiscoveredForms[formKey] {
-						continue
-					}
-					seenDiscoveredForms[formKey] = true
-					discoveredForms = append(discoveredForms, f)
-				}
-				mu.Unlock()
-				if err := db.InsertPage(scanID, baseURL, linkFinalURL, linkDiscovery.RenderedHTML, map[string]interface{}{
-					"seo":                 linkSEO,
-					"ux":                  linkUX,
-					"rendered_discovery":  linkDiscovery,
-					"evidence_provenance": "rendered_discovery",
-					"html_source":         "rendered_discovery",
-				}); err != nil {
-					log.Printf("rendered discovery DB insert failed for %s: %v", linkFinalURL, err)
-				}
-				recoveredPages++
 			}
 			atomic.StoreInt32(&pageCount, int32(len(allSEOResults)))
-			log.Printf("Rendered discovery fallback recovered %d page(s), %d link(s), %d form(s)",
-				len(allSEOResults), len(discovery.InternalLinks), len(discoveredForms))
+			log.Printf("Obscura rendered discovery recovered %d page(s), %d link(s), %d form(s), engine=%s",
+				len(allSEOResults), len(discovery.InternalLinks), len(discoveredForms), discovery.Engine)
 		}
 	}
 	if cfFallbackMode && atomic.LoadInt32(&pageCount) == 0 && len(allSEOResults) > 0 {
 		atomic.StoreInt32(&pageCount, int32(len(allSEOResults)))
 	}
-	if !parallelDiscoveryReady && !parallelDiscoveryApplied && !cfFallbackMode {
+	if !parallelDiscoveryReady && !parallelDiscoveryApplied {
 		lateJoinMS := envInt("OBSCURA_PARALLEL_DISCOVERY_LATE_JOIN_MS", 8000)
 		select {
 		case <-parallelDiscoveryDone:

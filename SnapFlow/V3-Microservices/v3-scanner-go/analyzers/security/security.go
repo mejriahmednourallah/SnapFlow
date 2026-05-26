@@ -1328,22 +1328,22 @@ func isStandardCMSRobotsDisallow(path string) bool {
 	p := strings.ToLower(strings.TrimSpace(path))
 	p = strings.TrimSuffix(p, "*")
 	standard := map[string]bool{
-		"/admin":                 true,
-		"/admin/":                true,
-		"/user":                  true,
-		"/user/":                 true,
-		"/user/login":            true,
-		"/user/password":         true,
-		"/index.php/admin":       true,
-		"/index.php/admin/":      true,
-		"/core/":                 true,
-		"/profiles/":             true,
-		"/sites/":                true,
-		"/wp-admin/":             true,
-		"/wp-login.php":          true,
-		"/administrator/":        true,
-		"/administrator":         true,
-		"/installation/":         true,
+		"/admin":            true,
+		"/admin/":           true,
+		"/user":             true,
+		"/user/":            true,
+		"/user/login":       true,
+		"/user/password":    true,
+		"/index.php/admin":  true,
+		"/index.php/admin/": true,
+		"/core/":            true,
+		"/profiles/":        true,
+		"/sites/":           true,
+		"/wp-admin/":        true,
+		"/wp-login.php":     true,
+		"/administrator/":   true,
+		"/administrator":    true,
+		"/installation/":    true,
 	}
 	return standard[p]
 }

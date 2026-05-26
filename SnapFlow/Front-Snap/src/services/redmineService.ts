@@ -24,6 +24,8 @@ export interface FilterOption {
 export interface RedmineUser {
   id: number;
   name: string;
+  login?: string;
+  email?: string;
   mail?: string;
   firstname?: string;
   lastname?: string;
@@ -116,6 +118,28 @@ export async function fetchRedmineUsers(): Promise<RedmineUser[]> {
   if (error) throw error;
   if (data?.error) throw new Error(data.error);
   return data?.users || [];
+}
+
+/** Create/update a SnapFlow user and link it to a Redmine identity. */
+export async function importRedmineUser(params: {
+  redmineUser: RedmineUser;
+  email: string;
+  password: string;
+  role: 'admin' | 'charge_de_projet' | 'testeur' | 'rapporteur';
+}): Promise<void> {
+  const { data, error } = await supabase.functions.invoke('fetch-redmine', {
+    body: {
+      type: 'import_redmine_user',
+      redmine_user_id: params.redmineUser.id,
+      redmine_user: params.redmineUser,
+      email: params.email,
+      password: params.password,
+      role: params.role,
+      full_name: params.redmineUser.name,
+    },
+  });
+  if (error) throw error;
+  if (data?.error) throw new Error(data.error);
 }
 
 /** Search issues by subject/title in a Redmine project. */

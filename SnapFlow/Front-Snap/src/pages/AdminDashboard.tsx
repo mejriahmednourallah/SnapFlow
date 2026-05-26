@@ -6,8 +6,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Zap, LogOut, UserPlus, Trash2, Globe, FileText, Users, Shield, Download, ExternalLink, Search } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import { createUser, updateRole, deleteUser } from '@/services/authService';
-import { fetchRedmineUsers } from '@/services/redmineService';
+import { createUser, updateRole, deleteUser, type UserRole } from '@/services/authService';
+import { fetchRedmineUsers, importRedmineUser, type RedmineUser } from '@/services/redmineService';
 
 interface Profile {
   id: string;
@@ -16,15 +16,17 @@ interface Profile {
   created_at: string;
 }
 
-interface UserRole {
+interface UserRoleRow {
   user_id: string;
   role: string;
 }
 
-interface RedmineUser {
-  id: number;
-  name: string;
-}
+const ROLE_OPTIONS: Array<{ value: UserRole; label: string }> = [
+  { value: 'charge_de_projet', label: 'Chargé de projet' },
+  { value: 'testeur', label: 'Testeur' },
+  { value: 'rapporteur', label: 'Rapporteur' },
+  { value: 'admin', label: 'Admin' },
+];
 
 const AdminDashboard = () => {
   const { user, userRole, loading, isAdmin, signOut } = useAuth();
@@ -32,7 +34,7 @@ const AdminDashboard = () => {
   const { toast } = useToast();
 
   const [profiles, setProfiles] = useState<Profile[]>([]);
-  const [roles, setRoles] = useState<UserRole[]>([]);
+  const [roles, setRoles] = useState<UserRoleRow[]>([]);
   const [loadingData, setLoadingData] = useState(true);
 
   // Redmine import
@@ -41,7 +43,7 @@ const AdminDashboard = () => {
   const [loadingRedmine, setLoadingRedmine] = useState(false);
   const [selectedRedmineUser, setSelectedRedmineUser] = useState<RedmineUser | null>(null);
   const [redminePassword, setRedminePassword] = useState('');
-  const [redmineRole, setRedmineRole] = useState<'admin' | 'charge_de_projet'>('charge_de_projet');
+  const [redmineRole, setRedmineRole] = useState<UserRole>('charge_de_projet');
   const [importingUser, setImportingUser] = useState(false);
   const [redmineEmail, setRedmineEmail] = useState('');
 
@@ -51,7 +53,7 @@ const AdminDashboard = () => {
   const [newEmail, setNewEmail] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [newName, setNewName] = useState('');
-  const [newRole, setNewRole] = useState<'admin' | 'charge_de_projet'>('charge_de_projet');
+  const [newRole, setNewRole] = useState<UserRole>('charge_de_projet');
   const [creating, setCreating] = useState(false);
 
   useEffect(() => {
@@ -80,7 +82,7 @@ const AdminDashboard = () => {
     setLoadingRedmine(true);
     try {
       const users = await fetchRedmineUsers();
-      setRedmineUsers(users.map(u => ({ id: u.id, name: u.name })));
+      setRedmineUsers(users);
       setShowRedmineUsers(true);
     } catch (err: any) {
       toast({ title: 'Erreur Redmine', description: err.message, variant: 'destructive' });
@@ -94,7 +96,7 @@ const AdminDashboard = () => {
     setImportingUser(true);
     try {
       const fullName = selectedRedmineUser.name;
-      await createUser({ email: redmineEmail, password: redminePassword, full_name: fullName, role: redmineRole });
+      await importRedmineUser({ redmineUser: selectedRedmineUser, email: redmineEmail, password: redminePassword, role: redmineRole });
       toast({ title: 'Utilisateur importé', description: `${fullName} (${redmineEmail})` });
       setShowRedmineUsers(false);
       setSelectedRedmineUser(null);
@@ -204,8 +206,9 @@ const AdminDashboard = () => {
               <div>
                 <label className="text-xs text-muted-foreground mb-1 block">Rôle</label>
                 <select value={newRole} onChange={e => setNewRole(e.target.value as any)} className="w-full h-10 text-sm bg-secondary border border-border rounded-md px-3 text-foreground">
-                  <option value="charge_de_projet">Chargé de projet</option>
-                  <option value="admin">Admin</option>
+                  {ROLE_OPTIONS.map(option => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
                 </select>
               </div>
               <Button type="submit" disabled={creating}>{creating ? 'Création…' : 'Créer'}</Button>
@@ -232,18 +235,28 @@ const AdminDashboard = () => {
                   </div>
                   <div className="max-h-60 overflow-y-auto space-y-1">
                     {redmineUsers
-                      .filter(ru => ru.name.toLowerCase().includes(redmineSearch.toLowerCase()) || String(ru.id).includes(redmineSearch))
+                      .filter(ru => {
+                        const search = redmineSearch.toLowerCase();
+                        return ru.name.toLowerCase().includes(search) || String(ru.id).includes(search) || String(ru.login || '').toLowerCase().includes(search);
+                      })
                       .map(ru => (
-                      <button
-                        key={ru.id}
-                        onClick={() => setSelectedRedmineUser(ru)}
-                        className="w-full flex items-center gap-3 p-2 rounded hover:bg-muted/30 text-left text-sm"
-                      >
-                        <span className="font-medium">{ru.name}</span>
-                        <span className="text-xs text-muted-foreground">ID: {ru.id}</span>
-                      </button>
+                        <button
+                          key={ru.id}
+                          onClick={() => {
+                            setSelectedRedmineUser(ru);
+                            setRedmineEmail(ru.email || ru.mail || '');
+                          }}
+                          className="w-full flex items-center gap-3 p-2 rounded hover:bg-muted/30 text-left text-sm"
+                        >
+                          <span className="font-medium">{ru.name}</span>
+                          {ru.login && <span className="text-xs text-muted-foreground">@{ru.login}</span>}
+                          <span className="text-xs text-muted-foreground">ID: {ru.id}</span>
+                        </button>
                     ))}
-                    {redmineUsers.filter(ru => ru.name.toLowerCase().includes(redmineSearch.toLowerCase()) || String(ru.id).includes(redmineSearch)).length === 0 && (
+                    {redmineUsers.filter(ru => {
+                      const search = redmineSearch.toLowerCase();
+                      return ru.name.toLowerCase().includes(search) || String(ru.id).includes(search) || String(ru.login || '').toLowerCase().includes(search);
+                    }).length === 0 && (
                       <p className="text-xs text-muted-foreground text-center py-2">Aucun utilisateur trouvé</p>
                     )}
                   </div>
@@ -265,8 +278,9 @@ const AdminDashboard = () => {
                   <div>
                     <label className="text-xs text-muted-foreground mb-1 block">Rôle</label>
                     <select value={redmineRole} onChange={e => setRedmineRole(e.target.value as any)} className="w-full h-10 text-sm bg-secondary border border-border rounded-md px-3 text-foreground">
-                      <option value="charge_de_projet">Chargé de projet</option>
-                      <option value="admin">Admin</option>
+                      {ROLE_OPTIONS.map(option => (
+                        <option key={option.value} value={option.value}>{option.label}</option>
+                      ))}
                     </select>
                   </div>
                   <div className="flex gap-2">
@@ -307,8 +321,9 @@ const AdminDashboard = () => {
                             disabled={isSelf}
                             className="text-xs bg-secondary border border-border rounded-md px-2 py-1 text-foreground"
                           >
-                            <option value="admin">Admin</option>
-                            <option value="charge_de_projet">Chargé de projet</option>
+                            {ROLE_OPTIONS.map(option => (
+                              <option key={option.value} value={option.value}>{option.label}</option>
+                            ))}
                           </select>
                         </td>
                         <td className="p-3 text-center">

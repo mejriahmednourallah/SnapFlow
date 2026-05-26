@@ -232,10 +232,16 @@ serve(async (req) => {
       full_name: displayName,
     });
 
-    await supabase.from("user_roles").upsert(
-      { user_id: userId, role: "charge_de_projet" },
-      { onConflict: "user_id,role" }
-    );
+    const { data: existingRole } = await supabase
+      .from("user_roles")
+      .select("role")
+      .eq("user_id", userId)
+      .limit(1)
+      .maybeSingle();
+
+    if (!existingRole?.role) {
+      await supabase.from("user_roles").insert({ user_id: userId, role: "charge_de_projet" });
+    }
 
     await supabase.from("redmine_user_identities").upsert(
       {

@@ -38,6 +38,13 @@ Deno.serve(async (req) => {
   }
 
   const { email, password, full_name, role } = await req.json()
+  const allowedRoles = new Set(['admin', 'charge_de_projet', 'testeur', 'rapporteur'])
+  if (!allowedRoles.has(role)) {
+    return new Response(JSON.stringify({ error: 'Role invalide' }), {
+      status: 400,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+    })
+  }
   console.log('Creating user:', email, 'role:', role, 'by admin:', caller.id)
 
   const { data, error } = await supabase.auth.admin.createUser({

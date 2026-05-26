@@ -47,12 +47,15 @@ services:
       BROWSER_POOL_URL: http://v3-browser-pool:8084
       BROWSER_POOL_TIMEOUT_MS: "90000"
       SCANNER_REQUEST_TIMEOUT_SEC: "30"
-      RENDERED_DISCOVERY_MAX_PAGES: "8"
-      RENDERED_DISCOVERY_MAX_LINKS: "30"
-      RENDERED_DISCOVERY_TIMEOUT_MS: "20000"
+      HEADLESS_SAMPLE_RATIO: "1.0"
+      RENDERED_DISCOVERY_MAX_PAGES: "100"
+      RENDERED_DISCOVERY_MAX_LINKS: "200"
+      RENDERED_DISCOVERY_TIMEOUT_MS: "45000"
       ENABLE_OBSCURA_PARALLEL_DISCOVERY: "true"
-      OBSCURA_DISCOVERY_MAX_LINKS_PER_PAGE: "30"
-      OBSCURA_PARALLEL_DISCOVERY_JOIN_MS: "1500"
+      OBSCURA_BLOCKED_CRAWL_CONCURRENCY: "48"
+      OBSCURA_DISCOVERY_MAX_LINKS_PER_PAGE: "200"
+      OBSCURA_PARALLEL_DISCOVERY_JOIN_MS: "5000"
+      OBSCURA_PARALLEL_DISCOVERY_LATE_JOIN_MS: "15000"
       ENABLE_PORT_SCAN: "true"
       PORT_SCAN_TIMEOUT_MS: "900"
       PORT_SCAN_PORTS: "21,22,25,53,80,443,3306,5432,6379,8080,8443,3389"
@@ -94,8 +97,8 @@ services:
       SCANNER_API_URL: http://scanner:8081
       VISUAL_REGRESSION_API_URL: http://v3-visual-regression:8083
       BROWSER_POOL_URL: http://v3-browser-pool:8084
-      DEFAULT_HEADLESS_CONCURRENCY: "24"
-      MAX_HEADLESS_CONCURRENCY: "48"
+      DEFAULT_HEADLESS_CONCURRENCY: "100"
+      MAX_HEADLESS_CONCURRENCY: "100"
     restart: unless-stopped
 
   # ─── Browser Pool (Playwright) ──────────────────────────────────────
@@ -105,10 +108,10 @@ services:
     # No host port — internal only
     environment:
       CHROME_NO_SANDBOX: "true"
-      BROWSER_POOL_CONCURRENCY: "64"
-      BROWSER_POOL_RECYCLE_AFTER: "160"
+      BROWSER_POOL_CONCURRENCY: "128"
+      BROWSER_POOL_RECYCLE_AFTER: "240"
       BROWSER_POOL_DEFAULT_TIMEOUT_MS: "30000"
-      BROWSER_POOL_ACQUIRE_TIMEOUT_S: "45"
+      BROWSER_POOL_ACQUIRE_TIMEOUT_S: "60"
       BROWSER_POOL_IGNORE_HTTPS_ERRORS: "true"
       BROWSER_POOL_SCREENSHOT_WAIT_UNTIL: "domcontentloaded"
       BROWSER_POOL_SCREENSHOT_SETTLE_MS: "1000"
@@ -117,13 +120,16 @@ services:
       BROWSER_POOL_RENDER_SETTLE_MS: "1000"
       ENABLE_OBSCURA_DISCOVERY: ${ENABLE_OBSCURA_DISCOVERY:-true}
       OBSCURA_RENDER_ENABLED: ${OBSCURA_RENDER_ENABLED:-true}
-      OBSCURA_MAX_SESSIONS: "48"
-      OBSCURA_DISCOVERY_CONCURRENCY: "24"
-      OBSCURA_RENDER_FALLBACK_CONCURRENCY: "24"
+      OBSCURA_MAX_SESSIONS: "96"
+      OBSCURA_DISCOVERY_CONCURRENCY: "48"
+      OBSCURA_RENDER_FALLBACK_CONCURRENCY: "32"
       ENABLE_OBSCURA_FORM_EXECUTION: "false"
       ENABLE_OBSCURA_FORM_FUZZING: "false"
       OBSCURA_CDP_URL: http://obscura:9222
     restart: unless-stopped
+    depends_on:
+      obscura:
+        condition: service_started
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:8084/health || exit 1"]
       interval: 10s
@@ -133,7 +139,6 @@ services:
   # ─── Visual Regression ─────────────────────────────────────────────
   obscura:
     image: ${OBSCURA_IMAGE:-h4ckf0r0day/obscura:latest}
-    profiles: ["obscura"]
     environment:
       CHROME_NO_SANDBOX: "true"
     restart: unless-stopped
@@ -147,7 +152,7 @@ services:
       VISUAL_REGRESSION_ENABLED: "true"
       CHROME_NO_SANDBOX: "true"
       BROWSER_POOL_URL: http://v3-browser-pool:8084
-      VISUAL_SCREENSHOT_MAX_CONCURRENCY: "24"
+      VISUAL_SCREENSHOT_MAX_CONCURRENCY: "48"
       SCREENSHOT_IGNORE_HTTPS_ERRORS: "true"
       SCREENSHOT_WAIT_UNTIL: "domcontentloaded"
       SCREENSHOT_SETTLE_MS: "1000"

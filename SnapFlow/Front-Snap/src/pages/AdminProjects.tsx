@@ -220,7 +220,7 @@ const AdminProjects = () => {
 
   const filterUser = filterUserId ? profiles.find((p) => p.id === filterUserId) : null;
   const currentUserProfile = user?.id ? profiles.find((p) => p.id === user.id) : null;
-  const canImportRedmine = isAdmin || ['charge', 'charge_de_projet'].includes(String(userRole || '').toLowerCase());
+  const canImportRedmine = isAdmin || ['charge', 'charge_de_projet', 'testeur', 'rapporteur'].includes(String(userRole || '').toLowerCase());
 
   const handleAddProject = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -351,8 +351,15 @@ const AdminProjects = () => {
         });
         if (error) throw error;
         if (data?.error) throw new Error(data.error);
-        setRedmineProjects((data?.projects || []) as RedmineProject[]);
+        const incoming = (data?.projects || []) as RedmineProject[];
+        setRedmineProjects(incoming);
         setShowRedmine(true);
+        if (incoming.length === 0) {
+          toast({
+            title: 'Aucun projet Redmine',
+            description: data?.message || data?.filtered_out_reason || 'Aucun projet importable trouve pour votre compte Redmine.',
+          });
+        }
         return;
       }
 
@@ -494,7 +501,7 @@ const AdminProjects = () => {
 
       toast({
         title: 'Projets Redmine synchronisÃ©s',
-        description: `${data?.imported ?? 0} projet(s) disponible(s), ${data?.revoked ?? 0} accÃ¨s retirÃ©(s).`,
+        description: data?.message || `${data?.imported ?? 0} projet(s) disponible(s), ${data?.revoked ?? 0} acces retire(s).`,
       });
       await fetchData();
     } catch (err: any) {

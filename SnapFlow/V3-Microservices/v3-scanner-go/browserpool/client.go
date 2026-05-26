@@ -262,6 +262,10 @@ type RenderOptions struct {
 	SettleMS             int
 }
 
+type DiscoverRenderedOptions struct {
+	ForceChromium bool
+}
+
 // Render asks the pool to navigate to url and return rendered HTML.
 // waitUntil is one of "load", "domcontentloaded", "networkidle" (default: "domcontentloaded").
 func Render(ctx context.Context, url string, timeoutMS int, waitUntil string) (*RenderResult, error) {
@@ -342,12 +346,19 @@ func BatchScreenshot(ctx context.Context, urls []string, width, height int, full
 // submitting anything. Browser-pool may use Obscura for discovery behind a
 // feature flag, but this is not final runtime evidence.
 func DiscoverRendered(ctx context.Context, url string, allowedDomains []string, maxLinks int, extractForms bool, waitMS int) (*DiscoverRenderedResult, error) {
+	return DiscoverRenderedWithOptions(ctx, url, allowedDomains, maxLinks, extractForms, waitMS, DiscoverRenderedOptions{})
+}
+
+func DiscoverRenderedWithOptions(ctx context.Context, url string, allowedDomains []string, maxLinks int, extractForms bool, waitMS int, opts DiscoverRenderedOptions) (*DiscoverRenderedResult, error) {
 	payload := map[string]interface{}{
 		"url":             url,
 		"allowed_domains": allowedDomains,
 		"max_links":       maxLinks,
 		"extract_forms":   extractForms,
 		"wait_ms":         waitMS,
+	}
+	if opts.ForceChromium {
+		payload["force_chromium"] = true
 	}
 	data, err := post(ctx, "/discover-rendered", payload)
 	if err != nil {

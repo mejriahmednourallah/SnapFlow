@@ -1,6 +1,6 @@
 import { supabase } from '@/integrations/supabase/client';
 
-export type UserRole = 'admin' | 'charge_de_projet';
+export type UserRole = 'admin' | 'charge_de_projet' | 'testeur' | 'rapporteur';
 
 export interface CreateUserParams {
   email: string;

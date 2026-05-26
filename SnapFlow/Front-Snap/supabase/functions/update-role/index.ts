@@ -34,19 +34,19 @@ Deno.serve(async (req) => {
   }
 
   const { user_id, role } = await req.json()
+  const allowedRoles = new Set(['admin', 'charge_de_projet', 'testeur', 'rapporteur'])
+  if (!allowedRoles.has(role)) {
+    return new Response(JSON.stringify({ error: 'Role invalide' }), { status: 400, headers: corsHeaders })
+  }
 
-  // Upsert role
-  const { error } = await supabase
-    .from('user_roles')
-    .upsert({ user_id, role }, { onConflict: 'user_id,role' })
+  const { error: deleteError } = await supabase.from('user_roles').delete().eq('user_id', user_id)
+  if (deleteError) {
+    return new Response(JSON.stringify({ error: deleteError.message }), { status: 400, headers: corsHeaders })
+  }
 
-  if (error) {
-    // If changing role, delete old and insert new
-    await supabase.from('user_roles').delete().eq('user_id', user_id)
-    const { error: insertError } = await supabase.from('user_roles').insert({ user_id, role })
-    if (insertError) {
-      return new Response(JSON.stringify({ error: insertError.message }), { status: 400, headers: corsHeaders })
-    }
+  const { error: insertError } = await supabase.from('user_roles').insert({ user_id, role })
+  if (insertError) {
+    return new Response(JSON.stringify({ error: insertError.message }), { status: 400, headers: corsHeaders })
   }
 
   return new Response(JSON.stringify({ success: true }), {
