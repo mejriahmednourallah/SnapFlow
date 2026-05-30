@@ -220,6 +220,34 @@ class TestKPINewModeEndpoints(unittest.TestCase):
         self.assertEqual(scan_id, "scan_previous")
         self.assertEqual(artifact["quality"]["quality_score"], 91.5)
 
+    def test_persisted_kpi_loader_ignores_type_jsonb_values_without_throwing(self):
+        class FakeCursor:
+            def execute(self, *_args, **_kwargs):
+                pass
+
+            def fetchone(self):
+                return {
+                    "kpi_json": dict,
+                    "top_level_kpis": dict,
+                    "quality_drift_artifact": dict,
+                }
+
+            def close(self):
+                pass
+
+        class FakeConn:
+            def cursor(self, *_args, **_kwargs):
+                return FakeCursor()
+
+            def close(self):
+                pass
+
+        main.get_db = lambda: FakeConn()
+
+        payload = main._load_persisted_kpi_payload("scan_bad_jsonb")
+
+        self.assertIsNone(payload)
+
 
 if __name__ == "__main__":
     unittest.main()

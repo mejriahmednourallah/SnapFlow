@@ -362,7 +362,7 @@ class TestKPICentricReport(unittest.TestCase):
 
         self.assertEqual(security["Pages Admin Exposées"]["status"], "passing")
         self.assertEqual(security["Protection Brute Force Login"]["status"], "failing")
-        self.assertEqual(audit_tech["Version Langage de Programmation"]["status"], "failing")
+        self.assertEqual(audit_tech["Version serveur"]["status"], "failing")
         self.assertEqual(security["Divulgation de Version CMS"]["status"], "failing")
         self.assertEqual(security["Fuite d'Information Page d'Erreur"]["status"], "failing")
         self.assertEqual(security["Divulgation d'Information via robots.txt"]["status"], "failing")
@@ -440,7 +440,7 @@ class TestKPICentricReport(unittest.TestCase):
         rebuilt = build_kpi_centric_report(report)
         mobile = rebuilt["axes"]["Audit de Performance et Temps de Réponse"]["Temps de Chargement Mobile"]
 
-        self.assertEqual(mobile["status"], "passing")
+        self.assertEqual(mobile["status"], "not_evaluated")
 
     def test_forms_kpi_keeps_full_fuzz_payload_and_status_rules(self):
         report = json.loads(json.dumps(self.report))

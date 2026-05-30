@@ -1555,7 +1555,6 @@ function humanizeEvidenceLabel(label: string): string {
     version: 'Version',
     risk: 'Risque',
     recommendation: 'Recommandation',
-    score_formula: 'Formule du score',
     score_value: 'Score ecologique',
     measurement_status: 'Statut de mesure',
     affected_pages: 'Pages concernees',

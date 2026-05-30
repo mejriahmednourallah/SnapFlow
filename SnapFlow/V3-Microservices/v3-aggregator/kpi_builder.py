@@ -1144,7 +1144,16 @@ def _is_valid_performance_digest_row(row: dict) -> bool:
         return False
     if source.get("available") is not None and not _digest_bool(source.get("available")):
         return False
-    return _positive_digest_number(source.get("fcp_ms")) or _positive_digest_number(source.get("lcp_ms"))
+    fcp_ms = _optional_float(source.get("fcp_ms"))
+    lcp_ms = _optional_float(source.get("lcp_ms"))
+    if fcp_ms is None or lcp_ms is None or fcp_ms <= 0 or lcp_ms <= 0:
+        return False
+    # Anti-bot/blocked pages can produce synthetic-looking timings such as 43ms.
+    # Treat those as unusable for site performance/eco scoring unless the scanner
+    # later adds an explicit tiny-document marker.
+    if fcp_ms < 100 or lcp_ms < 100:
+        return False
+    return True
 
 
 def _mask_digest_value(key: str, value):
@@ -3513,6 +3522,8 @@ def build_kpi_centric_report(report: dict) -> dict:
     functional_kpi = da.get("functional_kpi", {})
     functional_fuzzer_kpi = da.get("functional_fuzzer_kpi", {})
     domain_url = report.get("domain", "")
+    scan_telemetry = _safe_dict(report.get("scan_telemetry", {}))
+    blocked_recovery_partial = bool(scan_telemetry.get("blocked_recovery_partial"))
 
     non_func_buttons_evidence = _normalized_kpi_evidence(report, "Non-Functional Buttons")
     button_kpi = _safe_dict(perf.get("button_kpi", {}))
@@ -4164,12 +4175,29 @@ def build_kpi_centric_report(report: dict) -> dict:
     mobile_friendly_kpi = _safe_dict(ux.get("mobile_friendly_kpi", {}))
     mobile_friendly_status = _resolve_mobile_friendly_status(mobile_friendly_kpi)
     mobile_friendly_available = mobile_friendly_status != "not_available"
-    avg_fcp_ms = _optional_float(perf.get("avg_fcp_ms"))
-    avg_lcp_ms = _optional_float(perf.get("avg_lcp_ms"))
+    raw_headless_rows = _performance_digest_rows({"rows": _safe_list(perf.get("headless_rows"))})
+    valid_headless_rows = [row for row in raw_headless_rows if _is_valid_performance_digest_row(row)]
+    if raw_headless_rows:
+        if valid_headless_rows:
+            avg_fcp_ms = sum(_safe_float(row.get("fcp_ms")) for row in valid_headless_rows) / len(valid_headless_rows)
+            avg_lcp_ms = sum(_safe_float(row.get("lcp_ms")) for row in valid_headless_rows) / len(valid_headless_rows)
+            avg_cls = sum(_safe_float(row.get("cls")) for row in valid_headless_rows) / len(valid_headless_rows)
+            eco_values = [_optional_float(row.get("eco_index")) for row in valid_headless_rows]
+            eco_values = [value for value in eco_values if value is not None]
+            avg_eco_index = sum(eco_values) / len(eco_values) if eco_values else None
+        else:
+            avg_fcp_ms = None
+            avg_lcp_ms = None
+            avg_cls = None
+            avg_eco_index = None
+    else:
+        avg_fcp_ms = _optional_float(perf.get("avg_fcp_ms"))
+        avg_lcp_ms = _optional_float(perf.get("avg_lcp_ms"))
+        avg_cls = _optional_float(perf.get("avg_cls"))
+        avg_eco_index = _optional_float(perf.get("avg_eco_index"))
     effective_lcp_ms = _optional_float(perf.get("effective_lcp_ms")) or avg_lcp_ms
     fallback_render_count = _safe_int(perf.get("fallback_render_count"))
-    avg_cls = _optional_float(perf.get("avg_cls"))
-    avg_eco_index = _optional_float(perf.get("avg_eco_index"))
+    performance_data_quality = "MISSING" if raw_headless_rows and not valid_headless_rows else "PARTIAL" if len(valid_headless_rows) < len(raw_headless_rows) else "VALID"
     image_stats = _safe_dict(content.get("image_compression_stats", {}))
     compression_rate_pct = _optional_float(image_stats.get("compression_rate_pct")) or 0.0
     sampled_images = _safe_int(image_stats.get("sampled_images"))
@@ -4177,7 +4205,7 @@ def build_kpi_centric_report(report: dict) -> dict:
     desktop_perf_status = "non_evalue" if effective_lcp_ms is None or effective_lcp_ms <= 0 or avg_fcp_ms is None or avg_fcp_ms <= 0 else ("failing" if effective_lcp_ms > 2500 else "passing")
     image_perf_status = "non_evalue" if sampled_images <= 0 else ("failing" if unoptimised_count > 0 else "passing")
     cache_is_friendly = _is_cache_friendly(sec.get("cache_control"), bool(sec.get("has_cache")))
-    eco_status = "non_evalue" if avg_eco_index is None else ("failing" if avg_eco_index < 30 else "warning" if avg_eco_index < 50 else "passing")
+    eco_status = "non_evalue" if avg_eco_index is None else ("failing" if avg_eco_index < 30 else "warning" if avg_eco_index < 70 else "passing")
     
     axes["Audit de Performance et Temps de Réponse"] = {
         "Temps de Chargement Desktop": {
@@ -4193,17 +4221,19 @@ def build_kpi_centric_report(report: dict) -> dict:
             "type": "recommendation" if desktop_perf_status == "failing" else None,
             "severity": None,
             "data": {
-                "fcp_ms": perf.get("avg_fcp_ms"),
-                "lcp_ms": perf.get("avg_lcp_ms"),
-                "effective_lcp_ms": perf.get("effective_lcp_ms"),
+                "fcp_ms": avg_fcp_ms,
+                "lcp_ms": avg_lcp_ms,
+                "effective_lcp_ms": effective_lcp_ms,
                 "fallback_render_count": fallback_render_count,
                 "confidence_multiplier": perf.get("confidence_multiplier"),
                 "measurement_note": "Certaines mesures desktop proviennent du moteur de rendu de secours Obscura et sont ponderees a 90%." if fallback_render_count > 0 else None,
-                "cls": perf.get("avg_cls"),
+                "cls": avg_cls,
                 "speed_index_ms": perf.get("avg_speed_index_ms"),
                 "speed_index_synthetic": True,
-                "rows": _safe_list(perf.get("headless_rows")),
-                "data_quality": "MISSING" if desktop_perf_status == "non_evalue" else "VALID",
+                "rows": valid_headless_rows or _safe_list(perf.get("headless_rows")),
+                "measurement_row_count": len(raw_headless_rows),
+                "valid_measurement_count": len(valid_headless_rows),
+                "data_quality": "MISSING" if desktop_perf_status == "non_evalue" else performance_data_quality,
             }
         },
         "Temps de Chargement Mobile": {
@@ -4705,11 +4735,91 @@ def build_kpi_centric_report(report: dict) -> dict:
             "status": eco_status,
             "type": "recommendation" if avg_eco_index is not None and avg_eco_index < 50 else None,
             "severity": None,
-            "data": {"avg_eco_index": perf.get("avg_eco_index")},
+            "data": {
+                "avg_eco_index": avg_eco_index,
+                "rows": valid_headless_rows,
+                "measurement_row_count": len(raw_headless_rows),
+                "valid_measurement_count": len(valid_headless_rows),
+                "data_quality": "MISSING" if avg_eco_index is None else performance_data_quality,
+            },
         }
     }
 
     # ─── RGPD ───────────────────────────────────────────────────────────────────
+    rgpd_runtime_unavailable = "Preuve runtime indisponible: crawl bloque ou rendu partiel, controle a relancer avec une couverture plus large."
+    def _rgpd_status_from_signal(signal: bool, rows: list, missing_status: str = "failing") -> str:
+        if signal:
+            return "passing"
+        if blocked_recovery_partial and not rows:
+            return "not_evaluated"
+        return missing_status
+
+    def _rgpd_placeholder_row(status: str, snippet: str, **extra) -> dict:
+        return {"page_url": domain_url, "status": status, "snippet": snippet, **extra}
+
+    inferred_privacy_urls = _safe_list(privacy_kpi.get("privacy_policy_inferred_urls"))
+    privacy_policy_real_rows = bool(inferred_privacy_urls) or bool(privacy_kpi.get("has_privacy_policy"))
+    privacy_policy_rows = [
+        {
+            "policy_url": url,
+            "status": "inferred_from_content",
+            "title": "Politique de confidentialite",
+            "snippet": "Signal RGPD detecte sur cette page",
+        }
+        for url in inferred_privacy_urls
+    ]
+    if not privacy_policy_rows:
+        privacy_policy_rows = [{
+            "policy_url": domain_url,
+            "status": "detected" if privacy_kpi.get("has_privacy_policy") else ("runtime_unavailable" if blocked_recovery_partial else "missing"),
+            "title": "Politique de confidentialite",
+            "snippet": "Politique detectee par le scan domaine" if privacy_kpi.get("has_privacy_policy") else (rgpd_runtime_unavailable if blocked_recovery_partial else "Aucune politique detectee"),
+        }]
+    retention_rows = _safe_list(content.get("rgpd_retention_rows"))
+    retention_real_rows = bool(retention_rows)
+    if not retention_rows and blocked_recovery_partial:
+        retention_rows = [_rgpd_placeholder_row("runtime_unavailable", rgpd_runtime_unavailable)]
+    elif not retention_rows and _safe_int(content.get("rgpd_retention_signal_pages", 0)) == 0:
+        retention_rows = [_rgpd_placeholder_row("missing", "Aucun extrait mentionnant la duree de conservation n'a ete detecte.")]
+    minimization_rows = _safe_list(content.get("rgpd_minimization_rows"))
+    minimization_real_rows = bool(minimization_rows)
+    if not minimization_rows and blocked_recovery_partial:
+        minimization_rows = [_rgpd_placeholder_row("runtime_unavailable", rgpd_runtime_unavailable)]
+    elif not minimization_rows and _safe_int(content.get("rgpd_minimization_signal_pages", 0)) == 0:
+        minimization_rows = [_rgpd_placeholder_row("missing", "Aucun extrait mentionnant la minimisation des donnees n'a ete detecte.")]
+    legal_notice_real_rows = bool(privacy_kpi.get("has_legal_notice"))
+    legal_notice_rows = [{
+        "legal_url": domain_url,
+        "status": "detected" if privacy_kpi.get("has_legal_notice") else ("runtime_unavailable" if blocked_recovery_partial else "missing"),
+        "publisher": None,
+        "contact": None,
+        "snippet": "Mentions legales detectees" if privacy_kpi.get("has_legal_notice") else (rgpd_runtime_unavailable if blocked_recovery_partial else "Mentions legales non detectees"),
+    }]
+    rights_rows = _safe_list(_safe_dict(content.get("advanced_rgpd_kpis", {})).get("rights_rows"))
+    rights_real_rows = bool(rights_rows)
+    if not rights_rows and blocked_recovery_partial:
+        rights_rows = [_rgpd_placeholder_row("runtime_unavailable", rgpd_runtime_unavailable, right="droits RGPD", present=False)]
+    elif not rights_rows and not privacy_kpi.get("has_information_rights"):
+        rights_rows = [_rgpd_placeholder_row("missing", "Les droits des personnes ne sont pas mentionnes clairement.", right="droits RGPD", present=False)]
+    purpose_rows = _safe_list(content.get("rgpd_purpose_rows"))
+    purpose_real_rows = bool(purpose_rows)
+    if not purpose_rows and blocked_recovery_partial:
+        purpose_rows = [_rgpd_placeholder_row("runtime_unavailable", rgpd_runtime_unavailable, purpose="finalite du traitement")]
+    elif not purpose_rows and not privacy_kpi.get("has_declared_purpose"):
+        purpose_rows = [_rgpd_placeholder_row("missing", "La finalite du traitement n'est pas explicitement declaree.", purpose="finalite du traitement")]
+    pre_consent_rows = _safe_list(_safe_dict(content.get("advanced_rgpd_kpis", {})).get("pre_consent_rows"))
+    pre_consent_real_rows = bool(pre_consent_rows)
+    if not pre_consent_rows and blocked_recovery_partial:
+        pre_consent_rows = [_rgpd_placeholder_row("runtime_unavailable", "Preuve runtime indisponible pour la timeline des traceurs avant consentement.", tracker_domain="non mesure", category="runtime", before_consent=None)]
+    elif not pre_consent_rows and _safe_int(_safe_dict(content.get("advanced_rgpd_kpis", {})).get("pre_consent_violation_pages")) > 0:
+        pre_consent_rows = [_rgpd_placeholder_row("missing", "Violation pre-consentement signalee sans timeline detaillee.", tracker_domain="non conserve", category="runtime", before_consent=True)]
+    privacy_score_rows = _safe_list(_safe_dict(content.get("advanced_rgpd_kpis", {})).get("privacy_score_rows"))
+    privacy_score_real_rows = bool(privacy_score_rows)
+    if not privacy_score_rows and blocked_recovery_partial:
+        privacy_score_rows = [_rgpd_placeholder_row("runtime_unavailable", rgpd_runtime_unavailable, score=None, weakness="preuve insuffisante")]
+    elif not privacy_score_rows and _safe_int(_safe_dict(content.get("advanced_rgpd_kpis", {})).get("privacy_score_low_pages")) > 0:
+        privacy_score_rows = [_rgpd_placeholder_row("missing", "Score faible signale sans extrait detaille.", score=None, weakness="preuve non conservee")]
+
     axes["RGPD"] = {
         "Consentement Cookies": {
             "info": f"Banneau consentement: {'Partiel (NLP)' if privacy_kpi.get('cookie_consent', {}).get('cmp_nlp_detected') else ('Détecté' if privacy_kpi.get('cookie_consent', {}).get('has_banner') else 'Absent')}",
@@ -4735,27 +4845,23 @@ def build_kpi_centric_report(report: dict) -> dict:
                 else "low" if privacy_kpi.get("cookie_consent", {}).get("cmp_nlp_detected")
                 else "critical"
             ),
-            "data": privacy_kpi.get("cookie_consent", {}),
+            "data": privacy_kpi.get("cookie_consent") or {
+                "data_quality": "MISSING",
+                "runtime_evidence_status": "unavailable" if blocked_recovery_partial else "not_collected",
+                "missing_reason": rgpd_runtime_unavailable if blocked_recovery_partial else "Preuve CMP/banniere non conservee.",
+            },
         },
         "Politique de Confidentialité": {
             "info": f"Politique de confidentialité: {'Présente' if privacy_kpi.get('has_privacy_policy') else 'Absente'}",
             "impact": "Politique absente = violation RGPD, risque légal, manque de transparence envers utilisateurs",
             "pages_affected": 1,
             "pages_affected_urls": [report.get("domain", "")],
-            "status": "failing" if not privacy_kpi.get("has_privacy_policy") else "passing",
+            "status": _rgpd_status_from_signal(bool(privacy_kpi.get("has_privacy_policy")), privacy_policy_rows if privacy_policy_real_rows else []),
             "type": "compliance",
             "severity": None,
             "data": {
                 "has_privacy_policy": privacy_kpi.get("has_privacy_policy"),
-                "rows": [
-                    {
-                        "policy_url": url,
-                        "status": "inferred_from_content",
-                        "title": "Politique de confidentialite",
-                        "snippet": "Signal RGPD detecte sur cette page",
-                    }
-                    for url in _safe_list(privacy_kpi.get("privacy_policy_inferred_urls"))
-                ],
+                "rows": privacy_policy_rows,
             },
         },
         "Durée de Conservation": {
@@ -4763,12 +4869,12 @@ def build_kpi_centric_report(report: dict) -> dict:
             "impact": "Durée non déclarée = non-conformité RGPD Art.5, transparence insuffisante",
             "pages_affected": 1 if content.get("rgpd_retention_signal_pages", 0) == 0 else 0,
             "pages_affected_urls": [report.get("domain", "")] if content.get("rgpd_retention_signal_pages", 0) == 0 else [],
-            "status": "failing" if content.get("rgpd_retention_signal_pages", 0) == 0 else "passing",
+            "status": _rgpd_status_from_signal(_safe_int(content.get("rgpd_retention_signal_pages", 0)) > 0, retention_rows if retention_real_rows else []),
             "type": "compliance",
             "severity": None,
             "data": {
                 "rgpd_retention_signal_pages": content.get("rgpd_retention_signal_pages", 0),
-                "rows": _safe_list(content.get("rgpd_retention_rows")),
+                "rows": retention_rows,
             },
         },
         "Minimisation des Données": {
@@ -4776,12 +4882,12 @@ def build_kpi_centric_report(report: dict) -> dict:
             "impact": "Minimisation non déclarée = non-conformité RGPD, principes de collecte transparence insuffisan",
             "pages_affected": 1 if content.get("rgpd_minimization_signal_pages", 0) == 0 else 0,
             "pages_affected_urls": [report.get("domain", "")] if content.get("rgpd_minimization_signal_pages", 0) == 0 else [],
-            "status": "failing" if content.get("rgpd_minimization_signal_pages", 0) == 0 else "passing",
+            "status": _rgpd_status_from_signal(_safe_int(content.get("rgpd_minimization_signal_pages", 0)) > 0, minimization_rows if minimization_real_rows else []),
             "type": "compliance",
             "severity": None,
             "data": {
                 "rgpd_minimization_signal_pages": content.get("rgpd_minimization_signal_pages", 0),
-                "rows": _safe_list(content.get("rgpd_minimization_rows")),
+                "rows": minimization_rows,
             },
         },
         "Mentions Légales": {
@@ -4789,18 +4895,12 @@ def build_kpi_centric_report(report: dict) -> dict:
             "impact": "Mentions absentes = risque réglementaire France/EU, manque de transparence juridique",
             "pages_affected": 1,
             "pages_affected_urls": [report.get("domain", "")],
-            "status": "failing" if not privacy_kpi.get("has_legal_notice") else "passing",
+            "status": _rgpd_status_from_signal(bool(privacy_kpi.get("has_legal_notice")), legal_notice_rows if legal_notice_real_rows else []),
             "type": "compliance",
             "severity": None,
             "data": {
                 "has_legal_notice": privacy_kpi.get("has_legal_notice"),
-                "rows": [{
-                    "legal_url": report.get("domain", ""),
-                    "status": "detected" if privacy_kpi.get("has_legal_notice") else "missing",
-                    "publisher": None,
-                    "contact": None,
-                    "snippet": "Mentions legales detectees" if privacy_kpi.get("has_legal_notice") else "",
-                }] if privacy_kpi.get("has_legal_notice") else [],
+                "rows": legal_notice_rows,
             },
         },
         "Droits des Personnes": {
@@ -4808,12 +4908,12 @@ def build_kpi_centric_report(report: dict) -> dict:
             "impact": "Droits non mentionnés = non-conformité RGPD Art.13/14, violation transparence",
             "pages_affected": 1,
             "pages_affected_urls": [report.get("domain", "")],
-            "status": "failing" if not privacy_kpi.get("has_information_rights") else "passing",
+            "status": _rgpd_status_from_signal(bool(privacy_kpi.get("has_information_rights")), rights_rows if rights_real_rows else []),
             "type": "compliance",
             "severity": None,
             "data": {
                 "has_information_rights": privacy_kpi.get("has_information_rights"),
-                "rows": _safe_list(_safe_dict(content.get("advanced_rgpd_kpis", {})).get("rights_rows")),
+                "rows": rights_rows,
             },
         },
         "Finalité du Traitement": {
@@ -4821,12 +4921,12 @@ def build_kpi_centric_report(report: dict) -> dict:
             "impact": "Finalité non déclarée = non-conformité RGPD, base légale insuffisante",
             "pages_affected": 1,
             "pages_affected_urls": [report.get("domain", "")],
-            "status": "failing" if not privacy_kpi.get("has_declared_purpose") else "passing",
+            "status": _rgpd_status_from_signal(bool(privacy_kpi.get("has_declared_purpose")), purpose_rows if purpose_real_rows else []),
             "type": "compliance",
             "severity": None,
             "data": {
                 "has_declared_purpose": privacy_kpi.get("has_declared_purpose"),
-                "rows": _safe_list(content.get("rgpd_purpose_rows")),
+                "rows": purpose_rows,
             },
         },
         "Couverture des Droits RGPD": {
@@ -4834,30 +4934,30 @@ def build_kpi_centric_report(report: dict) -> dict:
             "impact": "Droits RGPD incomplets exposent à des risques de non-conformité réglementaire",
             "pages_affected": _safe_int(content.get('advanced_rgpd_kpis', {}).get('rights_low_pages', 0)),
             "pages_affected_urls": [],
-            "status": "failing" if _safe_int(content.get('advanced_rgpd_kpis', {}).get('rights_low_pages', 0)) > 0 else "passing",
+            "status": "not_evaluated" if blocked_recovery_partial and not rights_real_rows else ("failing" if _safe_int(content.get('advanced_rgpd_kpis', {}).get('rights_low_pages', 0)) > 0 else "passing"),
             "type": "compliance",
             "severity": None,
-            "data": {**_safe_dict(content.get("advanced_rgpd_kpis", {})), "rows": _safe_list(_safe_dict(content.get("advanced_rgpd_kpis", {})).get("rights_rows"))},
+            "data": {**_safe_dict(content.get("advanced_rgpd_kpis", {})), "rows": rights_rows},
         },
         "Trackers Avant Consentement": {
             "info": f"Pages avec trackers pré-consentement: {content.get('advanced_rgpd_kpis', {}).get('pre_consent_violation_pages', 0)}",
             "impact": "Trackers avant consentement peuvent enfreindre ePrivacy/CNIL et exposer à des sanctions",
             "pages_affected": _safe_int(content.get('advanced_rgpd_kpis', {}).get('pre_consent_violation_pages', 0)),
             "pages_affected_urls": [],
-            "status": "failing" if _safe_int(content.get('advanced_rgpd_kpis', {}).get('pre_consent_violation_pages', 0)) > 0 else "passing",
+            "status": "not_evaluated" if blocked_recovery_partial and not pre_consent_real_rows else ("failing" if _safe_int(content.get('advanced_rgpd_kpis', {}).get('pre_consent_violation_pages', 0)) > 0 else "passing"),
             "type": "compliance",
             "severity": None,
-            "data": {**_safe_dict(content.get("advanced_rgpd_kpis", {})), "rows": _safe_list(_safe_dict(content.get("advanced_rgpd_kpis", {})).get("pre_consent_rows"))},
+            "data": {**_safe_dict(content.get("advanced_rgpd_kpis", {})), "rows": pre_consent_rows},
         },
         "Score Politique de Confidentialité": {
             "info": f"Pages avec score confidentialité faible: {content.get('advanced_rgpd_kpis', {}).get('privacy_score_low_pages', 0)}",
             "impact": "Politique de confidentialité faible dégrade la confiance et le niveau de conformité perçu",
             "pages_affected": _safe_int(content.get('advanced_rgpd_kpis', {}).get('privacy_score_low_pages', 0)),
             "pages_affected_urls": [],
-            "status": "failing" if _safe_int(content.get('advanced_rgpd_kpis', {}).get('privacy_score_low_pages', 0)) > 0 else "passing",
+            "status": "not_evaluated" if blocked_recovery_partial and not privacy_score_real_rows else ("failing" if _safe_int(content.get('advanced_rgpd_kpis', {}).get('privacy_score_low_pages', 0)) > 0 else "passing"),
             "type": "compliance",
             "severity": None,
-            "data": {**_safe_dict(content.get("advanced_rgpd_kpis", {})), "rows": _safe_list(_safe_dict(content.get("advanced_rgpd_kpis", {})).get("privacy_score_rows"))},
+            "data": {**_safe_dict(content.get("advanced_rgpd_kpis", {})), "rows": privacy_score_rows},
         }
     }
 

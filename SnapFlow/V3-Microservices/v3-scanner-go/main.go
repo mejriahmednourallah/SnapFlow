@@ -148,6 +148,9 @@ type ScanTelemetry struct {
 	// Issue 5: headless coverage metadata
 	HeadlessCoveragePct     float64 `json:"headless_coverage_pct"`
 	PartialHeadlessCoverage bool    `json:"partial_headless_coverage,omitempty"`
+	BlockedRecoveryPartial  bool    `json:"blocked_recovery_partial,omitempty"`
+	RenderedRecoveryPages   int     `json:"rendered_recovery_pages,omitempty"`
+	RenderedRecoveryMinimum int     `json:"rendered_recovery_minimum,omitempty"`
 }
 
 type FinalReport struct {
@@ -1443,6 +1446,7 @@ func startScan(ctx context.Context, config ScannerConfig) {
 	cfFallbackMode := atomic.LoadInt32(&pageCount) == 0 && htmlBody != ""
 	if cfFallbackMode {
 		log.Printf("⚠ Colly crawl blocked (0 pages) — seeding from pre-fetch HTML")
+		setStopReason("blocked_recovery_partial")
 		prefetchSEO := seo.Analyze(baseURL, htmlBody, hasSitemap, hasRobots)
 		prefetchUX := ux.Analyze(baseURL, htmlBody, baseURL)
 		mu.Lock()
@@ -1460,6 +1464,11 @@ func startScan(ctx context.Context, config ScannerConfig) {
 		}
 	}
 	parallelDiscoveryApplied := false
+	renderedRecoveryPages := 0
+	renderedRecoveryMinimum := envInt("BLOCKED_RECOVERY_MIN_PAGES", 5)
+	if renderedRecoveryMinimum < 1 {
+		renderedRecoveryMinimum = 1
+	}
 	mergeRenderedDiscovery := func(discovery *browserpool.DiscoverRenderedResult, requestedURL, provenance string, replaceFirst bool, insertPage bool) bool {
 		if discovery == nil || discovery.Error != "" {
 			return false
@@ -1586,9 +1595,12 @@ func startScan(ctx context.Context, config ScannerConfig) {
 		if config.MaxPages > 0 && maxRenderedPages > config.MaxPages {
 			maxRenderedPages = config.MaxPages
 		}
-		blockedConcurrency := envInt("OBSCURA_BLOCKED_CRAWL_CONCURRENCY", 48)
+		blockedConcurrency := envInt("OBSCURA_BLOCKED_CRAWL_CONCURRENCY", 4)
 		if blockedConcurrency < 1 {
 			blockedConcurrency = 1
+		}
+		if blockedConcurrency > 6 {
+			blockedConcurrency = 6
 		}
 		if blockedConcurrency > maxRenderedPages {
 			blockedConcurrency = maxRenderedPages
@@ -1695,6 +1707,12 @@ func startScan(ctx context.Context, config ScannerConfig) {
 				}
 			}
 			atomic.StoreInt32(&pageCount, int32(len(allSEOResults)))
+			renderedRecoveryPages = len(allSEOResults)
+			if renderedRecoveryPages < renderedRecoveryMinimum {
+				setStopReason("blocked_recovery_partial")
+				log.Printf("⚠ Blocked crawl recovery is partial: recovered=%d minimum=%d; downstream KPI confidence will be reduced",
+					renderedRecoveryPages, renderedRecoveryMinimum)
+			}
 			log.Printf("Obscura rendered discovery recovered %d page(s), %d link(s), %d form(s), engine=%s",
 				len(allSEOResults), len(discovery.InternalLinks), len(discoveredForms), discovery.Engine)
 		}
@@ -2433,6 +2451,9 @@ func startScan(ctx context.Context, config ScannerConfig) {
 		FormFuzzer:              formFuzzerSummary,
 		HeadlessCoveragePct:     headlessCoveragePct,
 		PartialHeadlessCoverage: partialHeadlessCoverage,
+		BlockedRecoveryPartial:  cfFallbackMode && (renderedRecoveryPages == 0 || renderedRecoveryPages < renderedRecoveryMinimum),
+		RenderedRecoveryPages:   renderedRecoveryPages,
+		RenderedRecoveryMinimum: renderedRecoveryMinimum,
 	}
 	if err := db.UpdateTelemetry(scanID, report.ScanTelemetry); err != nil {
 		log.Printf("⚠ UpdateTelemetry failed: %v", err)
