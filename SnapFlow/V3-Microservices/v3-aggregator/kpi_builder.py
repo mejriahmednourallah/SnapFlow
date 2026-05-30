@@ -2352,7 +2352,13 @@ def _evaluate_module_versions(modules: list) -> dict:
     elif verified_rows and len(safe) == len(verified_rows):
         status = "passing"
         severity = None
+    elif uncertain:
+        # Modules were detected but cannot be fully evaluated (not in local catalogue,
+        # or version data incomplete). This is inconclusive, not untested.
+        status = "warning"
+        severity = "medium"
     else:
+        # Truly empty module list — scan ran but found nothing to evaluate
         status = "not_evaluated"
         severity = None
 
@@ -3099,14 +3105,25 @@ def _build_contract_constat(kpi_id: str, kpi_name: str, status: str, kpi_type: s
     data = _safe_dict(kpi_obj.get("data", {}))
     pages_affected = _safe_int(kpi_obj.get("pages_affected", 0))
 
+    _UNKNOWN_TOKENS = {"non detecte", "non détecté", "non detectee", "non détectée", ""}
+
+    def _tech_known(raw: str) -> bool:
+        return bool(raw) and raw.lower().strip() not in _UNKNOWN_TOKENS
+
     if kpi_id == "tech_cms_version":
         product = _display_value(evidence.get("detected_product"))
         version = _display_value(evidence.get("detected_version"))
         support_status = _display_value(evidence.get("support_status"), "statut de support inconnu")
+        product_known = _tech_known(product)
+        version_known = _tech_known(version)
         if status == "passing":
             return f"Le CMS détecté est {product} {version} et le statut de support remonté est « {support_status} »."
-        if status == "not_evaluated":
-            return f"Le CMS {product if product != 'non détecté' else 'du site'} n'a pas pu être qualifié de façon fiable car la version ou le statut de support manque."
+        if status in ("not_evaluated", "warning"):
+            if not product_known:
+                return "Aucun CMS ou framework n'a été identifié lors du scan (signatures non reconnues ou en-têtes masqués). Le niveau de risque lié à la base technique ne peut pas être évalué."
+            if not version_known:
+                return f"Le CMS {product} a été identifié mais sa version n'est pas exposée publiquement. Il n'est pas possible de déterminer le statut de support avec certitude."
+            return f"Le CMS {product} {version} a été détecté mais son statut de support n'a pas pu être qualifié de façon fiable dans le catalogue utilisé."
         return f"Le site expose {product} {version} avec un statut de support « {support_status} ». Cette base technique doit être traitée avant qu'elle ne devienne un risque d'exploitation ou de maintenance."
 
     if kpi_id == "tech_server_version":
@@ -3114,11 +3131,39 @@ def _build_contract_constat(kpi_id: str, kpi_name: str, status: str, kpi_type: s
         version = _display_value(evidence.get("detected_version"))
         critical = _safe_int(_safe_dict(data.get("cve_severity")).get("critical"))
         high = _safe_int(_safe_dict(data.get("cve_severity")).get("high"))
+        product_known = _tech_known(product)
+        version_known = _tech_known(version)
         if status == "passing":
             return f"Le serveur ou runtime détecté est {product} {version}. Aucun signal critique ou haut n'a été remonté dans l'agrégat utilisé pour ce KPI."
-        if status == "not_evaluated":
-            return f"Le serveur {product if product != 'non détecté' else 'du site'} a été partiellement détecté, mais la version exploitable manque pour conclure sur son niveau de risque."
+        if status in ("not_evaluated", "warning"):
+            if not product_known:
+                return "Le serveur du site n'a pas pu être identifié lors du scan (en-têtes masqués, CDN ou réponse non standard). Le risque lié à la version serveur ne peut pas être évalué sans cette information."
+            if not version_known:
+                return f"Le serveur {product} a été détecté mais sa version n'est pas exposée dans les en-têtes HTTP. Il n'est pas possible de conclure sur son niveau de risque avec certitude."
+            return f"Le serveur {product} {version} a été détecté mais n'a pas pu être qualifié de façon fiable dans l'agrégat technique (CVE ou EOL non déterminé)."
         return f"Le site expose {product} {version} avec {critical} CVE critique(s) et {high} CVE haute(s) dans l'agrégat technique. Cette exposition facilite le ciblage d'attaques connues."
+
+    if kpi_id == "tech_programming_language":
+        language = _clean_text(data.get("language") or data.get("programming_language"))
+        lang_version = _clean_text(data.get("language_version") or data.get("programming_language_version"))
+        server_tech = _clean_text(data.get("server_tech"))
+        cms_name = _clean_text(data.get("cms_name"))
+        context_product = language or server_tech or cms_name
+        context_version = lang_version if language else _clean_text(data.get("server_version") or data.get("cms_version"))
+        lang_known = bool(context_product) and context_product.lower() not in {"non detecte", "non détecté", ""}
+        ver_known = bool(context_version) and context_version.lower() not in {"non detectee", "non détectée", ""}
+        lang_inferred = bool(data.get("language_inferred"))
+        if status == "passing":
+            return f"Le langage ou runtime {context_product} {context_version} ne présente aucun signal de risque dans l'agrégat utilisé."
+        if status in ("not_evaluated", "warning"):
+            if not lang_known:
+                return "Le langage de programmation du site n'est pas exposé directement dans les pages analysées (runtime masqué ou CDN). Le niveau de risque ne peut pas être conclu avec certitude."
+            if lang_inferred:
+                return f"Le langage utilisé ({context_product}) a été inféré depuis le CMS détecté, mais sa version n'est pas confirmée. Le risque associé reste incertain et nécessite une vérification manuelle."
+            if not ver_known:
+                return f"Le langage {context_product} a été détecté mais sa version n'est pas exposée. Identifier le langage/runtime aide à cibler les correctifs de sécurité et les upgrades de maintenance."
+            return f"Le langage {context_product} {context_version} a été détecté mais n'a pas pu être qualifié de façon fiable (statut EOL ou support non déterminé dans le catalogue)."
+        return f"Le site utilise {context_product} {context_version}. Une vérification du statut de maintenance de ce runtime est recommandée pour prévenir des vulnérabilités connues."
 
     if kpi_id == "sec_service_exposure":
         enabled = bool(evidence.get("enabled"))
@@ -3297,9 +3342,15 @@ def _make_kpi_v2(kpi_name: str, kpi_obj: dict, axis: str, pages_scanned: int, do
             confidence_penalty += 2
         confidence = _downgrade_confidence(base_confidence, confidence_penalty)
     severity = _cap_severity_by_confidence(severity, confidence)
-    score = _compute_eco_status_score(status) if kpi_id == "eco_index_score" else _compute_contract_score(status, severity, data_quality)
     if kpi_id == "eco_index_score":
+        # Use the actual measured eco index value as the score (e.g. 41.1 → 41),
+        # not the status-derived synthetic value (warning→50, passing→100, else→0).
+        # Fall back to the status-derived score only when no measurement is available.
+        avg_eco_idx = _optional_float(v1_data.get("avg_eco_index"))
+        score = round(avg_eco_idx) if avg_eco_idx is not None else _compute_eco_status_score(status)
         evidence["score_value"] = score
+    else:
+        score = _compute_contract_score(status, severity, data_quality)
 
     return {
         "kpi_id": kpi_id,

@@ -305,14 +305,14 @@ const KPI_LABEL_RULES: Record<string, (status: string, severity: string | null |
   },
 
   // ── SEO ───────────────────────────────────────────────────────────────
-  seo_alt_tags(rawStatus) {
+  seo_alt_tags(rawStatus, _severity, data) {
     if (rawStatus === 'passing') return OK_DEFAULT;
-    if (rawStatus === 'not_available') return NT_DEFAULT;
+    if (isNonTestedStatus(rawStatus)) return technicalUncertainLabel(data);
     return KO_RECO_MIN;
   },
-  seo_meta_tags(rawStatus) {
+  seo_meta_tags(rawStatus, _severity, data) {
     if (rawStatus === 'passing') return OK_DEFAULT;
-    if (rawStatus === 'not_available') return NT_DEFAULT;
+    if (isNonTestedStatus(rawStatus)) return technicalUncertainLabel(data);
     return KO_RECO_MIN;
   },
   seo_sitemap(rawStatus) {
@@ -340,14 +340,14 @@ const KPI_LABEL_RULES: Record<string, (status: string, severity: string | null |
     if (rawStatus === 'not_available') return NT_DEFAULT;
     return KO_RECO_MIN;
   },
-  seo_heading_structure(rawStatus) {
+  seo_heading_structure(rawStatus, _severity, data) {
     if (rawStatus === 'passing') return OK_DEFAULT;
-    if (rawStatus === 'not_available') return NT_DEFAULT;
+    if (isNonTestedStatus(rawStatus)) return technicalUncertainLabel(data);
     return KO_RECO_MIN;
   },
-  seo_internal_linking(rawStatus) {
+  seo_internal_linking(rawStatus, _severity, data) {
     if (rawStatus === 'passing') return OK_DEFAULT;
-    if (rawStatus === 'not_available') return NT_DEFAULT;
+    if (isNonTestedStatus(rawStatus)) return technicalUncertainLabel(data);
     return KO_RECO_MIN;
   },
   seo_external_linking(rawStatus) {
@@ -517,9 +517,18 @@ function resolveKpiLabels(
   data: any,
 ): KpiLabels {
   const status = String(rawStatus ?? '').toLowerCase();
+  const normalizedKpiId = kpiId.replace(/[^a-z0-9_]/g, '').toLowerCase();
 
-  // Status wins over type: non-tested KPIs are informational, not bugs/recommendations.
+  // For non-tested statuses, let the per-KPI rule decide first.
+  // Rules call technicalUncertainLabel(data) which returns "Non concluant" when
+  // positive evidence is present, and "Non testé" only when nothing was detected.
+  // KPIs without a rule fall back to NT_DEFAULT unconditionally.
   if (isNonTestedStatus(status)) {
+    const ruleForNT = KPI_LABEL_RULES[normalizedKpiId];
+    if (ruleForNT) {
+      const result = ruleForNT(status, severity, data);
+      if (result) return result;
+    }
     return NT_DEFAULT;
   }
 
@@ -529,7 +538,6 @@ function resolveKpiLabels(
   }
 
   // For failing/warning, look up per-KPI rule
-  const normalizedKpiId = kpiId.replace(/[^a-z0-9_]/g, '').toLowerCase();
   const rule = KPI_LABEL_RULES[normalizedKpiId];
   if (rule) {
     const result = rule(normalizedKpiId, severity, data);

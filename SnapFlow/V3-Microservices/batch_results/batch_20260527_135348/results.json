@@ -1,0 +1,103 @@
+{
+  "manifest": {
+    "run_id": "batch_20260527_135348",
+    "created_at": "2026-05-27T13:53:48.839068+00:00",
+    "aggregator_url": "http://localhost:8080",
+    "source": "C:\\Users\\DELL\\AppData\\Local\\Temp\\snapflow_batch_urls_check.txt",
+    "filters": {
+      "exclude_patterns": [
+        "(^|\\.)medianet\\.tn$",
+        "preprod",
+        "maintenance\\.medianet\\.tn$",
+        "\\bmaintenance\\b",
+        "snapflowv2\\.medianet\\.tn$"
+      ],
+      "dry_run": false
+    },
+    "limits": {
+      "max_pages": 150,
+      "headless_concurrency": 3,
+      "timeout": 7200,
+      "requested_limit": null,
+      "selected_targets": 1,
+      "skipped_targets": 2
+    }
+  },
+  "sites": [
+    {
+      "target": {
+        "url": "https://www.example.com",
+        "source": "C:\\Users\\DELL\\AppData\\Local\\Temp\\snapflow_batch_urls_check.txt",
+        "identifier": null,
+        "label": null
+      },
+      "skipped": false,
+      "skip_reason": null,
+      "request_url": null,
+      "response_path": null,
+      "response": null,
+      "error": "[WinError 10054] An existing connection was forcibly closed by the remote host",
+      "scan_id": null,
+      "status": null,
+      "quality_score": null,
+      "health_status": null
+    }
+  ],
+  "aggregate": {
+    "counts": {
+      "total_targets": 1,
+      "tested": 0,
+      "skipped": 0,
+      "failed_requests": 1,
+      "passing_sites": 0,
+      "warning_sites": 0,
+      "failing_sites": 0,
+      "not_evaluated_sites": 0
+    },
+    "quality": {
+      "scores": [],
+      "average": null,
+      "minimum": null,
+      "maximum": null
+    },
+    "issues_by_kpi": [],
+    "issues_by_axis": {},
+    "severity_counts": {},
+    "status_counts": {},
+    "site_rows": [
+      {
+        "url": "https://www.example.com",
+        "source": "C:\\Users\\DELL\\AppData\\Local\\Temp\\snapflow_batch_urls_check.txt",
+        "identifier": null,
+        "label": null,
+        "skipped": false,
+        "skip_reason": null,
+        "scan_id": null,
+        "status": null,
+        "quality_score": null,
+        "health_status": null,
+        "response_path": null,
+        "error": "[WinError 10054] An existing connection was forcibly closed by the remote host"
+      }
+    ],
+    "site_rankings": [],
+    "skipped_targets": [
+      {
+        "url": "https://﻿https://maintenance",
+        "reason": "excluded_by_pattern:\\bmaintenance\\b"
+      },
+      {
+        "url": "https://snapflowv2.medianet.tn",
+        "reason": "excluded_by_pattern:(^|\\.)medianet\\.tn$"
+      }
+    ],
+    "selected_targets": [
+      {
+        "url": "https://www.example.com",
+        "source": "C:\\Users\\DELL\\AppData\\Local\\Temp\\snapflow_batch_urls_check.txt",
+        "identifier": null,
+        "label": null
+      }
+    ]
+  }
+}

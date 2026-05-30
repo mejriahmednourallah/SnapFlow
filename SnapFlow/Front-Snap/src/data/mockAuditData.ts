@@ -88,6 +88,7 @@ export interface AuditPassingKpi {
 export interface KpiEvidenceItem {
   name: string;
   status_code?: number;
+  status?: string;
   error?: string;
   found_on: string;
   anchor_text?: string;

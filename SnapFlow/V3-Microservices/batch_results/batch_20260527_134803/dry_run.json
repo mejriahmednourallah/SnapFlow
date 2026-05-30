@@ -1,0 +1,44 @@
+{
+  "manifest": {
+    "run_id": "batch_20260527_134803",
+    "created_at": "2026-05-27T13:48:03.105613+00:00",
+    "aggregator_url": "http://localhost:8080",
+    "source": "C:\\Users\\DELL\\AppData\\Local\\Temp\\snapflow_batch_urls_check.txt",
+    "filters": {
+      "exclude_patterns": [
+        "(^|\\.)medianet\\.tn$",
+        "preprod",
+        "maintenance\\.medianet\\.tn$",
+        "\\bmaintenance\\b",
+        "snapflowv2\\.medianet\\.tn$"
+      ],
+      "dry_run": true
+    },
+    "limits": {
+      "max_pages": 150,
+      "headless_concurrency": 3,
+      "timeout": 7200,
+      "requested_limit": null,
+      "selected_targets": 1,
+      "skipped_targets": 2
+    }
+  },
+  "selected": [
+    {
+      "url": "https://www.example.com",
+      "source": "C:\\Users\\DELL\\AppData\\Local\\Temp\\snapflow_batch_urls_check.txt",
+      "identifier": null,
+      "label": null
+    }
+  ],
+  "skipped": [
+    {
+      "url": "https://﻿https://maintenance",
+      "reason": "excluded_by_pattern:\\bmaintenance\\b"
+    },
+    {
+      "url": "https://snapflowv2.medianet.tn",
+      "reason": "excluded_by_pattern:(^|\\.)medianet\\.tn$"
+    }
+  ]
+}
