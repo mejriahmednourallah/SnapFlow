@@ -1915,7 +1915,7 @@ func startScan(ctx context.Context, config ScannerConfig) {
 	if lowQualityContentHashPages > 0 {
 		duplicationReliability = "partial"
 	}
-	if summary.DuplicateContentRatePct >= 80.0 && lowQualityContentHashPages > 0 {
+	if reliableContentHashPages == 0 && lowQualityContentHashPages > 0 {
 		duplicationReliability = "pipeline_suspect"
 	}
 
@@ -1956,6 +1956,10 @@ func startScan(ctx context.Context, config ScannerConfig) {
 		"pages_with_social_sharing":      summary.PagesWithSocialSharing,
 		"avg_social_sharing_score":       summary.AvgSocialSharingScore,
 		"social_sharing_kpi_passed":      summary.SocialSharingKPIPassed,
+		"pages_missing_meta_desc":        summary.PagesMissingMetaDesc,
+		"pages_missing_title":            summary.PagesMissingTitle,
+		"pages_with_bad_h1":              summary.PagesWithBadH1,
+		"pages_not_url_clean":            summary.PagesNotURLClean,
 	}
 	if err := db.UpdateSEOKPIExtended(scanID, seoKPIExtended); err != nil {
 		log.Printf("⚠ UpdateSEOKPIExtended failed: %v", err)

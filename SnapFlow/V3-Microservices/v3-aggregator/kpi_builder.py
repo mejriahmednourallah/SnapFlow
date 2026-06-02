@@ -3531,10 +3531,12 @@ def build_kpi_centric_report(report: dict) -> dict:
     total_broken_buttons = button_kpi.get("total_nonfunc_buttons")
     if total_broken_buttons is None:
         total_broken_buttons = len(broken_buttons) if broken_buttons else 0
-    missing_meta_evidence = _normalized_kpi_evidence(report, "Missing Meta Descriptions")
-    missing_title_evidence = _normalized_kpi_evidence(report, "Missing Page Titles")
-    missing_alt_evidence = _normalized_kpi_evidence(report, "Images Missing Alt Text")
-    heading_hierarchy_evidence = _normalized_kpi_evidence(report, "Heading Hierarchy")
+    # SEO evidence: scanner stores counts in seo_kpi_extended, not in report["kpis"].
+    # URL lists are not collected by the scanner for these KPIs — only counts are available.
+    missing_meta_evidence = {"count": seo.get("pages_missing_meta_desc", 0), "affected_pages": []}
+    missing_title_evidence = {"count": seo.get("pages_missing_title", 0), "affected_pages": []}
+    missing_alt_evidence = {"images": []}
+    heading_hierarchy_evidence = {"count": seo.get("pages_with_bad_h1", 0), "affected_pages": []}
     internal_contextual_links_evidence = _normalized_kpi_evidence(report, "Internal Contextual Links")
 
     axes = {}
