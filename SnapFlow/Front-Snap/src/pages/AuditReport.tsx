@@ -379,31 +379,8 @@ const AuditReport = () => {
     setIsExporting(true);
     try {
       const { generateAuditPdf } = await import('@/lib/generateAuditPdf.tsx');
-      let clientLogoUrl = projectInfo?.logo_url ?? undefined;
-      let clientLogoDataUrl: string | undefined;
-
-      if (clientLogoUrl) {
-        console.log('[PDF Export] Using stored logo URL:', clientLogoUrl);
-        const { data, error } = await supabase.functions.invoke('detect-logo', { body: { logoUrl: clientLogoUrl, returnDataUrl: true } });
-        if (error) {
-          console.warn('[PDF Export] Detect-logo error for stored logo:', error);
-        } else {
-          clientLogoDataUrl = data?.data_url ?? undefined;
-          console.log('[PDF Export] Received data_url:', !!clientLogoDataUrl);
-        }
-      } else if (siteUrl) {
-        console.log('[PDF Export] Auto-detecting logo from site URL:', siteUrl);
-        const { data, error } = await supabase.functions.invoke('detect-logo', { body: { siteUrl, returnDataUrl: true } });
-        if (error) {
-          console.warn('[PDF Export] Detect-logo error for auto-detection:', error);
-        } else {
-          clientLogoUrl = data?.logo_url ?? undefined;
-          clientLogoDataUrl = data?.data_url ?? undefined;
-          console.log('[PDF Export] Auto-detected logo:', clientLogoUrl, 'Has data_url:', !!clientLogoDataUrl);
-        }
-      }
-
-      await generateAuditPdf(audit, theme, { clientLogoUrl: clientLogoDataUrl || clientLogoUrl });
+      const clientLogoUrl = projectInfo?.logo_url ?? undefined;
+      await generateAuditPdf(audit, theme, { clientLogoUrl });
       toast({ title: 'PDF téléchargé', description: 'Le rapport complet a été exporté.' });
     } catch (error) {
       console.error('PDF export error:', error);

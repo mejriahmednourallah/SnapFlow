@@ -1,5 +1,4 @@
 import { Buffer } from 'buffer';
-import { supabase } from '@/integrations/supabase/client';
 import type { DashboardProject, RedmineIssue, ActivityPdfOptions } from '@/components/activity/pdf/pdfTypes';
 
 export interface GenerateActivityPdfParams {
@@ -43,39 +42,41 @@ function blobToDataUrl(blob: Blob): Promise<string> {
   });
 }
 
-async function fetchLogoAsDataUrl(url?: string | null): Promise<string | undefined> {
+async function fetchLogoAsDataUrl(url?: string | null, fallbackToDirect = true): Promise<string | undefined> {
   if (!url) return undefined;
   if (/^(data:|blob:)/i.test(url)) return url;
 
   try {
     const response = await fetch(url);
-    if (!response.ok) return url;
+    if (!response.ok) return fallbackToDirect ? url : undefined;
     return await blobToDataUrl(await response.blob());
   } catch {
-    return url;
+    return fallbackToDirect ? url : undefined;
+  }
+}
+
+function inferredLogoCandidates(project: DashboardProject): string[] {
+  try {
+    const origin = new URL(project.url).origin;
+    return [
+      `${origin}/apple-touch-icon.png`,
+      `${origin}/favicon-32x32.png`,
+      `${origin}/favicon.ico`,
+    ];
+  } catch {
+    return [];
   }
 }
 
 async function resolveActivityLogoSource(project: DashboardProject): Promise<string | undefined> {
   const storedLogo = project.logo_url?.trim();
-  const siteUrl = project.url?.trim();
+  if (storedLogo) return fetchLogoAsDataUrl(storedLogo);
 
-  try {
-    const { data, error } = await supabase.functions.invoke('detect-logo', {
-      body: storedLogo
-        ? { logoUrl: storedLogo, returnDataUrl: true }
-        : { siteUrl, returnDataUrl: true },
-    });
-
-    if (!error) {
-      if (data?.data_url) return data.data_url;
-      if (data?.logo_url) return await fetchLogoAsDataUrl(data.logo_url);
-    }
-  } catch {
-    // The activity export still works without the edge function; direct URL is the fallback.
+  for (const candidate of inferredLogoCandidates(project)) {
+    const resolved = await fetchLogoAsDataUrl(candidate, false);
+    if (resolved) return resolved;
   }
-
-  return fetchLogoAsDataUrl(storedLogo);
+  return undefined;
 }
 
 export async function generateActivityPdf(params: GenerateActivityPdfParams): Promise<void> {
