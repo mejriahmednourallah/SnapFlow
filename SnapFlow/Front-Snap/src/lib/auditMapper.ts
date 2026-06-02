@@ -963,12 +963,15 @@ function cleanFindingTitle(finding: AuditFinding): string {
   const privacyTitle = privacyTitleForFinding(finding);
   if (privacyTitle) return privacyTitle;
   const source = `${finding.id} ${finding.sourceKpi ?? ''} ${finding.title}`.toLowerCase();
+  if (/perf_console_errors|console_error|console javascript/.test(source)) return 'Erreurs Console JavaScript';
+  if (/sec_robots_disclosure/.test(source)) return 'Exposition de chemins via robots.txt';
+  if (/seo_robots/.test(source)) return 'Fichier robots.txt et directives de crawl';
   if (/^ssl$/i.test(finding.title.trim())) return 'Certificat de sécurité';
   if (/tech_cms_version/.test(source)) return 'Version du système de gestion du site';
   if (/tech_cve_check/.test(source)) return 'Vérification des vulnérabilités connues';
   if (/perf_desktop_speed|desktop|core vitals/.test(source)) return 'Temps de chargement desktop';
   if (/sec_ssl|certificat/.test(source)) return 'Certificat de sécurité';
-  if (/sec_js_deps|javascript/.test(source)) return 'Fichiers JavaScript vulnérables';
+  if (/sec_js_deps/.test(source)) return 'Fichiers JavaScript vulnérables';
   if (/seo_meta|meta/.test(source)) return 'Descriptions de pages pour le referencement';
   if (/seo_sitemap|sitemap/.test(source)) return 'Plan du site';
   if (/seo_robots|robots/.test(source)) return 'Instructions pour les moteurs de recherche';
@@ -3040,6 +3043,7 @@ export function mapApiResponseToReport(
     const scoreVal = smet.performance.avg_eco_index || 0;
     const passed = scoreVal > 50; 
     const f1 = createFinding('eco', 'score', 'Bilan Eco Index (Impact CO2)', passed, `Résultat Eco Index : ${scoreVal.toFixed(1)}/100.`, resolveStatus(smet.performance?.eco_kpi ?? { passed }));
+    if (f1) f1.displayScorePct = scoreVal;
     if (f1) findingsEco.push(f1);
   }
 

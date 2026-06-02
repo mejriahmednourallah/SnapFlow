@@ -940,6 +940,8 @@ def _build_functional_fuzzer_kpi(summary_row: dict | None, table_stats: dict | N
     unique_transactional_forms_tested = int(raw.get("unique_transactional_forms_tested", 0) or 0)
     non_transactional_forms_tested = int(raw.get("non_transactional_forms_tested", 0) or 0)
     suppressed_low_confidence_anomalies = int(raw.get("suppressed_low_confidence_anomalies", 0) or 0)
+    explicit_signal_count = "signal_count" in raw or "signals" in raw
+    signal_count = int(raw.get("signal_count", raw.get("signals", 0)) or 0)
     anomalies_count = int(raw.get("anomalies_found", 0) or 0)
     affected_pages = int(raw.get("affected_pages", 0) or 0)
     affected_page_urls = [
@@ -951,6 +953,9 @@ def _build_functional_fuzzer_kpi(summary_row: dict | None, table_stats: dict | N
     if not has_summary or (tests_run == 0 and int(table_stats.get("tests_run", 0) or 0) > 0):
         tests_run = int(table_stats.get("tests_run", 0) or 0)
         forms_tested = int(table_stats.get("forms_tested", 0) or 0)
+        if "signal_count" in table_stats or "signals" in table_stats:
+            explicit_signal_count = True
+            signal_count = int(table_stats.get("signal_count", table_stats.get("signals", 0)) or 0)
         if forms_discovered == 0:
             forms_discovered = forms_tested
         anomalies_count = int(table_stats.get("anomalies_count", 0) or 0)
@@ -1005,7 +1010,12 @@ def _build_functional_fuzzer_kpi(summary_row: dict | None, table_stats: dict | N
     if unique_transactional_forms_tested == 0 and forms_tested > 0:
         unique_transactional_forms_tested = forms_tested
 
-    if unique_transactional_forms_tested == 0:
+    no_usable_signals = tests_run > 0 and explicit_signal_count and signal_count == 0
+    if no_usable_signals:
+        passed = None
+        fuzzer_status = "non_evalue"
+        skipped_reason = skipped_reason or "form_fuzzer_no_usable_signals"
+    elif unique_transactional_forms_tested == 0:
         passed = None
         fuzzer_status = "non_evalue"
     else:
@@ -1023,6 +1033,12 @@ def _build_functional_fuzzer_kpi(summary_row: dict | None, table_stats: dict | N
         "tests_run": tests_run,
         "anomalies_count": anomalies_count,
         "suppressed_low_confidence_anomalies": suppressed_low_confidence_anomalies,
+        "signal_count": signal_count,
+        "response_type": raw.get("response_type"),
+        "submitted": raw.get("submitted"),
+        "failure_reason": skipped_reason if fuzzer_status == "non_evalue" else None,
+        "execution_status": "failed" if skipped_reason == "form_fuzzer_no_usable_signals" else ("completed" if tests_run > 0 else "not_started"),
+        "data_quality": "MISSING" if skipped_reason == "form_fuzzer_no_usable_signals" else ("VALID" if tests_run > 0 else "MISSING"),
         "affected_pages": affected_pages,
         "affected_page_urls": affected_page_urls,
         "anomalous_tests_all": anomalous_tests_all if isinstance(anomalous_tests_all, list) else [],
@@ -2393,8 +2409,10 @@ def build_report(scan_id: str, enrichment_artifacts: Optional[dict] = None) -> d
         cms_kpi = {
             "cms_detected":     cms_name or None,
             "cms_version":      cms_version or None,
+            "cms_version_range": raw_tech.get("cms_version_range", ""),
             "cms_version_eol":  cms_eol,
             "cms_support_status": raw_tech.get("cms_support_status", ""),
+            "inference_sources": raw_tech.get("inference_sources", []),
             "passed":           cms_passed,
             "issues":           cms_issues,
             # Full detected stack (servers, frameworks, analytics, CDN …)
@@ -2653,6 +2671,14 @@ def build_report(scan_id: str, enrichment_artifacts: Optional[dict] = None) -> d
     brand_exclusion_terms = _build_brand_exclusion_terms(scan_start_url)
     audience_segment_counts = defaultdict(int)
     audience_confidence_counts = {"low": 0, "medium": 0, "high": 0}
+    utility_page_tokens = ("cart", "panier", "checkout", "commande", "order", "payment", "paiement", "login", "connexion", "account", "mon-compte", "search", "recherche")
+
+    def _is_utility_page(page_url: str, nlp_payload: dict) -> bool:
+        url_text = str(page_url or "").lower()
+        if any(token in url_text for token in utility_page_tokens):
+            return True
+        page_type = str(_safe_dict(nlp_payload).get("page_type") or "").lower()
+        return page_type in {"cart", "checkout", "login", "account", "search"}
     menu_bad_pages = 0
     menu_issue_samples = []
     menu_issue_map = {}
@@ -3055,6 +3081,7 @@ def build_report(scan_id: str, enrichment_artifacts: Optional[dict] = None) -> d
                 nlp_landing_pages += 1
             if nlp.get("page_type") == "product":
                 nlp_product_pages += 1
+            is_utility_content_page = _is_utility_page(page_url, nlp)
             if nlp.get("content_type_hint") == "stuffed":
                 nlp_keyword_stuffing_pages += 1
                 context_keyword_stuffing_pages.append(page_url)
@@ -3065,7 +3092,7 @@ def build_report(scan_id: str, enrichment_artifacts: Optional[dict] = None) -> d
                     "stuffing_signal": True,
                     "snippet": _evidence_snippet(_safe_dict(_safe_dict(nlp.get("content_kpis")).get("above_fold")).get("above_fold_snippet")),
                 })
-            if (nlp.get("word_count") or 0) < 300:
+            if (nlp.get("word_count") or 0) < 300 and not is_utility_content_page:
                 nlp_thin_content_pages += 1
                 content_thin_rows.append({
                     "page_url": page_url,
@@ -3217,7 +3244,7 @@ def build_report(scan_id: str, enrichment_artifacts: Optional[dict] = None) -> d
                 intent_kpi = _j(content_kpis.get("intent"))
                 cta_kpi = _j(content_kpis.get("cta"))
                 tone_kpi = _j(content_kpis.get("tone"))
-                if intent_kpi.get("intent") == "transactional" and int(cta_kpi.get("cta_count", 0) or 0) == 0:
+                if intent_kpi.get("intent") == "transactional" and int(cta_kpi.get("cta_count", 0) or 0) == 0 and not _is_utility_page(page_url, nlp):
                     nlp_content_transactional_no_cta_pages += 1
                     content_cta_rows.append({
                         "page_url": page_url,
@@ -3371,6 +3398,53 @@ def build_report(scan_id: str, enrichment_artifacts: Optional[dict] = None) -> d
             "Internal-link total could not be reconstructed from summary or per-page SEO metrics"
         )
     effective_total_external_links = summary_external_links if summary_external_links > 0 else seo_external_links_recount
+    raw_mobile_summary = _safe_dict(raw_seo_kpi.get("mobile_summary", {}))
+    mobile_kpi_from_summary = None
+    if raw_mobile_summary:
+        mobile_individual = _safe_dict(raw_mobile_summary.get("individual_pages", {}))
+        mobile_rows = []
+        for page_url, metrics in mobile_individual.items():
+            row = _safe_dict(metrics)
+            row.setdefault("url", page_url)
+            row.setdefault("profile", "mobile")
+            mobile_rows.append(row)
+        mobile_attempted = int(raw_mobile_summary.get("pages_attempted", 0) or len(mobile_rows) or 0)
+        mobile_measured = int(
+            raw_mobile_summary.get("pages_measured", raw_mobile_summary.get("pages_tested", 0)) or 0
+        )
+        mobile_avg_fcp = raw_mobile_summary.get("avg_fcp_ms")
+        mobile_avg_lcp = raw_mobile_summary.get("avg_lcp_ms")
+        mobile_avg_cls = raw_mobile_summary.get("avg_cls")
+        mobile_measurement_failed = mobile_attempted > 0 and mobile_measured == 0
+        mobile_passed = None
+        if mobile_measured > 0:
+            try:
+                mobile_passed = (
+                    float(mobile_avg_lcp or 0) > 0
+                    and float(mobile_avg_lcp or 0) <= 2500
+                    and float(mobile_avg_fcp or 0) <= 1800
+                    and float(mobile_avg_cls or 0) <= 0.1
+                )
+            except (TypeError, ValueError):
+                mobile_passed = None
+        mobile_kpi_from_summary = {
+            "fcp_ms": mobile_avg_fcp,
+            "lcp_ms": mobile_avg_lcp,
+            "cls": mobile_avg_cls,
+            "speed_index_ms": raw_mobile_summary.get("avg_speed_index_ms"),
+            "issues": raw_mobile_summary.get("issues", []),
+            "passed": mobile_passed,
+            "available": mobile_measured > 0,
+            "pages_attempted": mobile_attempted,
+            "pages_measured": mobile_measured,
+            "rows": mobile_rows[:200],
+            "measurement_status": "measurement_failed" if mobile_measurement_failed else ("measured" if mobile_measured > 0 else "not_started"),
+            "failure_reason": "mobile_cwv_measurement_failed" if mobile_measurement_failed else None,
+            "data_quality": "MISSING" if mobile_measurement_failed else ("VALID" if mobile_measured > 0 else "MISSING"),
+            "execution_status": "completed" if mobile_measured > 0 else ("failed" if mobile_measurement_failed else "not_started"),
+            "rendering_mobile_available": ux_mobile_checked_pages > 0,
+            "ux_mobile_pages_tested": ux_mobile_checked_pages,
+        }
     runtime_pre_consent_violation_pages = len(rgpd_runtime_pre_consent_urls)
     if rgpd_cookie_consent_rows:
         consent = privacy_kpi.setdefault("cookie_consent", {})
@@ -3627,7 +3701,7 @@ def build_report(scan_id: str, enrichment_artifacts: Optional[dict] = None) -> d
                 "issues": mobile_metrics_data.get("issues", []) if mobile_metrics_data else [],
                 "passed": mobile_metrics_data.get("passed", False) if mobile_metrics_data else None,
                 "available": mobile_metrics_data is not None,
-            },
+            } if mobile_kpi_from_summary is None else mobile_kpi_from_summary,
         },
         # Phase L + M-7: content freshness, page classification, image compression
         "content": {

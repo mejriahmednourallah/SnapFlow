@@ -507,7 +507,12 @@ export function getAxisScoreBreakdown(axis: AuditAxis): AxisScoreBreakdown {
   ).length;
   const x = passed;
   const y = passed + failed + notMeasured + notAvailable;
-  const scorePct = y > 0 ? Math.round((x / y) * 100) : 0;
+  const measuredEcoScore = /eco/i.test(`${axis.id} ${axis.name}`)
+    ? axis.findings.find(finding => typeof finding.displayScorePct === 'number')?.displayScorePct
+    : undefined;
+  const scorePct = typeof measuredEcoScore === 'number'
+    ? Math.max(0, Math.min(100, Math.round(measuredEcoScore)))
+    : y > 0 ? Math.round((x / y) * 100) : 0;
 
   return {
     passed,

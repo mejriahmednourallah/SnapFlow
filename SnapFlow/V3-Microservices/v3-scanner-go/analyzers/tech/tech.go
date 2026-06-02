@@ -102,8 +102,10 @@ type TechResult struct {
 	Stack            []DetectedTech `json:"stack"`
 	CMS              string         `json:"cms,omitempty"`
 	CMSVersion       string         `json:"cms_version,omitempty"`
+	CMSVersionRange  string         `json:"cms_version_range,omitempty"`
 	CMSVersionEOL    bool           `json:"cms_version_eol"`
 	CMSSupportStatus string         `json:"cms_support_status,omitempty"`
+	InferenceSources []string       `json:"inference_sources,omitempty"`
 	Server           string         `json:"server,omitempty"`
 	Language         string         `json:"language,omitempty"`
 	LanguageVersion  string         `json:"language_version,omitempty"`
@@ -312,6 +314,32 @@ func lookupCMSSupport(cmsKey, version string) (string, bool) {
 }
 
 // ─── DetectStack ─────────────────────────────────────────────────────────────
+func inferCMSVersionRange(cmsName, html string) (string, []string) {
+	cmsKey := strings.ToLower(strings.TrimSpace(cmsName))
+	htmlLower := strings.ToLower(html)
+	sources := []string{}
+
+	if cmsKey == "prestashop" {
+		if strings.Contains(htmlLower, "prestashop") {
+			sources = append(sources, "html_prestashop_marker")
+		}
+		if strings.Contains(htmlLower, "/modules/") {
+			sources = append(sources, "asset_modules_path")
+		}
+		if strings.Contains(htmlLower, "/themes/") {
+			sources = append(sources, "asset_themes_path")
+		}
+		if strings.Contains(htmlLower, "data-button-action=\"add-to-cart\"") || strings.Contains(htmlLower, "data-link-action=\"add-to-cart\"") {
+			sources = append(sources, "prestashop_cart_action")
+		}
+		if len(sources) > 0 {
+			return "1.7_or_8.x", sources
+		}
+	}
+
+	return "", sources
+}
+
 func DetectStack(html string, headers *http.Header) []DetectedTech {
 	var detected []DetectedTech
 	seen := map[string]bool{}
@@ -671,6 +699,8 @@ func Analyze(targetURL string, html string, headers *http.Header) TechResult {
 	eol := false
 	cmsVersion = normalizeCMSVersion(cmsVersion)
 	cmsSupportStatus := ""
+	cmsVersionRange := ""
+	inferenceSources := []string{}
 
 	if cms != "" && cmsVersion != "" {
 		eol = isCMSVersionEOL(strings.ToLower(cms), cmsVersion)
@@ -680,6 +710,15 @@ func Analyze(targetURL string, html string, headers *http.Header) TechResult {
 		if eol {
 			issues = append(issues, fmt.Sprintf("%s version %s is end-of-life and no longer receives security patches", cms, cmsVersion))
 		}
+	}
+	if cms != "" && cmsVersion == "" {
+		cmsVersionRange, inferenceSources = inferCMSVersionRange(cms, html)
+		if cmsVersionRange != "" && cmsSupportStatus == "" {
+			cmsSupportStatus = "inferred_partial"
+		}
+	}
+	if languageInferred && lang != "" {
+		inferenceSources = append(inferenceSources, "cms_language_mapping")
 	}
 
 	// Passed = false only when we can positively confirm an EOL version.
@@ -733,8 +772,10 @@ func Analyze(targetURL string, html string, headers *http.Header) TechResult {
 		Stack:            stack,
 		CMS:              cms,
 		CMSVersion:       cmsVersion,
+		CMSVersionRange:  cmsVersionRange,
 		CMSVersionEOL:    eol,
 		CMSSupportStatus: cmsSupportStatus,
+		InferenceSources: inferenceSources,
 		Server:           server,
 		Language:         lang,
 		LanguageVersion:  langVersion,

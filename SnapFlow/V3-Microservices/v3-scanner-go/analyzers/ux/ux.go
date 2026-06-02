@@ -31,6 +31,42 @@ type UXResult struct {
 	Issues              []string `json:"issues"`
 }
 
+func hasCommerceFunnelSignal(pageURL, lowerHtml string, doc *goquery.Document) bool {
+	lowerURL := strings.ToLower(pageURL)
+	for _, signal := range []string{
+		"/cart", "panier", "checkout", "commande", "order", "payment", "paiement",
+		"mon-compte", "account", "login", "connexion",
+	} {
+		if strings.Contains(lowerURL, signal) {
+			return true
+		}
+	}
+
+	for _, signal := range []string{
+		"add to cart", "ajouter au panier", "mettre au panier", "panier",
+		"checkout", "passer commande", "commander", "valider la commande",
+		"livraison", "paiement", "payment", "cart-summary", "shopping-cart",
+	} {
+		if strings.Contains(lowerHtml, signal) {
+			return true
+		}
+	}
+
+	for _, selector := range []string{
+		"a[href*='cart']", "a[href*='panier']", "a[href*='checkout']",
+		"a[href*='commande']", "a[href*='order']", "a[href*='payment']",
+		"button[name*='add']", ".add-to-cart", ".ajax_add_to_cart_button",
+		"[data-button-action*='add-to-cart']", "[data-link-action*='add-to-cart']",
+		"form[action*='cart']", "form[action*='panier']",
+	} {
+		if doc.Find(selector).Length() > 0 {
+			return true
+		}
+	}
+
+	return false
+}
+
 func Analyze(pageURL string, html string, baseDomain string) UXResult {
 	res := UXResult{
 		ProductCardsMissingImages: []string{},
@@ -188,6 +224,9 @@ func Analyze(pageURL string, html string, baseDomain string) UXResult {
 
 	// 6. Detect conversion funnel steps
 	lower := strings.ToLower(html)
+	if hasCommerceFunnelSignal(pageURL, lower, doc) {
+		res.IsFunnelStep = true
+	}
 	if strings.Contains(lower, "étape ") || strings.Contains(lower, "step ") || strings.Contains(lower, "suivant") || strings.Contains(lower, "next") {
 		doc.Find("button, a.btn, .button").Each(func(i int, s *goquery.Selection) {
 			txt := strings.ToLower(s.Text())

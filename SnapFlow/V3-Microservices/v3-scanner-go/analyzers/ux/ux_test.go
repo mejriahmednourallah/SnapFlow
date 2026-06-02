@@ -107,3 +107,17 @@ func TestAnalyzeMarksContextualMeasurementUnreliableWithoutContentZone(t *testin
 		t.Fatalf("expected contextual measurement to be unreliable without a content zone")
 	}
 }
+
+func TestAnalyzeDetectsCommerceFunnelSignals(t *testing.T) {
+	html := `<html><body>
+		<a href="/panier?action=show">Panier</a>
+		<form action="/cart">
+			<button data-button-action="add-to-cart">Ajouter au panier</button>
+		</form>
+	</body></html>`
+
+	result := Analyze("https://shop.test/product/foo", html, "https://shop.test")
+	if !result.IsFunnelStep {
+		t.Fatalf("expected commerce cart/add-to-cart signals to mark page as funnel step")
+	}
+}

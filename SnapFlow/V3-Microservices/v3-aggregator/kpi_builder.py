@@ -2368,7 +2368,7 @@ def _evaluate_module_versions(modules: list) -> dict:
         severity = "medium"
     else:
         # Truly empty module list — scan ran but found nothing to evaluate
-        status = "not_evaluated"
+        status = "not_available"
         severity = None
 
     return {
@@ -2381,6 +2381,8 @@ def _evaluate_module_versions(modules: list) -> dict:
         "uncertain_count": len(uncertain),
         "verification_mode": "hybrid_offline_first",
         "live_advisory_status": "non_configure",
+        "failure_reason": "cms_modules_not_extractable" if not verified_rows else None,
+        "data_quality": "MISSING" if not verified_rows else ("PARTIAL" if uncertain else "VALID"),
     }
 
 
@@ -3533,11 +3535,14 @@ def build_kpi_centric_report(report: dict) -> dict:
         total_broken_buttons = len(broken_buttons) if broken_buttons else 0
     # SEO evidence: scanner stores counts in seo_kpi_extended, not in report["kpis"].
     # URL lists are not collected by the scanner for these KPIs — only counts are available.
-    missing_meta_evidence = {"count": seo.get("pages_missing_meta_desc", 0), "affected_pages": []}
-    missing_title_evidence = {"count": seo.get("pages_missing_title", 0), "affected_pages": []}
+    missing_meta_evidence = _normalized_kpi_evidence(report, "Missing Meta Descriptions") or {"count": seo.get("pages_missing_meta_desc", 0), "affected_pages": []}
+    missing_title_evidence = _normalized_kpi_evidence(report, "Missing Page Titles") or {"count": seo.get("pages_missing_title", 0), "affected_pages": []}
     missing_alt_evidence = {"images": []}
     heading_hierarchy_evidence = {"count": seo.get("pages_with_bad_h1", 0), "affected_pages": []}
     internal_contextual_links_evidence = _normalized_kpi_evidence(report, "Internal Contextual Links")
+    pages_checked_total = _safe_int(report.get("pages_scanned", 0))
+    seo_bad_h1_raw = _safe_int(seo.get("pages_with_bad_h1", 0))
+    seo_bad_h1_pages = min(seo_bad_h1_raw, pages_checked_total) if pages_checked_total > 0 else seo_bad_h1_raw
 
     axes = {}
 
@@ -3589,7 +3594,25 @@ def build_kpi_centric_report(report: dict) -> dict:
 
     has_login = _safe_bool(functional_kpi.get("has_login"))
     brute_force_protected = _safe_bool(brute_force_login.get("protected"))
-    brute_force_has_issue = has_login and ((not brute_force_protected) or str(brute_force_login.get("status", "")).lower() == "fail")
+    brute_force_target_confirmed = (
+        _clean_text(brute_force_login.get("target_type")).lower() == "login"
+        and _clean_text(brute_force_login.get("confidence")).lower() in {"high", "medium"}
+    )
+    brute_force_status_raw = _clean_text(brute_force_login.get("status")).lower()
+    brute_force_legacy_text = _clean_text(
+        f"{brute_force_login.get('target_url', '')} {brute_force_login.get('details', '')}"
+    ).lower()
+    brute_force_legacy_non_login = any(
+        marker in brute_force_legacy_text
+        for marker in ("newsletter", "subscribe", "subscription", "blockemailsubscription", "footer", "search", "contact")
+    )
+    if not brute_force_target_confirmed and not brute_force_login.get("target_type") and not brute_force_legacy_non_login:
+        brute_force_target_confirmed = brute_force_status_raw in {"fail", "failing", "failed", "pass", "passing"}
+    brute_force_has_issue = (
+        has_login
+        and brute_force_target_confirmed
+        and ((not brute_force_protected) or brute_force_status_raw in {"fail", "failing", "failed"})
+    )
 
     upload_issues = _safe_list(upload_control.get("issues"))
     upload_restrictions_found = _safe_bool(upload_control.get("restrictions_found"))
@@ -3608,19 +3631,29 @@ def build_kpi_centric_report(report: dict) -> dict:
         1 for svc in service_exposure_open_services
         if _clean_text(_safe_dict(svc).get("risk")).lower() == "high"
     )
+    service_exposure_medium_open = sum(
+        1 for svc in service_exposure_open_services
+        if _clean_text(_safe_dict(svc).get("risk")).lower() == "medium"
+    )
+    service_exposure_low_open = sum(
+        1 for svc in service_exposure_open_services
+        if _clean_text(_safe_dict(svc).get("risk")).lower() == "low"
+    )
     if not service_exposure_enabled:
         service_exposure_status = "non_evalue"
     elif service_exposure_status_raw in {"pass", "passing"}:
         service_exposure_status = "passing"
-    elif service_exposure_status_raw in {"fail", "failing", "failed"}:
+    elif service_exposure_status_raw in {"fail", "failing", "failed"} and (service_exposure_critical_open > 0 or service_exposure_high_open > 0):
         service_exposure_status = "failing"
-    elif service_exposure_status_raw in {"warning"}:
+    elif service_exposure_status_raw in {"warning"} and service_exposure_medium_open > 0:
         service_exposure_status = "warning"
     elif service_exposure_status_raw in {"non_evalue", "not_evaluated", "not-evaluated", "not_available"}:
         service_exposure_status = "non_evalue"
     elif service_exposure_critical_open > 0:
         service_exposure_status = "failing"
-    elif service_exposure_high_open > 0 or len(service_exposure_open_services) > 0:
+    elif service_exposure_high_open > 0:
+        service_exposure_status = "failing"
+    elif service_exposure_medium_open > 0:
         service_exposure_status = "warning"
     else:
         service_exposure_status = "passing"
@@ -3632,7 +3665,7 @@ def build_kpi_centric_report(report: dict) -> dict:
             service_exposure_severity = "critical"
         elif service_exposure_high_open > 0:
             service_exposure_severity = "high"
-        elif len(service_exposure_open_services) > 0:
+        elif service_exposure_medium_open > 0:
             service_exposure_severity = "medium"
         else:
             service_exposure_severity = "low"
@@ -3642,6 +3675,8 @@ def build_kpi_centric_report(report: dict) -> dict:
     server_version = str(cms_kpi.get("server_version") or "").strip()
     cms_detected_name = str(cms_kpi.get("cms_detected") or "").strip()
     cms_detected_version = str(cms_kpi.get("cms_version") or "").strip()
+    cms_version_range = str(cms_kpi.get("cms_version_range") or "").strip()
+    tech_inference_sources = _safe_list(cms_kpi.get("inference_sources"))
     programming_language = str(cms_kpi.get("language") or "").strip()
     programming_language_version = str(cms_kpi.get("language_version") or "").strip()
     programming_language_inferred = bool(cms_kpi.get("language_inferred"))
@@ -3658,7 +3693,7 @@ def build_kpi_centric_report(report: dict) -> dict:
             programming_language_info = f"Langage détecté: {programming_language} {programming_language_version}"
         else:
             programming_language_info = f"Langage détecté: {programming_language} (version non détectée)"
-        programming_language_status = "non_evalue" if programming_language_inferred else "passing"
+        programming_language_status = "passing"
     elif server_tech:
         version_text = f" {server_version}" if server_version else " (version serveur non détectée)"
         programming_language_info = f"Langage non exposé directement; serveur détecté: {server_tech}{version_text}"
@@ -3676,13 +3711,15 @@ def build_kpi_centric_report(report: dict) -> dict:
         server_version_has_issue = False
         server_version_info = "Serveur: Non détecté"
     elif not server_version:
-        server_version_status = "non_evalue"
+        server_version_status = "passing"
         server_version_has_issue = False
         server_version_info = f"Serveur: {server_tech} (version non détectée)"
     else:
         server_version_has_issue = (server_critical > 0 or server_high > 0 or len(server_related_issues) > 0)
         server_version_status = "failing" if server_version_has_issue else "passing"
         server_version_info = f"Serveur: {server_tech} {server_version}"
+    if server_tech and not server_version:
+        server_version_info = f"Serveur: {server_tech} (version non exposee, configuration de securite favorable)"
 
     # ─── AUDIT TECHNIQUE ───────────────────────────────────────────────────────
     # [5.6] Distinguish cms_version_eol=None (probe didn't run) from False (not EOL).
@@ -3692,6 +3729,11 @@ def build_kpi_centric_report(report: dict) -> dict:
     module_status = module_verification.get("status", "not_evaluated")
     module_severity = module_verification.get("severity")
     module_count = _safe_int(module_verification.get("module_count"))
+    cms_version_status = (
+        "failing" if cms_eol is True
+        else "passing" if cms_eol is False or cms_detected_name
+        else "non_evalue"
+    )
     
     axes["Audit Technique"] = {
         "Version CMS/Framework": {
@@ -3699,14 +3741,18 @@ def build_kpi_centric_report(report: dict) -> dict:
             "impact": "Risque de sécurité si version obsolète ou non maintenue",
             "pages_affected": 1,
             "pages_affected_urls": [report.get("domain", "")],
-            "status": "failing" if cms_eol is True else "passing" if cms_eol is False else "non_evalue",
+            "status": cms_version_status,
             "type": "bug" if cms_eol is True else None,
             "severity": "critical" if cms_eol is True else None,
             "data": {
                 "cms_name": cms_kpi.get("cms_detected"),
                 "cms_version": cms_kpi.get("cms_version"),
+                "cms_version_range": cms_version_range,
                 "cms_eol": cms_eol,
                 "cms_support_status": cms_kpi.get("cms_support_status"),
+                "inference_sources": tech_inference_sources,
+                "data_quality": "VALID" if cms_detected_version else ("PARTIAL" if cms_detected_name else "MISSING"),
+                "confidence": "medium" if cms_version_range else ("high" if cms_detected_version else "none"),
             }
         },
         "Version Modules Installés": {
@@ -3738,6 +3784,9 @@ def build_kpi_centric_report(report: dict) -> dict:
                 "programming_language_version": cms_kpi.get("language_version"),
                 "issues": server_related_issues,
                 "cve_severity": cve_severity,
+                "data_quality": "VALID" if server_version else ("PARTIAL" if server_tech else "MISSING"),
+                "failure_reason": "server_version_hidden_by_design" if server_tech and not server_version else None,
+                "confidence": "medium" if server_tech and not server_version else ("high" if server_version else "none"),
             }
         },
         "Langage de Programmation": {
@@ -3756,6 +3805,10 @@ def build_kpi_centric_report(report: dict) -> dict:
                 "server_version": cms_kpi.get("server_version"),
                 "cms_name": cms_kpi.get("cms_detected"),
                 "cms_version": cms_kpi.get("cms_version"),
+                "cms_version_range": cms_version_range,
+                "inference_sources": tech_inference_sources,
+                "data_quality": "PARTIAL" if programming_language_inferred or not programming_language_version else "VALID",
+                "confidence": "medium" if programming_language_inferred else ("high" if programming_language else "none"),
             }
         },
         "Vérification du Code": {
@@ -3862,6 +3915,10 @@ def build_kpi_centric_report(report: dict) -> dict:
                 "error": service_exposure.get("error", ""),
                 "critical_open_count": service_exposure_critical_open,
                 "high_open_count": service_exposure_high_open,
+                "medium_open_count": service_exposure_medium_open,
+                "low_open_count": service_exposure_low_open,
+                "data_quality": "VALID" if service_exposure_enabled else "MISSING",
+                "applicability_context": "public_web_ports_expected" if service_exposure_low_open > 0 and service_exposure_medium_open == 0 and service_exposure_high_open == 0 and service_exposure_critical_open == 0 else "network_exposure",
             },
         },
 
@@ -3941,11 +3998,24 @@ def build_kpi_centric_report(report: dict) -> dict:
             "info": f"Protection brute force sur login: {'OUI' if brute_force_protected else 'NON'} - {brute_force_login.get('details', '')}",
             "impact": "Pas de protection brute force = facilite attaques par dictionnaire sur credentials",
             "pages_affected": 1 if brute_force_has_issue else 0,
-            "pages_affected_urls": _safe_list([report.get('domain', '')]) if brute_force_has_issue else [],
-            "status": "failing" if brute_force_has_issue else ("passing" if has_login else "not_evaluated"),
+            "pages_affected_urls": _safe_list([brute_force_login.get("target_url") or report.get('domain', '')]) if brute_force_has_issue else [],
+            "status": (
+                "failing" if brute_force_has_issue
+                else "passing" if has_login and brute_force_target_confirmed and brute_force_protected
+                else "not_evaluated"
+            ),
             "type": "bug" if brute_force_has_issue else None,
             "severity": "high" if brute_force_has_issue else None,
-            "data": brute_force_login,
+            "data": {
+                **brute_force_login,
+                "execution_status": "completed" if brute_force_target_confirmed else "target_rejected",
+                "failure_reason": brute_force_login.get("failure_reason") or (None if brute_force_target_confirmed else "login_target_not_confirmed"),
+                "data_quality": "VALID" if brute_force_target_confirmed else "MISSING",
+                "confidence": brute_force_login.get("confidence") or ("high" if brute_force_target_confirmed else "none"),
+                "tested_targets": _safe_list(brute_force_login.get("tested_targets")),
+                "rejected_candidates": _safe_list(brute_force_login.get("rejected_candidates")),
+                "applicability_context": "login_only",
+            },
         },
         "Contrôle d'Extension Upload Fichier": {
             "info": f"Restrictions upload fichier: {'OUI' if upload_restrictions_found else 'NON'} - {len(upload_issues)} problèmes",
@@ -4004,6 +4074,12 @@ def build_kpi_centric_report(report: dict) -> dict:
                 "forms_tested": functional_fuzzer_kpi.get("unique_transactional_forms_tested", functional_fuzzer_kpi.get("total_forms_tested", 0)),
                 "non_transactional_forms_tested": functional_fuzzer_kpi.get("non_transactional_forms_tested", 0),
                 "tests_run": functional_fuzzer_kpi.get("tests_run", 0),
+                "signal_count": functional_fuzzer_kpi.get("signal_count", 0),
+                "response_type": functional_fuzzer_kpi.get("response_type"),
+                "submitted": functional_fuzzer_kpi.get("submitted"),
+                "execution_status": functional_fuzzer_kpi.get("execution_status"),
+                "failure_reason": functional_fuzzer_kpi.get("failure_reason"),
+                "data_quality": functional_fuzzer_kpi.get("data_quality"),
                 "anomalies": functional_fuzzer_kpi.get("anomalies_count", 0),
                 "suppressed_low_confidence_anomalies": functional_fuzzer_kpi.get("suppressed_low_confidence_anomalies", 0),
                 "affected_pages": functional_fuzzer_kpi.get("affected_pages", 0),
@@ -4239,7 +4315,7 @@ def build_kpi_centric_report(report: dict) -> dict:
             }
         },
         "Temps de Chargement Mobile": {
-            "info": f"Disponible: {mobile_available}, LCP={perf.get('mobile_kpi', {}).get('lcp_ms') if mobile_available else 'N/A'}ms",
+            "info": f"Pages testees: {_safe_int(mobile_kpi.get('pages_attempted', 1 if mobile_available else 0))}, mesures valides: {_safe_int(mobile_kpi.get('pages_measured', 1 if mobile_available else 0))}",
             "impact": "Performance mobile dégradée = mauvaise expérience et pénalité SEO mobile-first",
             "pages_affected": 1 if mobile_is_available else 0,
             "pages_affected_urls": [report.get("domain", "")] if mobile_is_available else [],
@@ -4248,6 +4324,9 @@ def build_kpi_centric_report(report: dict) -> dict:
             "severity": None,
             "data": {
                 **mobile_kpi,
+                "failure_reason": mobile_kpi.get("failure_reason") or ("mobile_cwv_measurement_failed" if _safe_int(mobile_kpi.get("pages_attempted")) > 0 and _safe_int(mobile_kpi.get("pages_measured")) == 0 else None),
+                "execution_status": mobile_kpi.get("execution_status") or ("failed" if _safe_int(mobile_kpi.get("pages_attempted")) > 0 and _safe_int(mobile_kpi.get("pages_measured")) == 0 else "completed"),
+                "data_quality": mobile_kpi.get("data_quality") or ("MISSING" if not mobile_is_available else "VALID"),
                 "rows": _safe_list(mobile_kpi.get("rows")) or ([{
                     "url": report.get("domain", ""),
                     "profile": "mobile",
@@ -4448,13 +4527,16 @@ def build_kpi_centric_report(report: dict) -> dict:
         "Structure du Contenu (Hn)": {
             "info": f"Pages avec mauvaise structure H1: {seo.get('pages_with_bad_h1', 0)}, Homepage H1: {'Manquant' if seo.get('homepage_h1_kpi', {}).get('homepage_h1_missing') else 'Présent'}",
             "impact": "Structure H1 défaillante = signal SEO réduit, hiérarchie de contenu confuse pour utilisateurs",
-            "pages_affected": seo.get("pages_with_bad_h1", 0),
+            "pages_affected": seo_bad_h1_pages,
             "pages_affected_urls": [],
-            "status": "failing" if seo.get("pages_with_bad_h1", 0) > 0 or seo.get("homepage_h1_kpi", {}).get("homepage_h1_missing") else "passing",
-            "type": "recommendation" if seo.get("pages_with_bad_h1", 0) > 0 else None,
+            "status": "failing" if seo_bad_h1_pages > 0 or seo.get("homepage_h1_kpi", {}).get("homepage_h1_missing") else "passing",
+            "type": "recommendation" if seo_bad_h1_pages > 0 else None,
             "severity": None,
             "data": {
-                "pages_with_bad_h1": seo.get("pages_with_bad_h1", 0),
+                "pages_with_bad_h1": seo_bad_h1_pages,
+                "pages_checked": pages_checked_total,
+                "affected_pages": seo_bad_h1_pages,
+                "affected_elements": seo_bad_h1_raw,
                 "homepage_h1_missing": seo.get("homepage_h1_kpi", {}).get("homepage_h1_missing"),
                 "bad_h1_urls": _safe_list(heading_hierarchy_evidence.get("affected_pages")),
                 "heading_hierarchy_note": heading_hierarchy_evidence.get("note"),
@@ -4555,6 +4637,10 @@ def build_kpi_centric_report(report: dict) -> dict:
     }
 
     # ─── AUDIT UX/UI ──────────────────────────────────────────────────────────────
+    ux_funnel_count = _safe_int(ux.get("pages_with_conversion_funnels", 0))
+    ux_funnel_inconclusive = _safe_bool(functional_kpi.get("has_cart")) and ux_funnel_count == 0
+    ux_funnel_status = "passing" if ux_funnel_count > 0 else ("not_evaluated" if ux_funnel_inconclusive else "failing")
+
     axes["Audit UX/UI"] = {
         "Ciblage": {
             "info": f"Segments d'audience détectés: B2B={content.get('audience_segments', {}).get('counts', {}).get('b2b', 0)}, Institutionnel={content.get('audience_segments', {}).get('counts', {}).get('institutionnel', 0)}, Investisseur={content.get('audience_segments', {}).get('counts', {}).get('investisseur', 0)}",
@@ -4596,12 +4682,16 @@ def build_kpi_centric_report(report: dict) -> dict:
             "impact": "Navigation confuse = perte utilisateur, taux rebond élevé, parcours client frustrant",
             "pages_affected": 0,
             "pages_affected_urls": [],
-            "status": "passing" if ux.get("pages_with_conversion_funnels", 0) > 0 else "failing",
+            "status": ux_funnel_status,
             "type": None,
             "severity": None,
             "data": {
                 "pages_with_conversion_funnels": ux.get("pages_with_conversion_funnels", 0),
                 "pages_missing_contextual_links": ux.get("pages_missing_contextual_links", 0),
+                "has_cart": functional_kpi.get("has_cart"),
+                "execution_status": "detection_inconclusive" if ux_funnel_inconclusive else "completed",
+                "failure_reason": "funnel_detection_inconclusive" if ux_funnel_inconclusive else None,
+                "data_quality": "MISSING" if ux_funnel_inconclusive else "VALID",
             },
         },
 
@@ -4954,12 +5044,18 @@ def build_kpi_centric_report(report: dict) -> dict:
         "Score Politique de Confidentialité": {
             "info": f"Pages avec score confidentialité faible: {content.get('advanced_rgpd_kpis', {}).get('privacy_score_low_pages', 0)}",
             "impact": "Politique de confidentialité faible dégrade la confiance et le niveau de conformité perçu",
-            "pages_affected": _safe_int(content.get('advanced_rgpd_kpis', {}).get('privacy_score_low_pages', 0)),
-            "pages_affected_urls": [],
-            "status": "not_evaluated" if blocked_recovery_partial and not privacy_score_real_rows else ("failing" if _safe_int(content.get('advanced_rgpd_kpis', {}).get('privacy_score_low_pages', 0)) > 0 else "passing"),
+            "pages_affected": 1 if not privacy_kpi.get("has_privacy_policy") else _safe_int(content.get('advanced_rgpd_kpis', {}).get('privacy_score_low_pages', 0)),
+            "pages_affected_urls": [report.get("domain", "")] if not privacy_kpi.get("has_privacy_policy") else [],
+            "status": "failing" if not privacy_kpi.get("has_privacy_policy") else ("not_evaluated" if blocked_recovery_partial and not privacy_score_real_rows else ("failing" if _safe_int(content.get('advanced_rgpd_kpis', {}).get('privacy_score_low_pages', 0)) > 0 else "passing")),
             "type": "compliance",
-            "severity": None,
-            "data": {**_safe_dict(content.get("advanced_rgpd_kpis", {})), "rows": privacy_score_rows},
+            "severity": "high" if not privacy_kpi.get("has_privacy_policy") else None,
+            "data": {
+                **_safe_dict(content.get("advanced_rgpd_kpis", {})),
+                "rows": privacy_score_rows,
+                "execution_status": "prerequisite_failed" if not privacy_kpi.get("has_privacy_policy") else "completed",
+                "failure_reason": "privacy_policy_missing" if not privacy_kpi.get("has_privacy_policy") else None,
+                "data_quality": "MISSING" if not privacy_kpi.get("has_privacy_policy") else ("PARTIAL" if blocked_recovery_partial and not privacy_score_real_rows else "VALID"),
+            },
         }
     }
 

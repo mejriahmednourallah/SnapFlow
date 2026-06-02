@@ -114,11 +114,17 @@ type CORSResult struct {
 // ─── GROUP C: Form-Based Checks ───────────────────────────────────────────────
 
 type BruteForceResult struct {
-	Protected bool   `json:"protected"`
-	Status    string `json:"status"`
-	Severity  string `json:"severity"`
-	Impact    string `json:"impact"`
-	Details   string `json:"details,omitempty"`
+	Protected          bool     `json:"protected"`
+	Status             string   `json:"status"`
+	Severity           string   `json:"severity"`
+	Impact             string   `json:"impact"`
+	Details            string   `json:"details,omitempty"`
+	TargetURL          string   `json:"target_url,omitempty"`
+	TargetType         string   `json:"target_type,omitempty"`
+	Confidence         string   `json:"confidence,omitempty"`
+	TestedTargets      []string `json:"tested_targets,omitempty"`
+	RejectedCandidates []string `json:"rejected_candidates,omitempty"`
+	FailureReason      string   `json:"failure_reason,omitempty"`
 }
 
 type FileUploadResult struct {
@@ -1576,41 +1582,92 @@ var loginFormKeywords = []string{
 
 // findLoginForm searches for the first login form in HTML.
 // Returns the form's action URL or empty string if not found.
-func findLoginForm(htmlBody, baseURL string) string {
-	htmlLower := strings.ToLower(htmlBody)
+func absoluteURL(baseURL, candidate string) string {
+	candidate = strings.TrimSpace(candidate)
+	if candidate == "" {
+		return ""
+	}
+	if strings.HasPrefix(candidate, "http://") || strings.HasPrefix(candidate, "https://") {
+		return candidate
+	}
+	base := strings.TrimRight(baseURL, "/")
+	if strings.HasPrefix(candidate, "/") {
+		return base + candidate
+	}
+	return base + "/" + candidate
+}
 
-	// Simple regex to find form tags
-	formPattern := regexp.MustCompile(`(?i)<form[^>]*action=["']([^"']+)["']`)
+func looksLikeNonLoginForm(text string) bool {
+	text = strings.ToLower(text)
+	nonLoginSignals := []string{
+		"newsletter", "subscribe", "subscription", "abonnement", "abonnez",
+		"emailsubscription", "blockemailsubscription", "footer", "mailchimp",
+		"contact", "search", "recherche",
+	}
+	for _, signal := range nonLoginSignals {
+		if strings.Contains(text, signal) {
+			return true
+		}
+	}
+	return false
+}
+
+func findLoginForm(htmlBody, baseURL string) (string, []string) {
+	htmlLower := strings.ToLower(htmlBody)
+	rejected := []string{}
+
+	formPattern := regexp.MustCompile(`(?is)<form\b([^>]*)>(.*?)</form>`)
+	actionPattern := regexp.MustCompile(`(?i)\baction=["']([^"']*)["']`)
 	matches := formPattern.FindAllStringSubmatch(htmlBody, -1)
 
 	for _, match := range matches {
+		attrs := ""
+		body := ""
 		if len(match) > 1 {
-			action := match[1]
-			actionLower := strings.ToLower(action)
-
-			// Check if this form is likely a login form
-			for _, keyword := range loginFormKeywords {
-				if strings.Contains(actionLower, keyword) {
-					// Convert relative URL to absolute
-					if strings.HasPrefix(action, "http") {
-						return action
-					}
-					action = strings.TrimRight(baseURL, "/") + "/" + strings.TrimLeft(action, "/")
-					return action
-				}
+			attrs = match[1]
+		}
+		if len(match) > 2 {
+			body = match[2]
+		}
+		formText := strings.ToLower(attrs + " " + body)
+		action := ""
+		if actionMatch := actionPattern.FindStringSubmatch(attrs); len(actionMatch) > 1 {
+			action = actionMatch[1]
+		}
+		candidate := absoluteURL(baseURL, action)
+		if looksLikeNonLoginForm(formText + " " + candidate) {
+			if candidate != "" {
+				rejected = append(rejected, candidate)
 			}
+			continue
+		}
+		hasPassword := strings.Contains(formText, `type="password"`) || strings.Contains(formText, `type='password'`)
+		hasLoginSignal := false
+		for _, keyword := range loginFormKeywords {
+			if strings.Contains(formText, keyword) || strings.Contains(strings.ToLower(candidate), keyword) {
+				hasLoginSignal = true
+				break
+			}
+		}
+		if hasPassword && hasLoginSignal {
+			if candidate == "" {
+				candidate = baseURL
+			}
+			return candidate, rejected
+		}
+		if candidate != "" {
+			rejected = append(rejected, candidate)
 		}
 	}
 
-	// Check if /login path is common
 	potentialLoginPaths := []string{"/login", "/signin", "/auth", "/user/login", "/account/login"}
 	for _, path := range potentialLoginPaths {
 		if strings.Contains(htmlLower, path) {
-			return baseURL + path
+			return absoluteURL(baseURL, path), rejected
 		}
 	}
 
-	return ""
+	return "", rejected
 }
 
 // testBruteForceProtection sends rapid requests to test for brute force protection.
@@ -1692,14 +1749,7 @@ func checkBruteForcedProtectionLogin(targetURL, htmlBody string, adminExposure A
 		if candidate == "" {
 			return
 		}
-		if !strings.HasPrefix(candidate, "http://") && !strings.HasPrefix(candidate, "https://") {
-			base := strings.TrimRight(targetURL, "/")
-			if strings.HasPrefix(candidate, "/") {
-				candidate = base + candidate
-			} else {
-				candidate = base + "/" + candidate
-			}
-		}
+		candidate = absoluteURL(targetURL, candidate)
 		if seen[candidate] {
 			return
 		}
@@ -1708,7 +1758,8 @@ func checkBruteForcedProtectionLogin(targetURL, htmlBody string, adminExposure A
 	}
 
 	// 1) Homepage-derived form login target.
-	addTarget(findLoginForm(htmlBody, targetURL))
+	formTarget, rejectedCandidates := findLoginForm(htmlBody, targetURL)
+	addTarget(formTarget)
 
 	// 2) Exposed admin/login endpoints discovered by wordlist probe.
 	for _, p := range adminExposure.Exposed {
@@ -1722,11 +1773,16 @@ func checkBruteForcedProtectionLogin(targetURL, htmlBody string, adminExposure A
 		// [NEW-2] No login surface detected — the brute-force protection check cannot run.
 		// Returning Protected=true silently masks an untested state as success. Use non_evalue.
 		return BruteForceResult{
-			Protected: false,
-			Status:    "non_evalue",
-			Severity:  "",
-			Impact:    "",
-			Details:   "No login form or endpoint detected — brute-force protection not evaluated",
+			Protected:          false,
+			Status:             "non_evalue",
+			Severity:           "",
+			Impact:             "",
+			Details:            "No login form or endpoint detected — brute-force protection not evaluated",
+			TargetType:         "none",
+			Confidence:         "none",
+			TestedTargets:      loginTargets,
+			RejectedCandidates: rejectedCandidates,
+			FailureReason:      "login_target_not_confirmed",
 		}
 	}
 
@@ -1754,12 +1810,22 @@ func checkBruteForcedProtectionLogin(targetURL, htmlBody string, adminExposure A
 		details = "Brute force protection detected"
 	}
 
+	reportedTarget := unprotectedTarget
+	if reportedTarget == "" && len(loginTargets) > 0 {
+		reportedTarget = loginTargets[0]
+	}
+
 	return BruteForceResult{
-		Protected: allProtected,
-		Status:    status,
-		Severity:  severity,
-		Impact:    "",
-		Details:   details,
+		Protected:          allProtected,
+		Status:             status,
+		Severity:           severity,
+		Impact:             "",
+		Details:            details,
+		TargetURL:          reportedTarget,
+		TargetType:         "login",
+		Confidence:         "high",
+		TestedTargets:      loginTargets,
+		RejectedCandidates: rejectedCandidates,
 	}
 }
 
