@@ -32,6 +32,7 @@ export interface PdfExportModalProps {
 
 const COVER_KPI_DEFS = [
   { key: 'total', label: 'Total' },
+  { key: 'meetings', label: 'Reunions' },
   { key: 'open', label: 'En cours' },
   { key: 'resolved', label: 'Resolus' },
   { key: 'critical', label: 'Critiques' },
@@ -41,16 +42,24 @@ const COVER_KPI_DEFS = [
 
 const SECTION_DEFS = [
   { key: 'sommaire', label: 'Table des matieres' },
-  { key: 'indicateurs', label: 'Grille des indicateurs' },
-  { key: 'statuts', label: 'Repartition par statut' },
-  { key: 'trackers', label: 'Categories et trackers' },
-  { key: 'priorities', label: 'Priorites' },
-  { key: 'evolution', label: 'Evolution temporelle' },
-  { key: 'bloqueSynth', label: 'Tickets bloques' },
-  { key: 'validation', label: 'Validation client' },
-  { key: 'insights', label: 'Recommandations' },
-  { key: 'appendix', label: 'Annexe tickets' },
   { key: 'merci', label: 'Page de cloture' },
+] as const;
+
+const FIXED_PAGE_DEFS = [
+  'P6 Indicateurs globaux',
+  'P7 Etat des tickets',
+  'P8 Typologie des tickets',
+  'P9 Priorite des tickets',
+  'P10 Tickets clotures',
+  'P11 Tickets ouverts',
+  'P12 Tickets en test',
+  'P13 Charge active',
+  'P14 Details en traitement',
+  'P15 Pris en charge',
+  'P16 Analyse des blocages',
+  'P17 Blocages Feature',
+  'P18 Autres blocages',
+  'P19 Reunions',
 ] as const;
 
 export function PdfExportModal({
@@ -102,8 +111,24 @@ export function PdfExportModal({
 
         <hr className="my-3 border-stone-200" />
 
+        <div>
+          <p className="text-sm font-semibold text-stone-700 mb-2">Pages analytiques fixes</p>
+          <div className="grid grid-cols-2 gap-1.5 rounded-lg border border-stone-200 bg-stone-50 p-2">
+            {FIXED_PAGE_DEFS.map(label => (
+              <div key={label} className="rounded-md bg-white px-2 py-1 text-xs font-medium text-stone-600">
+                {label}
+              </div>
+            ))}
+          </div>
+          <p className="mt-1.5 text-xs text-stone-500">
+            Ces pages restent incluses pour garantir le meme ordre et les memes graphiques a chaque export.
+          </p>
+        </div>
+
+        <hr className="my-3 border-stone-200" />
+
         <div className="space-y-1">
-          <p className="text-sm font-semibold text-stone-700 mb-2">Pages a inclure</p>
+          <p className="text-sm font-semibold text-stone-700 mb-2">Pages optionnelles</p>
           {SECTION_DEFS.map(({ key, label }) => (
             <div key={key} className="flex items-center justify-between py-1">
               <Label htmlFor={`sec-${key}`} className="text-sm text-stone-600 cursor-pointer">{label}</Label>

@@ -322,7 +322,7 @@ def _generate_constat_failing_bug(kpi_name, data, info, pages_affected, axis_nam
             parts.append(f"En-têtes manquants: {missing}")
     
     # Cookie/session flaws
-    if "missing_count" in data and data.get("missing_count") > 0:
+    if "missing_count" in data and _safe_int(data.get("missing_count")) > 0:
         missing = _summarize_list_french(data.get("cookies"), "cookies")
         if missing:
             parts.append(f"{data['missing_count']} cookie(s) dépourvu(s) de flags Secure/HttpOnly: {missing}")
@@ -508,7 +508,7 @@ def _normalize_kpi_object(kpi_obj, axis_name, kpi_name):
             normalized["severity"] = severity
     
     # Rule 3: pages_affected_urls_note when pages_affected > 0 and URL list empty
-    if normalized.get("pages_affected", 0) > 0 and not normalized.get("pages_affected_urls"):
+    if _safe_int(normalized.get("pages_affected")) > 0 and not normalized.get("pages_affected_urls"):
         normalized["pages_affected_urls_note"] = "URLs non disponibles — agrégat calculé"
     
     return normalized
@@ -2038,6 +2038,15 @@ def _build_curated_evidence_digest(kpi_id: str, kpi_name: str, status: str, evid
         and _clean_text(rule.get("proof_type")).lower() == "rows"
         and not rows
     )
+    prerequisite_failure_is_proof = (
+        kpi_id == "rgpd_privacy_score"
+        and _safe_dict(evidence.get("observed_metrics")).get("failure_reason") == "privacy_policy_missing"
+    )
+    if prerequisite_failure_is_proof:
+        has_meaningful_proof = True
+        missing_required_rows = False
+        missing_executed_probe = False
+        missing_not_evaluated_rows = False
     if not has_meaningful_proof or missing_required_rows or missing_executed_probe or missing_not_evaluated_rows:
         quality = "MISSING"
 
@@ -2466,6 +2475,10 @@ def _build_contract_evidence(kpi_id: str, kpi_obj: dict, pages_scanned: int, dom
         "pages_checked": _derive_pages_checked(kpi_id, pages_scanned, data, affected_urls),
         "affected_pages": affected_pages,
     }
+    if data.get("execution_status") is not None:
+        evidence["execution_status"] = data.get("execution_status")
+    if data.get("failure_reason") is not None:
+        evidence["failure_reason"] = data.get("failure_reason")
     data_quality = "VALID"
     status_override = None
     confidence_penalty = 0
@@ -2494,6 +2507,8 @@ def _build_contract_evidence(kpi_id: str, kpi_obj: dict, pages_scanned: int, dom
             "valid_measurement_count": len(valid_rows),
             "measurement_row_count": len(rows),
             "valid_measurement_rows": valid_rows[:200],
+            "execution_status": data.get("execution_status"),
+            "failure_reason": data.get("failure_reason"),
         })
         return evidence, data_quality, status_override, confidence_penalty
 
@@ -2645,6 +2660,8 @@ def _build_contract_evidence(kpi_id: str, kpi_obj: dict, pages_scanned: int, dom
         open_services_all = []
         critical_open_count = 0
         high_open_count = 0
+        medium_open_count = 0
+        low_open_count = 0
         for row in _safe_list(data.get("open_services", [])):
             svc = _safe_dict(row)
             risk = _clean_text(svc.get("risk")).lower()
@@ -2652,6 +2669,10 @@ def _build_contract_evidence(kpi_id: str, kpi_obj: dict, pages_scanned: int, dom
                 critical_open_count += 1
             elif risk == "high":
                 high_open_count += 1
+            elif risk == "medium":
+                medium_open_count += 1
+            elif risk == "low":
+                low_open_count += 1
             open_services_all.append({
                 "port": svc.get("port") if svc.get("port") is not None else _missing_field("Port absent dans le résultat"),
                 "service": _value_or_missing(_clean_text(svc.get("service")), "Nom de service absent"),
@@ -2670,16 +2691,20 @@ def _build_contract_evidence(kpi_id: str, kpi_obj: dict, pages_scanned: int, dom
             status_override = "not_evaluated"
         elif status_raw in {"non_evalue", "not_evaluated", "not-evaluated", "not_available"}:
             status_override = "not_evaluated"
-        elif status_raw in {"failing", "fail", "failed"}:
-            status_override = "failing"
-        elif status_raw == "warning":
-            status_override = "warning"
-        elif status_raw in {"passing", "pass", "covered"}:
-            status_override = "passing"
         elif critical_open_count > 0:
             status_override = "failing"
-        elif high_open_count > 0 or open_service_count > 0:
+        elif high_open_count > 0:
+            status_override = "failing"
+        elif medium_open_count > 0:
             status_override = "warning"
+        elif low_open_count > 0:
+            status_override = "passing"
+        elif status_raw == "warning":
+            status_override = "warning"
+        elif status_raw in {"failing", "fail", "failed"}:
+            status_override = "failing"
+        elif status_raw in {"passing", "pass", "covered"}:
+            status_override = "passing"
         else:
             status_override = "passing"
 
@@ -2702,11 +2727,14 @@ def _build_contract_evidence(kpi_id: str, kpi_obj: dict, pages_scanned: int, dom
             "open_service_count": open_service_count,
             "critical_open_service_count": critical_open_count,
             "high_open_service_count": high_open_count,
+            "medium_open_service_count": medium_open_count,
+            "low_open_service_count": low_open_count,
             "open_services_all": open_services_all if open_services_all else [],
             "status_raw": status_raw or _missing_field("Statut brut du scanner absent"),
             "warning": warning,
             "error": error,
             "impact": _clean_text(data.get("impact")),
+            "applicability_context": "public_web_ports_expected" if low_open_count > 0 and medium_open_count == 0 and high_open_count == 0 and critical_open_count == 0 else "network_exposure",
         })
         return evidence, data_quality, status_override, confidence_penalty
 
@@ -3683,6 +3711,8 @@ def build_kpi_centric_report(report: dict) -> dict:
     cve_severity = _safe_dict(cms_kpi.get("cve_severity"))
     server_critical = _safe_int(cve_severity.get("critical"))
     server_high = _safe_int(cve_severity.get("high"))
+    cve_medium = _safe_int(cve_severity.get("medium"))
+    cve_low = _safe_int(cve_severity.get("low"))
     server_related_issues = [
         str(issue) for issue in tech_issues
         if any(tag in str(issue).lower() for tag in ("server", "version", "x-powered-by", "header"))
@@ -3816,10 +3846,15 @@ def build_kpi_centric_report(report: dict) -> dict:
             "impact": "Vulnérabilités connues exposent l'application à des attaques",
             "pages_affected": 1,
             "pages_affected_urls": [report.get("domain", "")],
-            "status": "failing" if (cms_kpi.get('cve_severity', {}).get('critical', 0) > 0 or cms_kpi.get('cve_severity', {}).get('high', 0) > 0) else "passing",
-            "type": "bug" if (cms_kpi.get('cve_severity', {}).get('critical', 0) > 0 or cms_kpi.get('cve_severity', {}).get('high', 0) > 0) else None,
-            "severity": "critical" if cms_kpi.get('cve_severity', {}).get('critical', 0) > 0 else ("high" if cms_kpi.get('cve_severity', {}).get('high', 0) > 0 else None),
-            "data": cms_kpi.get("cve_severity", {}),
+            "status": "failing" if (server_critical > 0 or server_high > 0) else "passing",
+            "type": "bug" if (server_critical > 0 or server_high > 0) else None,
+            "severity": "critical" if server_critical > 0 else ("high" if server_high > 0 else None),
+            "data": {
+                "critical": server_critical,
+                "high": server_high,
+                "medium": cve_medium,
+                "low": cve_low,
+            },
         }
     }
 
@@ -3842,6 +3877,7 @@ def build_kpi_centric_report(report: dict) -> dict:
         return max_sev
 
     cookie_severity = _evaluate_cookie_severity(cookie_kpi.get("cookies_with_missing_flags", []))
+    missing_cookie_flag_count = _safe_int(cookie_kpi.get("missing_cookie_flag_count"))
 
     # ─── CHECK SÉCURITÉ ────────────────────────────────────────────────────────
     # [5.4] Distinguish ssl.valid=None (probe not run) from ssl.valid=False (failed).
@@ -3879,17 +3915,17 @@ def build_kpi_centric_report(report: dict) -> dict:
             }
         },
         "Gestion des Sessions": {
-            "info": f"Cookies manquant flags: {cookie_kpi.get('missing_cookie_flag_count', 0)}",
+            "info": f"Cookies manquant flags: {missing_cookie_flag_count}",
             "impact": "Cookies sans HttpOnly/Secure exposent à des exploitations XSS et MITM",
             # [#10] missing_cookie_flag_count is cookie-level cardinality, not page-level.
             # This is a domain-level check — 1 domain is affected when any cookies fail.
-            "pages_affected": 1 if cookie_kpi.get("missing_cookie_flag_count", 0) > 0 else 0,
-            "pages_affected_urls": [report.get("domain", "")] if cookie_kpi.get("missing_cookie_flag_count", 0) > 0 else [],
-            "status": "failing" if cookie_kpi.get("missing_cookie_flag_count", 0) > 0 else "passing",
-            "type": "bug" if cookie_kpi.get("missing_cookie_flag_count", 0) > 0 else None,
+            "pages_affected": 1 if missing_cookie_flag_count > 0 else 0,
+            "pages_affected_urls": [report.get("domain", "")] if missing_cookie_flag_count > 0 else [],
+            "status": "failing" if missing_cookie_flag_count > 0 else "passing",
+            "type": "bug" if missing_cookie_flag_count > 0 else None,
             "severity": cookie_severity,
             "data": {
-                "missing_count": cookie_kpi.get("missing_cookie_flag_count", 0),
+                "missing_count": missing_cookie_flag_count,
                 "cookies": cookie_kpi.get("cookies_with_missing_flags", []),
             }
         },
@@ -4152,13 +4188,13 @@ def build_kpi_centric_report(report: dict) -> dict:
     axes["Audit Fonctionnel"]["Boutons"] = {
         "info": f"Boutons non-fonctionnels: {perf.get('button_kpi', {}).get('pages_with_nonfunc_buttons', 0)} pages affectées",
         "impact": "Boutons non-fonctionnels = abandon de parcours utilisateur et baisse de conversion",
-        "pages_affected": perf.get("button_kpi", {}).get("pages_with_nonfunc_buttons", 0),
+        "pages_affected": _safe_int(perf.get("button_kpi", {}).get("pages_with_nonfunc_buttons")),
         "pages_affected_urls": list(dict.fromkeys(_safe_list(non_func_buttons_evidence.get("affected_pages")))),
-        "status": "failing" if perf.get("button_kpi", {}).get("pages_with_nonfunc_buttons", 0) > 0 else "passing",
-        "type": "bug" if perf.get("button_kpi", {}).get("pages_with_nonfunc_buttons", 0) > 0 else None,
-        "severity": "medium" if perf.get("button_kpi", {}).get("pages_with_nonfunc_buttons", 0) > 0 else None,
+        "status": "failing" if _safe_int(perf.get("button_kpi", {}).get("pages_with_nonfunc_buttons")) > 0 else "passing",
+        "type": "bug" if _safe_int(perf.get("button_kpi", {}).get("pages_with_nonfunc_buttons")) > 0 else None,
+        "severity": "medium" if _safe_int(perf.get("button_kpi", {}).get("pages_with_nonfunc_buttons")) > 0 else None,
         "data": {
-            "pages_with_nonfunc_buttons": perf.get("button_kpi", {}).get("pages_with_nonfunc_buttons", 0),
+            "pages_with_nonfunc_buttons": _safe_int(perf.get("button_kpi", {}).get("pages_with_nonfunc_buttons")),
             "total_broken_buttons": int(total_broken_buttons or 0),
             "broken_buttons": [
                 {
@@ -4410,6 +4446,23 @@ def build_kpi_centric_report(report: dict) -> dict:
     internal_link_total = _safe_int(seo.get("total_internal_links", 0))
     contextual_link_total = _safe_int(seo.get("total_contextual_internal_links", 0))
     missing_contextual_pages = _safe_int(ux.get("pages_missing_contextual_links", 0))
+    images_missing_alt_count = _safe_int(seo.get("images_missing_alt"))
+    pages_missing_meta_desc_count = _safe_int(seo.get("pages_missing_meta_desc"))
+    pages_missing_title_count = _safe_int(seo.get("pages_missing_title"))
+    node_style_url_count = _safe_int(seo.get("node_style_url_count"))
+    duplicate_content_kpi = _safe_dict(seo.get("duplicate_content_kpi"))
+    duplicate_content_rate_pct = _safe_float(duplicate_content_kpi.get("duplicate_content_rate_pct"))
+    duplicate_page_count = _safe_int(duplicate_content_kpi.get("duplicate_page_count"))
+    duplicate_content_kpi = {
+        **duplicate_content_kpi,
+        "duplicate_content_rate_pct": duplicate_content_rate_pct,
+        "duplicate_page_count": duplicate_page_count,
+    }
+    seo["duplicate_content_kpi"] = duplicate_content_kpi
+    seo["node_style_url_count"] = node_style_url_count
+    ux["pages_missing_contextual_links"] = missing_contextual_pages
+    pages_scanned_for_ratios = max(_safe_int(report.get("pages_scanned")), 1)
+    report["pages_scanned"] = pages_scanned_for_ratios
     sitewide_zero_contextual_suspect = (
         internal_link_pages_checked > 0
         and internal_link_reliable_coverage_pct >= 90.0
@@ -4419,33 +4472,33 @@ def build_kpi_centric_report(report: dict) -> dict:
     )
     axes["SEO"] = {
         "Balise Alts": {
-            "info": f"Images sans ALT: {seo.get('images_missing_alt', 0)} images",
+            "info": f"Images sans ALT: {images_missing_alt_count} images",
             "impact": "Images sans ALT = perte de signal SEO, accessibilité dégradée, mauvaise expérience handicapés",
-            "pages_affected": seo.get("images_missing_alt", 0),
+            "pages_affected": images_missing_alt_count,
             "pages_affected_urls": list(dict.fromkeys([
                 img.get("page_url") or img.get("url") or img.get("image_url")
                 for img in _safe_list(missing_alt_evidence.get("images"))
                 if isinstance(img, dict) and (img.get("page_url") or img.get("url") or img.get("image_url"))
             ])),
-            "status": "failing" if seo.get("images_missing_alt", 0) > 0 else "passing",
-            "type": "recommendation" if seo.get("images_missing_alt", 0) > 0 else None,
+            "status": "failing" if images_missing_alt_count > 0 else "passing",
+            "type": "recommendation" if images_missing_alt_count > 0 else None,
             "severity": None,
             "data": {
-                "images_missing_alt": seo.get("images_missing_alt", 0),
+                "images_missing_alt": images_missing_alt_count,
                 "images": _safe_list(missing_alt_evidence.get("images")),
             },
         },
         "Balises META": {
-            "info": f"Meta descriptions manquantes: {seo.get('pages_missing_meta_desc', 0)} pages, Titres manquants: {seo.get('pages_missing_title', 0)} pages",
+            "info": f"Meta descriptions manquantes: {pages_missing_meta_desc_count} pages, Titres manquants: {pages_missing_title_count} pages",
             "impact": "Meta descriptions manquantes = mauvais CTR dans SERP et signaux SEO réduits",
-            "pages_affected": seo.get("pages_missing_meta_desc", 0),
+            "pages_affected": pages_missing_meta_desc_count,
             "pages_affected_urls": list(dict.fromkeys(_safe_list(missing_meta_evidence.get("affected_pages")) + _safe_list(missing_title_evidence.get("affected_pages")))),
-            "status": "failing" if seo.get("pages_missing_meta_desc", 0) > 0 or seo.get("pages_missing_title", 0) > 0 else "passing",
-            "type": "recommendation" if seo.get("pages_missing_meta_desc", 0) > 0 or seo.get("pages_missing_title", 0) > 0 else None,
+            "status": "failing" if pages_missing_meta_desc_count > 0 or pages_missing_title_count > 0 else "passing",
+            "type": "recommendation" if pages_missing_meta_desc_count > 0 or pages_missing_title_count > 0 else None,
             "severity": None,
             "data": {
-                "pages_missing_meta_desc": seo.get("pages_missing_meta_desc", 0),
-                "pages_missing_title": seo.get("pages_missing_title", 0),
+                "pages_missing_meta_desc": pages_missing_meta_desc_count,
+                "pages_missing_title": pages_missing_title_count,
                 "affected_pages_meta": _safe_list(missing_meta_evidence.get("affected_pages")),
                 "affected_pages_title": _safe_list(missing_title_evidence.get("affected_pages")),
             },
@@ -4481,20 +4534,22 @@ def build_kpi_centric_report(report: dict) -> dict:
         "Duplication de Contenu": {
             "info": f"Taux de duplication: {seo.get('duplicate_content_kpi', {}).get('duplicate_content_rate_pct', 0):.1f}% ({seo.get('duplicate_content_kpi', {}).get('duplicate_page_count', 0)} pages), fiabilité: {seo.get('duplicate_content_kpi', {}).get('duplication_reliability', 'unknown')}",
             "impact": "Contenu dupliqué = cannibalisation SEO, dilution de pertinence, classement affaibli",
-            "pages_affected": seo.get("duplicate_content_kpi", {}).get("duplicate_page_count", 0),
+            "pages_affected": duplicate_page_count,
             "pages_affected_urls": [],
             "status": (
-                "not_evaluated" if seo.get("duplicate_content_kpi", {}).get("pipeline_suspect") or seo.get("duplicate_content_kpi", {}).get("passed") is None
-                else ("failing" if seo.get("duplicate_content_kpi", {}).get("duplicate_content_rate_pct", 0) > 10.0 else "passing")
+                "not_evaluated" if duplicate_content_kpi.get("pipeline_suspect") or duplicate_content_kpi.get("passed") is None
+                else ("failing" if duplicate_content_rate_pct > 10.0 else "passing")
             ),
             "type": (
-                None if seo.get("duplicate_content_kpi", {}).get("pipeline_suspect") or seo.get("duplicate_content_kpi", {}).get("passed") is None
-                else ("recommendation" if seo.get("duplicate_content_kpi", {}).get("duplicate_content_rate_pct", 0) > 10.0 else None)
+                None if duplicate_content_kpi.get("pipeline_suspect") or duplicate_content_kpi.get("passed") is None
+                else ("recommendation" if duplicate_content_rate_pct > 10.0 else None)
             ),
             "severity": None,
             "data": {
-                **_safe_dict(seo.get("duplicate_content_kpi", {})),
-                "rows": _safe_list(_safe_dict(seo.get("duplicate_content_kpi", {})).get("duplicate_clusters")),
+                **duplicate_content_kpi,
+                "duplicate_content_rate_pct": duplicate_content_rate_pct,
+                "duplicate_page_count": duplicate_page_count,
+                "rows": _safe_list(duplicate_content_kpi.get("duplicate_clusters")),
             },
         },
         "Compatibilité Multiplateforme": {
@@ -4514,13 +4569,13 @@ def build_kpi_centric_report(report: dict) -> dict:
         "Structure des URLs": {
             "info": f"URLs non-propres (node/query): {seo.get('node_style_url_count', 0)} URL(s)",
             "impact": "URLs sales = mauvais SEO, inefficacité crawl, perte de PageRank",
-            "pages_affected": seo.get("node_style_url_count", 0),
+            "pages_affected": node_style_url_count,
             "pages_affected_urls": [],
-            "status": "failing" if seo.get("node_style_url_count", 0) > 0 else "passing",
-            "type": "recommendation" if seo.get("node_style_url_count", 0) > 0 else None,
+            "status": "failing" if node_style_url_count > 0 else "passing",
+            "type": "recommendation" if node_style_url_count > 0 else None,
             "severity": None,
             "data": {
-                "node_style_url_count": seo.get("node_style_url_count", 0),
+                "node_style_url_count": node_style_url_count,
                 "rows": _safe_list(seo.get("non_clean_urls_all")),
             },
         },
@@ -5054,7 +5109,7 @@ def build_kpi_centric_report(report: dict) -> dict:
                 "rows": privacy_score_rows,
                 "execution_status": "prerequisite_failed" if not privacy_kpi.get("has_privacy_policy") else "completed",
                 "failure_reason": "privacy_policy_missing" if not privacy_kpi.get("has_privacy_policy") else None,
-                "data_quality": "MISSING" if not privacy_kpi.get("has_privacy_policy") else ("PARTIAL" if blocked_recovery_partial and not privacy_score_real_rows else "VALID"),
+                "data_quality": "VALID" if not privacy_kpi.get("has_privacy_policy") else ("PARTIAL" if blocked_recovery_partial and not privacy_score_real_rows else "VALID"),
             },
         }
     }

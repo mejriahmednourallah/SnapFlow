@@ -1,4 +1,4 @@
-import { Document, Page, Text, View } from '@react-pdf/renderer';
+import { Document, Page, Text, View, Svg, Circle } from '@react-pdf/renderer';
 import type { ReactNode } from 'react';
 import { format, differenceInDays, startOfWeek } from 'date-fns';
 import { fr } from 'date-fns/locale';
@@ -36,20 +36,30 @@ interface ActivityKpi {
   status: SeverityStatus;
 }
 
+type CountRow = { name: string; count: number; color?: string };
+
+const CHART_COLORS = ['#1E3A5F', '#4E8CCF', '#3B9B86', '#BD8C4F', '#F97316', '#DC2626', '#64748B', '#7C3AED'];
+
 const clean = (value?: string | null) => (value || '').trim();
 const deAccent = (value: string) => value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
-const isClosed = (value: string) => /ferm|clotur|clos|reject|valid/.test(deAccent(value));
-const isResolved = (value: string) => /ferm|clotur|clos|resolu|resolved|reject|valid/.test(deAccent(value));
-const isResolvedOnly = (value: string) => /resolu|resolved/.test(deAccent(value)) && !isClosed(value);
-const isBlocked = (value: string) => /bloqu|attente|hold|feedback|suspendu|suspend|en cours de valid/.test(deAccent(value));
-const isCritical = (value: string) => /critique|critical|urgent|immediat|immediate/.test(deAccent(value));
+const hasAny = (value: string, patterns: RegExp[]) => patterns.some(pattern => pattern.test(deAccent(value)));
+
+const isClosed = (value: string) => hasAny(value, [/ferm/, /clotur/, /clos/, /resolu/, /resolved/, /valid/, /reject/]);
+const isResolvedOnly = (value: string) => hasAny(value, [/resolu/, /resolved/]) && !hasAny(value, [/clotur/, /clos/, /ferm/]);
+const isBlocked = (value: string) => hasAny(value, [/bloqu/, /attente/, /hold/, /suspend/, /en cours de valid/]);
+const isTesting = (value: string) => hasAny(value, [/test/, /validation/, /recette/]);
+const isAcknowledged = (value: string) => hasAny(value, [/pris en charge/, /ack/, /assign/, /affect/]);
+const isInProgress = (value: string) => hasAny(value, [/traitement/, /en cours/, /progress/]);
+const isCritical = (value: string) => hasAny(value, [/critique/, /critical/, /urgent/, /immediat/, /immediate/]);
+const isMeeting = (value: string) => hasAny(value, [/reunion/, /meeting/, /point d.?echange/, /comite/]);
+const isFeature = (value: string) => hasAny(value, [/feature/, /fonctionnal/, /evol/, /demande/, /amelioration/]);
 
 function pct(count: number, total: number) {
   if (!total) return 0;
   return Math.round((count / total) * 100);
 }
 
-function countBy<T>(items: T[], key: (item: T) => string) {
+function countBy<T>(items: T[], key: (item: T) => string): CountRow[] {
   const counts = new Map<string, number>();
   items.forEach((item) => {
     const label = clean(key(item)) || 'Non renseigne';
@@ -81,29 +91,49 @@ function clamp(value: number) {
   return Math.max(0, Math.min(100, Math.round(value)));
 }
 
+function short(value: string, max = 74) {
+  return value.length > max ? `${value.slice(0, max - 1)}...` : value;
+}
+
+function withColors(rows: CountRow[]) {
+  return rows.map((row, index) => ({ ...row, color: CHART_COLORS[index % CHART_COLORS.length] }));
+}
+
 function buildData(issues: RedmineIssue[], totalCount: number) {
   const total = issues.length;
-  const resolvedIssues = issues.filter((issue) => isResolved(issue.status.name));
-  const openIssues = issues.filter((issue) => !isResolved(issue.status.name));
-  const blockedIssues = issues.filter((issue) => isBlocked(issue.status.name));
-  const criticalIssues = issues.filter((issue) => isCritical(issue.priority.name));
-  const pendingValidation = issues.filter((issue) => isResolvedOnly(issue.status.name) && differenceInDays(Date.now(), new Date(issue.updated_on).getTime()) > 2);
-  const avgResolutionDays = avgDays(resolvedIssues);
-  const avgOpenDays = avgDays(openIssues);
-  const health = clamp(100 - pct(blockedIssues.length, Math.max(total, 1)) * 0.5 - pct(criticalIssues.length, Math.max(total, 1)) * 0.35 - Math.min(avgOpenDays || 0, 60) * 0.35);
+  const meetings = issues.filter(issue => isMeeting(issue.tracker.name));
+  const closedTickets = issues.filter(issue => isClosed(issue.status.name));
+  const openTickets = issues.filter(issue => !isClosed(issue.status.name));
+  const blockedTickets = issues.filter(issue => isBlocked(issue.status.name));
+  const testingTickets = issues.filter(issue => isTesting(issue.status.name));
+  const acknowledgedTickets = issues.filter(issue => isAcknowledged(issue.status.name) && !isClosed(issue.status.name) && !isBlocked(issue.status.name));
+  const activeTickets = issues.filter(issue =>
+    isInProgress(issue.status.name) &&
+    !isClosed(issue.status.name) &&
+    !isBlocked(issue.status.name) &&
+    !isTesting(issue.status.name)
+  );
+  const criticalIssues = issues.filter(issue => isCritical(issue.priority.name));
+  const pendingValidation = issues.filter(issue => isResolvedOnly(issue.status.name) && differenceInDays(Date.now(), new Date(issue.updated_on).getTime()) > 2);
+  const blockedFeatureTickets = blockedTickets.filter(issue => isFeature(issue.tracker.name));
+  const blockedOtherTickets = blockedTickets.filter(issue => !isFeature(issue.tracker.name));
+  const avgResolutionDays = avgDays(closedTickets);
+  const avgOpenDays = avgDays(openTickets);
+  const health = clamp(100 - pct(blockedTickets.length, Math.max(total, 1)) * 0.5 - pct(criticalIssues.length, Math.max(total, 1)) * 0.35 - Math.min(avgOpenDays || 0, 60) * 0.35);
   const status: SeverityStatus = health >= 75 ? 'success' : health >= 50 ? 'warning' : 'danger';
 
   const kpis: ActivityKpi[] = [
     { key: 'total', label: 'Tickets', value: String(totalCount || total), caption: totalCount !== total ? `${total} dans la vue filtree` : 'Perimetre complet', status: 'success' },
-    { key: 'open', label: 'En cours', value: String(openIssues.length), caption: `${pct(openIssues.length, total)} % des tickets`, status: openIssues.length ? 'warning' : 'success' },
-    { key: 'resolved', label: 'Resolus', value: String(resolvedIssues.length), caption: `${pct(resolvedIssues.length, total)} % traites`, status: 'success' },
+    { key: 'meetings', label: 'Reunions', value: String(meetings.length), caption: "Points d'echange", status: meetings.length ? 'success' : 'warning' },
+    { key: 'open', label: 'Ouverts', value: String(openTickets.length), caption: `${pct(openTickets.length, total)} % des tickets`, status: openTickets.length ? 'warning' : 'success' },
+    { key: 'resolved', label: 'Clotures', value: String(closedTickets.length), caption: `${pct(closedTickets.length, total)} % livres`, status: 'success' },
     { key: 'critical', label: 'Critiques', value: String(criticalIssues.length), caption: 'Priorite urgente ou critique', status: criticalIssues.length ? 'danger' : 'success' },
-    { key: 'blocked', label: 'Bloques', value: String(blockedIssues.length), caption: 'Tickets en attente ou bloques', status: blockedIssues.length ? 'danger' : 'success' },
+    { key: 'blocked', label: 'Bloques', value: String(blockedTickets.length), caption: 'Tickets en attente', status: blockedTickets.length ? 'danger' : 'success' },
     { key: 'closure', label: 'Delai moyen', value: avgResolutionDays == null ? '-' : `${avgResolutionDays} j`, caption: 'Resolution des tickets clos', status: avgResolutionDays == null || avgResolutionDays <= 7 ? 'success' : avgResolutionDays <= 21 ? 'warning' : 'danger' },
   ];
 
   const insights = [
-    blockedIssues.length > 0 ? `Traiter en priorite les ${blockedIssues.length} ticket(s) bloques ou en attente.` : 'Aucun blocage majeur detecte dans la selection.',
+    blockedTickets.length > 0 ? `Traiter en priorite les ${blockedTickets.length} ticket(s) bloques ou en attente.` : 'Aucun blocage majeur detecte dans la selection.',
     pendingValidation.length > 0 ? `${pendingValidation.length} ticket(s) resolus attendent une validation client.` : 'Aucun ticket resolu ne semble attendre une validation prolongee.',
     criticalIssues.length > 0 ? `Surveiller les ${criticalIssues.length} ticket(s) critiques pour eviter un impact projet.` : 'La selection ne contient pas de ticket critique.',
   ];
@@ -111,21 +141,35 @@ function buildData(issues: RedmineIssue[], totalCount: number) {
   return {
     total,
     totalCount,
-    open: openIssues.length,
-    resolved: resolvedIssues.length,
-    blocked: blockedIssues.length,
+    open: openTickets.length,
+    resolved: closedTickets.length,
+    blocked: blockedTickets.length,
     critical: criticalIssues.length,
+    meetings,
+    openTickets,
+    closedTickets,
+    blockedTickets,
+    testingTickets,
+    acknowledgedTickets,
+    activeTickets,
     pendingValidation,
-    blockedIssues,
+    blockedFeatureTickets,
+    blockedOtherTickets,
     criticalIssues,
     avgResolutionDays,
     avgOpenDays,
     health,
     healthStatus: status,
     kpis,
-    statusRows: countBy(issues, (issue) => issue.status.name),
-    trackerRows: countBy(issues, (issue) => issue.tracker.name),
-    priorityRows: countBy(issues, (issue) => issue.priority.name),
+    statusRows: withColors(countBy(issues, issue => issue.status.name)),
+    trackerRows: withColors(countBy(issues, issue => issue.tracker.name)),
+    priorityRows: withColors(countBy(issues, issue => issue.priority.name)),
+    closedByType: withColors(countBy(closedTickets, issue => issue.tracker.name)),
+    openByType: withColors(countBy(openTickets, issue => issue.tracker.name)),
+    activeByType: withColors(countBy(activeTickets, issue => issue.tracker.name)),
+    blockedByType: withColors(countBy(blockedTickets, issue => issue.tracker.name)),
+    blockedByPriority: withColors(countBy(blockedTickets, issue => issue.priority.name)),
+    blockedByStatus: withColors(countBy(blockedTickets, issue => issue.status.name)),
     timelineRows: groupByWeek(issues),
     insights,
   };
@@ -136,7 +180,7 @@ function filterSummary(filters?: ActivityDocumentProps['filters']) {
     filters?.statusLabel ? `Statut : ${filters.statusLabel}` : null,
     filters?.trackerLabel ? `Tracker : ${filters.trackerLabel}` : null,
     filters?.dateFrom ? `Depuis : ${filters.dateFrom}` : null,
-    filters?.dateTo ? `Jusqu'au : ${filters.dateTo}` : null,
+    filters?.dateTo ? `Jusqu'au ${filters.dateTo}` : null,
   ].filter(Boolean);
   return parts.length ? parts.join(' | ') : 'Tous les tickets disponibles';
 }
@@ -148,30 +192,71 @@ function periodLabel(filters?: ActivityDocumentProps['filters']) {
   return 'Toutes periodes confondues';
 }
 
-function KpiCard({ item, theme }: { item: ActivityKpi; theme?: PdfTheme }) {
+function EmptyState({ theme, label = 'Aucun element sur cette periode' }: { theme?: PdfTheme; label?: string }) {
+  return (
+    <View style={{ borderWidth: 0.8, borderColor: theme?.border ?? '#D7E0EA', backgroundColor: theme?.recBg ?? '#F1F4F8', borderRadius: 10, padding: 12 }}>
+      <Text style={{ fontSize: 9, color: theme?.textMuted ?? '#64748B' }}>{label}</Text>
+    </View>
+  );
+}
+
+function KpiCard({ item, theme, compact = false }: { item: ActivityKpi; theme?: PdfTheme; compact?: boolean }) {
   const s = makePageStyles(theme);
   const color = getStatusColor(item.status);
   return (
-    <View style={{ ...s.card, width: '31.8%', minHeight: 82, marginBottom: 10 }}>
-      <Text style={{ fontSize: 7.5, color: theme?.textMuted ?? '#64748B', textTransform: 'uppercase' }}>{item.label}</Text>
-      <Text style={{ fontSize: 24, fontFamily: 'DMSans', fontWeight: 700, color, marginTop: 5 }}>{item.value}</Text>
-      <Text style={{ fontSize: 8, color: theme?.textMuted ?? '#64748B', marginTop: 4 }}>{item.caption}</Text>
+    <View style={{ ...s.card, width: compact ? '23.5%' : '31.8%', minHeight: compact ? 64 : 78, marginBottom: 8, padding: compact ? 8 : 10 }}>
+      <Text style={{ fontSize: 7.2, color: theme?.textMuted ?? '#64748B', textTransform: 'uppercase' }}>{item.label}</Text>
+      <Text style={{ fontSize: compact ? 20 : 24, fontFamily: 'DMSans', fontWeight: 700, color, marginTop: 4 }}>{item.value}</Text>
+      <Text style={{ fontSize: 7.4, color: theme?.textMuted ?? '#64748B', marginTop: 3 }}>{item.caption}</Text>
     </View>
   );
 }
 
-function Bars({ rows, theme, limit = 10 }: { rows: { name: string; count: number }[]; theme?: PdfTheme; limit?: number }) {
-  const max = Math.max(...rows.map((row) => row.count), 1);
+function CounterCard({ label, value, caption, theme, status = 'success' }: { label: string; value: number | string; caption: string; theme?: PdfTheme; status?: SeverityStatus }) {
   return (
-    <View style={{ gap: 7 }}>
-      {rows.slice(0, limit).map((row) => (
-        <View key={row.name}>
+    <KpiCard
+      compact
+      theme={theme}
+      item={{ key: label, label, value: String(value), caption, status }}
+    />
+  );
+}
+
+function LegendTable({ rows, theme, total, label = 'Libelle', limit = 9 }: { rows: CountRow[]; theme?: PdfTheme; total: number; label?: string; limit?: number }) {
+  const visible = rows.slice(0, limit);
+  if (!visible.length) return <EmptyState theme={theme} />;
+  return (
+    <View style={{ borderWidth: 0.7, borderColor: theme?.border ?? '#D7E0EA', borderRadius: 9, overflow: 'hidden' }}>
+      <View style={{ flexDirection: 'row', backgroundColor: theme?.headerBg ?? '#E7EEF7', paddingVertical: 5, paddingHorizontal: 7 }}>
+        <Text style={{ width: 190, fontSize: 7.2, fontFamily: 'DMSans', fontWeight: 700, color: theme?.primary ?? '#1E3A5F' }}>{label}</Text>
+        <Text style={{ width: 45, fontSize: 7.2, fontFamily: 'DMSans', fontWeight: 700, color: theme?.primary ?? '#1E3A5F', textAlign: 'right' }}>Nb</Text>
+        <Text style={{ width: 45, fontSize: 7.2, fontFamily: 'DMSans', fontWeight: 700, color: theme?.primary ?? '#1E3A5F', textAlign: 'right' }}>%</Text>
+      </View>
+      {visible.map((row, index) => (
+        <View key={`${row.name}-${index}`} style={{ flexDirection: 'row', paddingVertical: 5, paddingHorizontal: 7, borderTopWidth: index ? 0.4 : 0, borderTopColor: theme?.border ?? '#D7E0EA' }}>
+          <Text style={{ width: 190, fontSize: 7.4, color: theme?.text ?? '#111827' }}>{short(row.name, 34)}</Text>
+          <Text style={{ width: 45, fontSize: 7.4, color: theme?.text ?? '#111827', textAlign: 'right' }}>{row.count}</Text>
+          <Text style={{ width: 45, fontSize: 7.4, color: theme?.textMuted ?? '#64748B', textAlign: 'right' }}>{pct(row.count, total)}%</Text>
+        </View>
+      ))}
+    </View>
+  );
+}
+
+function HorizontalBars({ rows, theme, limit = 8 }: { rows: CountRow[]; theme?: PdfTheme; limit?: number }) {
+  const visible = rows.slice(0, limit);
+  const max = Math.max(...visible.map(row => row.count), 1);
+  if (!visible.length) return <EmptyState theme={theme} />;
+  return (
+    <View style={{ gap: 6 }}>
+      {visible.map((row, index) => (
+        <View key={`${row.name}-${index}`}>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 2 }}>
-            <Text style={{ fontSize: 8.2, color: theme?.text ?? '#111827' }}>{row.name}</Text>
-            <Text style={{ fontSize: 8.2, color: theme?.textMuted ?? '#64748B' }}>{row.count}</Text>
+            <Text style={{ fontSize: 7.7, color: theme?.text ?? '#111827' }}>{short(row.name, 32)}</Text>
+            <Text style={{ fontSize: 7.7, color: theme?.textMuted ?? '#64748B' }}>{row.count}</Text>
           </View>
-          <View style={{ height: 6, backgroundColor: theme?.border ?? '#D7E0EA', borderRadius: 4 }}>
-            <View style={{ width: `${Math.max(4, (row.count / max) * 100)}%`, height: 6, backgroundColor: theme?.accent ?? '#4E8CCF', borderRadius: 4 }} />
+          <View style={{ height: 8, backgroundColor: theme?.border ?? '#D7E0EA', borderRadius: 5 }}>
+            <View style={{ width: `${Math.max(5, (row.count / max) * 100)}%`, height: 8, backgroundColor: row.color ?? theme?.accent ?? '#4E8CCF', borderRadius: 5 }} />
           </View>
         </View>
       ))}
@@ -179,27 +264,160 @@ function Bars({ rows, theme, limit = 10 }: { rows: { name: string; count: number
   );
 }
 
-function TicketTable({ issues, theme, title }: { issues: RedmineIssue[]; theme?: PdfTheme; title: string }) {
-  const s = makePageStyles(theme);
-  const rows = issues.slice(0, 18);
+function VerticalBars({ rows, theme, limit = 7 }: { rows: CountRow[]; theme?: PdfTheme; limit?: number }) {
+  const visible = rows.slice(0, limit);
+  const max = Math.max(...visible.map(row => row.count), 1);
+  if (!visible.length) return <EmptyState theme={theme} />;
   return (
-    <View style={{ ...s.card }}>
-      <Text style={s.h3}>{title}</Text>
-      <View style={{ flexDirection: 'row', paddingVertical: 5, borderBottomWidth: 0.8, borderBottomColor: theme?.border ?? '#D7E0EA' }}>
-        {['#', 'Sujet', 'Statut', 'Priorite', 'Avancement'].map((label, index) => (
-          <Text key={label} style={{ width: [42, 220, 80, 74, 70][index], fontSize: 7.2, color: theme?.textMuted ?? '#64748B', fontFamily: 'DMSans', fontWeight: 700 }}>{label}</Text>
+    <View style={{ height: 170, flexDirection: 'row', alignItems: 'flex-end', gap: 8, paddingTop: 6 }}>
+      {visible.map((row, index) => {
+        const height = Math.max(18, (row.count / max) * 132);
+        return (
+          <View key={`${row.name}-${index}`} style={{ flex: 1, alignItems: 'center' }}>
+            <Text style={{ fontSize: 8, fontFamily: 'DMSans', fontWeight: 700, color: row.color ?? theme?.accent ?? '#4E8CCF', marginBottom: 3 }}>{row.count}</Text>
+            <View style={{ height, width: '70%', backgroundColor: row.color ?? theme?.accent ?? '#4E8CCF', borderRadius: 5 }} />
+            <Text style={{ fontSize: 6.5, color: theme?.textMuted ?? '#64748B', textAlign: 'center', marginTop: 4 }}>{short(row.name, 13)}</Text>
+          </View>
+        );
+      })}
+    </View>
+  );
+}
+
+function DonutChart({ rows, theme, size = 132 }: { rows: CountRow[]; theme?: PdfTheme; size?: number }) {
+  const visible = rows.filter(row => row.count > 0).slice(0, 6);
+  const total = visible.reduce((sum, row) => sum + row.count, 0);
+  if (!visible.length || !total) return <EmptyState theme={theme} label="Aucune repartition disponible" />;
+  const radius = 43;
+  const circumference = 2 * Math.PI * radius;
+  let offset = 0;
+  return (
+    <View style={{ flexDirection: 'row', gap: 10, alignItems: 'center' }}>
+      <Svg width={size} height={size} viewBox="0 0 120 120">
+        <Circle cx="60" cy="60" r={radius} stroke={theme?.border ?? '#D7E0EA'} strokeWidth="18" fill="none" />
+        {visible.map((row, index) => {
+          const length = (row.count / total) * circumference;
+          const dashOffset = -offset;
+          offset += length;
+          return (
+            <Circle
+              key={`${row.name}-${index}`}
+              cx="60"
+              cy="60"
+              r={radius}
+              stroke={row.color ?? CHART_COLORS[index % CHART_COLORS.length]}
+              strokeWidth="18"
+              fill="none"
+              strokeDasharray={`${length} ${circumference - length}`}
+              strokeDashoffset={dashOffset}
+              transform="rotate(-90 60 60)"
+            />
+          );
+        })}
+      </Svg>
+      <View style={{ flex: 1, gap: 4 }}>
+        {visible.map((row, index) => (
+          <View key={`${row.name}-${index}`} style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+            <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: row.color ?? CHART_COLORS[index % CHART_COLORS.length] }} />
+            <Text style={{ fontSize: 7.3, color: theme?.text ?? '#111827', width: 94 }}>{short(row.name, 22)}</Text>
+            <Text style={{ fontSize: 7.3, color: theme?.textMuted ?? '#64748B', textAlign: 'right', width: 30 }}>{row.count}</Text>
+          </View>
         ))}
       </View>
-      {rows.map((issue) => (
-        <View key={issue.id} style={{ flexDirection: 'row', paddingVertical: 5, borderBottomWidth: 0.4, borderBottomColor: theme?.border ?? '#D7E0EA' }}>
-          <Text style={{ width: 42, fontSize: 7.5 }}>#{issue.id}</Text>
-          <Text style={{ width: 220, fontSize: 7.5 }}>{issue.subject.slice(0, 78)}</Text>
-          <Text style={{ width: 80, fontSize: 7.5 }}>{issue.status.name}</Text>
-          <Text style={{ width: 74, fontSize: 7.5 }}>{issue.priority.name}</Text>
-          <Text style={{ width: 70, fontSize: 7.5 }}>{issue.done_ratio}%</Text>
+    </View>
+  );
+}
+
+function TicketDetailCard({ issue, theme, emptyLabel }: { issue?: RedmineIssue; theme?: PdfTheme; emptyLabel: string }) {
+  if (!issue) return <EmptyState theme={theme} label={emptyLabel} />;
+  const s = makePageStyles(theme);
+  return (
+    <View style={{ ...s.card, padding: 11 }}>
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 5 }}>
+        <Text style={{ fontSize: 9, fontFamily: 'DMSans', fontWeight: 700, color: theme?.primary ?? '#1E3A5F' }}>#{issue.id}</Text>
+        <Text style={{ fontSize: 7.5, color: theme?.textMuted ?? '#64748B' }}>{format(new Date(issue.updated_on), 'dd/MM/yyyy', { locale: fr })}</Text>
+      </View>
+      <Text style={{ fontSize: 12, fontFamily: 'DMSans', fontWeight: 700, color: theme?.text ?? '#111827', marginBottom: 5 }}>{short(issue.subject, 110)}</Text>
+      <View style={{ flexDirection: 'row', gap: 8, marginTop: 4 }}>
+        <Text style={{ fontSize: 8, color: theme?.textMuted ?? '#64748B' }}>Statut: {issue.status.name}</Text>
+        <Text style={{ fontSize: 8, color: theme?.textMuted ?? '#64748B' }}>Type: {issue.tracker.name}</Text>
+        <Text style={{ fontSize: 8, color: theme?.textMuted ?? '#64748B' }}>Priorite: {issue.priority.name}</Text>
+      </View>
+      <View style={{ marginTop: 8 }}>
+        <ProgressBar label="Avancement" value={issue.done_ratio} status={issue.done_ratio >= 80 ? 'success' : issue.done_ratio >= 40 ? 'warning' : 'danger'} theme={theme} />
+      </View>
+    </View>
+  );
+}
+
+function DenseTicketTable({ issues, theme, title, limit = 10 }: { issues: RedmineIssue[]; theme?: PdfTheme; title: string; limit?: number }) {
+  const rows = issues.slice(0, limit);
+  if (!rows.length) return <EmptyState theme={theme} />;
+  return (
+    <View style={{ borderWidth: 0.7, borderColor: theme?.border ?? '#D7E0EA', borderRadius: 9, overflow: 'hidden' }}>
+      <View style={{ backgroundColor: theme?.headerBg ?? '#E7EEF7', padding: 7 }}>
+        <Text style={{ fontSize: 9, fontFamily: 'DMSans', fontWeight: 700, color: theme?.primary ?? '#1E3A5F' }}>{title}</Text>
+      </View>
+      <View style={{ flexDirection: 'row', paddingVertical: 5, paddingHorizontal: 7, borderTopWidth: 0.4, borderTopColor: theme?.border ?? '#D7E0EA' }}>
+        {['ID', 'Sujet', 'Statut', 'Type', 'Priorite', '%'].map((label, index) => (
+          <Text key={label} style={{ width: [40, 205, 86, 78, 74, 28][index], fontSize: 7, color: theme?.textMuted ?? '#64748B', fontFamily: 'DMSans', fontWeight: 700 }}>{label}</Text>
+        ))}
+      </View>
+      {rows.map((issue, index) => (
+        <View key={issue.id} style={{ flexDirection: 'row', paddingVertical: 5, paddingHorizontal: 7, borderTopWidth: 0.35, borderTopColor: theme?.border ?? '#D7E0EA', backgroundColor: index % 2 ? theme?.recBg ?? '#F1F4F8' : theme?.surface ?? '#FFFFFF' }}>
+          <Text style={{ width: 40, fontSize: 7.1 }}>#{issue.id}</Text>
+          <Text style={{ width: 205, fontSize: 7.1 }}>{short(issue.subject, 52)}</Text>
+          <Text style={{ width: 86, fontSize: 7.1 }}>{short(issue.status.name, 18)}</Text>
+          <Text style={{ width: 78, fontSize: 7.1 }}>{short(issue.tracker.name, 16)}</Text>
+          <Text style={{ width: 74, fontSize: 7.1 }}>{short(issue.priority.name, 16)}</Text>
+          <Text style={{ width: 28, fontSize: 7.1 }}>{issue.done_ratio}%</Text>
         </View>
       ))}
+      {issues.length > limit && (
+        <Text style={{ fontSize: 7.2, color: theme?.textMuted ?? '#64748B', padding: 6 }}>+ {issues.length - limit} ticket(s) non affiches pour conserver une page lisible.</Text>
+      )}
     </View>
+  );
+}
+
+function CompactPage({ title, project, theme, children }: { title: string; project: DashboardProject; theme?: PdfTheme; children: ReactNode }) {
+  const s = makePageStyles(theme);
+  return (
+    <Page size="A4" style={s.page}>
+      <PageHeader title={title} siteName={project.site_name} theme={theme} siteLogoSrc={project.logo_url ?? undefined} />
+      <View style={{ paddingHorizontal: 30, gap: 8 }}>
+        <SectionTitle title={title} theme={theme} />
+        {children}
+      </View>
+      <PageFooter preparedBy="Medianet x Snapflow App" theme={theme} />
+    </Page>
+  );
+}
+
+function ChartTablePage({
+  title, project, theme, rows, total, chart, tableLabel,
+}: {
+  title: string;
+  project: DashboardProject;
+  theme?: PdfTheme;
+  rows: CountRow[];
+  total: number;
+  chart: 'donut' | 'vertical' | 'horizontal';
+  tableLabel: string;
+}) {
+  return (
+    <CompactPage title={title} project={project} theme={theme}>
+      <View style={{ flexDirection: 'row', gap: 12 }}>
+        <View style={{ flex: 1.1, backgroundColor: theme?.surface ?? '#FFFFFF', borderColor: theme?.border ?? '#D7E0EA', borderWidth: 0.8, borderRadius: 10, padding: 10 }}>
+          {chart === 'donut' && <DonutChart rows={rows} theme={theme} />}
+          {chart === 'vertical' && <VerticalBars rows={rows} theme={theme} />}
+          {chart === 'horizontal' && <HorizontalBars rows={rows} theme={theme} />}
+        </View>
+        <View style={{ flex: 1 }}>
+          <LegendTable rows={rows} theme={theme} total={total} label={tableLabel} />
+        </View>
+      </View>
+    </CompactPage>
   );
 }
 
@@ -207,7 +425,7 @@ function StandardPage({ title, project, theme, children }: { title: string; proj
   const s = makePageStyles(theme);
   return (
     <Page size="A4" style={s.page}>
-      <PageHeader title={title} siteName={project.site_name} theme={theme} />
+      <PageHeader title={title} siteName={project.site_name} theme={theme} siteLogoSrc={project.logo_url ?? undefined} />
       <View style={s.body}>{children}</View>
       <PageFooter preparedBy="Medianet x Snapflow App" theme={theme} />
     </Page>
@@ -218,20 +436,8 @@ export function ActivityDocument({ project, issues, totalCount, filters, options
   const theme = options.theme;
   const s = makePageStyles(theme);
   const data = buildData(issues, totalCount);
-  const selectedKpis = data.kpis.filter((kpi) => options.coverKpis[kpi.key] !== false);
+  const selectedKpis = data.kpis.filter(kpi => options.coverKpis[kpi.key] !== false);
   const enabled = (key: string) => options.sections[key] !== false;
-  const sectionList = [
-    enabled('sommaire') && 'Table des matieres',
-    'Resume executif',
-    enabled('indicateurs') && 'Grille des indicateurs',
-    enabled('statuts') && 'Repartition par statut',
-    enabled('trackers') && 'Categories et priorites',
-    enabled('evolution') && 'Evolution temporelle',
-    enabled('bloqueSynth') && 'Tickets bloques',
-    enabled('validation') && 'Validation client',
-    enabled('insights') && 'Recommandations',
-    enabled('appendix') && 'Annexe tickets',
-  ].filter(Boolean) as string[];
 
   return (
     <Document title={`Rapport activite - ${project.site_name}`}>
@@ -246,7 +452,7 @@ export function ActivityDocument({ project, issues, totalCount, filters, options
           <Text style={{ color: 'rgba(255,255,255,0.72)', fontSize: 9, marginTop: 8 }}>{periodLabel(filters)}</Text>
           <Text style={{ color: 'rgba(255,255,255,0.65)', fontSize: 8, marginTop: 4 }}>{filterSummary(filters)}</Text>
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 42 }}>
-            {selectedKpis.map((kpi) => (
+            {selectedKpis.map(kpi => (
               <View key={kpi.key} style={{ width: '31%', backgroundColor: 'rgba(255,255,255,0.12)', borderRadius: 10, padding: 10 }}>
                 <Text style={{ color: 'rgba(255,255,255,0.72)', fontSize: 7, textTransform: 'uppercase' }}>{kpi.label}</Text>
                 <Text style={{ color: '#FFFFFF', fontSize: 22, fontFamily: 'DMSans', fontWeight: 700, marginTop: 4 }}>{kpi.value}</Text>
@@ -263,10 +469,21 @@ export function ActivityDocument({ project, issues, totalCount, filters, options
       {enabled('sommaire') && (
         <StandardPage title="Table des matieres" project={project} theme={theme}>
           <SectionTitle title="Structure du rapport" theme={theme} />
-          {sectionList.map((section, index) => (
-            <View key={section} style={{ ...s.card, flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 }}>
-              <Text style={{ fontSize: 9.2, color: theme?.text ?? '#111827' }}>{section}</Text>
-              <Text style={{ fontSize: 8.5, color: theme?.textMuted ?? '#64748B' }}>{String(index + 1).padStart(2, '0')}</Text>
+          {[
+            'Resume executif',
+            'Cadre du rapport',
+            'Periode et filtres',
+            'Synthese avant analyse',
+            'Indicateurs globaux',
+            'Etat des tickets',
+            'Typologie des tickets',
+            'Priorites des tickets',
+            'Details par cycle de traitement',
+            'Blocages et reunions',
+          ].map((section, index) => (
+            <View key={section} style={{ ...s.card, flexDirection: 'row', justifyContent: 'space-between', marginBottom: 7, padding: 9 }}>
+              <Text style={{ fontSize: 8.8, color: theme?.text ?? '#111827' }}>{section}</Text>
+              <Text style={{ fontSize: 8.2, color: theme?.textMuted ?? '#64748B' }}>{String(index + 1).padStart(2, '0')}</Text>
             </View>
           ))}
         </StandardPage>
@@ -274,93 +491,145 @@ export function ActivityDocument({ project, issues, totalCount, filters, options
 
       <StandardPage title="Resume executif" project={project} theme={theme}>
         <SectionTitle title="Vue globale" theme={theme} />
-        <View style={{ flexDirection: 'row', gap: 12, marginBottom: 14 }}>
+        <View style={{ flexDirection: 'row', gap: 12, marginBottom: 12 }}>
           <View style={{ ...s.card, width: 165, alignItems: 'center' }}>
             <ScoreGauge score={data.health} status={data.healthStatus} caption="Score activite" theme={theme} />
           </View>
           <View style={{ ...s.card, flex: 1 }}>
             <Text style={s.h3}>Lecture rapide</Text>
             <Text style={s.bodyText}>
-              Le rapport couvre {data.total} ticket(s) pour {project.site_name}. {data.open} restent en cours, {data.resolved} sont resolus et {data.blocked} demandent une attention particuliere.
+              Le rapport couvre {data.total} ticket(s) pour {project.site_name}. {data.open} restent ouverts, {data.resolved} sont clotures et {data.blocked} demandent une attention particuliere.
             </Text>
-            <Text style={{ ...s.textMuted, marginTop: 8 }}>{filterSummary(filters)}</Text>
+            <Text style={{ ...s.textMuted, marginTop: 7 }}>{filterSummary(filters)}</Text>
           </View>
         </View>
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between' }}>
-          {data.kpis.map((kpi) => <KpiCard key={kpi.key} item={kpi} theme={theme} />)}
+          {data.kpis.map(kpi => <KpiCard key={kpi.key} item={kpi} theme={theme} />)}
         </View>
       </StandardPage>
 
-      {enabled('indicateurs') && (
-        <StandardPage title="Grille des indicateurs" project={project} theme={theme}>
-          <SectionTitle title="Indicateurs operationnels" theme={theme} />
-          <View style={{ gap: 12 }}>
-            <ProgressBar label="Taux de resolution" value={pct(data.resolved, data.total)} status={data.resolved >= data.open ? 'success' : 'warning'} theme={theme} />
-            <ProgressBar label="Tickets bloques" value={pct(data.blocked, data.total)} status={data.blocked ? 'danger' : 'success'} theme={theme} />
-            <ProgressBar label="Tickets critiques" value={pct(data.critical, data.total)} status={data.critical ? 'danger' : 'success'} theme={theme} />
-            <ProgressBar label="Tickets encore ouverts" value={pct(data.open, data.total)} status={data.open ? 'warning' : 'success'} theme={theme} />
+      <StandardPage title="Cadre du rapport" project={project} theme={theme}>
+        <SectionTitle title="Perimetre operationnel" theme={theme} />
+        <View style={{ flexDirection: 'row', gap: 12 }}>
+          <View style={{ ...s.card, flex: 1 }}>
+            <Text style={s.h3}>Source</Text>
+            <Text style={s.bodyText}>Donnees Redmine consolidees pour le projet {project.site_name}. Les tickets sont classes par statut, type, priorite et avancement.</Text>
           </View>
-        </StandardPage>
-      )}
-
-      {enabled('statuts') && (
-        <StandardPage title="Repartition par statut" project={project} theme={theme}>
-          <SectionTitle title="Etat des tickets" theme={theme} />
-          <Bars rows={data.statusRows} theme={theme} />
-        </StandardPage>
-      )}
-
-      {enabled('trackers') && (
-        <StandardPage title="Categories et priorites" project={project} theme={theme}>
-          <View style={{ flexDirection: 'row', gap: 12 }}>
-            <View style={{ ...s.card, flex: 1 }}>
-              <Text style={s.h3}>Categories</Text>
-              <Bars rows={data.trackerRows} theme={theme} limit={8} />
-            </View>
-            <View style={{ ...s.card, flex: 1 }}>
-              <Text style={s.h3}>Priorites</Text>
-              <Bars rows={data.priorityRows} theme={theme} limit={8} />
-            </View>
+          <View style={{ ...s.card, flex: 1 }}>
+            <Text style={s.h3}>Lecture</Text>
+            <Text style={s.bodyText}>Les pages suivantes distinguent le travail livre, le travail ouvert, les blocages et les points d'echange de gouvernance.</Text>
           </View>
-        </StandardPage>
-      )}
+        </View>
+      </StandardPage>
 
-      {enabled('evolution') && (
-        <StandardPage title="Evolution temporelle" project={project} theme={theme}>
-          <SectionTitle title="Volume cree par semaine" theme={theme} />
-          <Bars rows={data.timelineRows} theme={theme} limit={16} />
-        </StandardPage>
-      )}
+      <StandardPage title="Periode et filtres" project={project} theme={theme}>
+        <SectionTitle title="Contexte de generation" theme={theme} />
+        <View style={{ ...s.card, marginBottom: 12 }}>
+          <Text style={s.h3}>{periodLabel(filters)}</Text>
+          <Text style={s.bodyText}>{filterSummary(filters)}</Text>
+        </View>
+        <View style={{ gap: 9 }}>
+          <ProgressBar label="Taux de cloture" value={pct(data.resolved, data.total)} status={data.resolved >= data.open ? 'success' : 'warning'} theme={theme} />
+          <ProgressBar label="Tickets ouverts" value={pct(data.open, data.total)} status={data.open ? 'warning' : 'success'} theme={theme} />
+          <ProgressBar label="Tickets bloques" value={pct(data.blocked, data.total)} status={data.blocked ? 'danger' : 'success'} theme={theme} />
+        </View>
+      </StandardPage>
 
-      {enabled('bloqueSynth') && data.blockedIssues.length > 0 && (
-        <StandardPage title="Tickets bloques" project={project} theme={theme}>
-          <TicketTable issues={data.blockedIssues} theme={theme} title="Tickets a debloquer" />
-        </StandardPage>
-      )}
+      <StandardPage title="Synthese avant analyse" project={project} theme={theme}>
+        <SectionTitle title="Points de pilotage" theme={theme} />
+        {data.insights.map(insight => (
+          <View key={insight} style={{ ...s.card, marginBottom: 9, padding: 10 }}>
+            <Text style={s.bodyText}>{insight}</Text>
+          </View>
+        ))}
+      </StandardPage>
 
-      {enabled('validation') && data.pendingValidation.length > 0 && (
-        <StandardPage title="Validation client" project={project} theme={theme}>
-          <TicketTable issues={data.pendingValidation} theme={theme} title="Tickets resolus en attente de validation" />
-        </StandardPage>
-      )}
+      <CompactPage title="Indicateurs Globaux" project={project} theme={theme}>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between' }}>
+          <CounterCard label="Tickets" value={data.totalCount || data.total} caption="Charge globale" theme={theme} />
+          <CounterCard label="Reunions" value={data.meetings.length} caption="Points d'echange" theme={theme} status={data.meetings.length ? 'success' : 'warning'} />
+          <CounterCard label="Ouverts" value={data.openTickets.length} caption="Demandes non cloturees" theme={theme} status={data.openTickets.length ? 'warning' : 'success'} />
+          <CounterCard label="Bloques" value={data.blockedTickets.length} caption="Actions en attente" theme={theme} status={data.blockedTickets.length ? 'danger' : 'success'} />
+        </View>
+        <View style={{ ...s.card, padding: 10 }}>
+          <Text style={s.bodyText}>Synthese executive de la charge: {data.total} ticket(s) et {data.meetings.length} reunion(s) sur la periode analysee.</Text>
+        </View>
+      </CompactPage>
 
-      {enabled('insights') && (
-        <StandardPage title="Recommandations" project={project} theme={theme}>
-          <SectionTitle title="Actions recommandees" theme={theme} />
-          {data.insights.map((insight) => (
-            <View key={insight} style={{ ...s.card, marginBottom: 10 }}>
-              <Text style={s.bodyText}>{insight}</Text>
-            </View>
-          ))}
-        </StandardPage>
-      )}
+      <ChartTablePage title="Etat des Tickets" project={project} theme={theme} rows={data.statusRows} total={data.total} chart="donut" tableLabel="Statut" />
+      <ChartTablePage title="Typologie des Tickets" project={project} theme={theme} rows={data.trackerRows} total={data.total} chart="vertical" tableLabel="Categorie" />
+      <ChartTablePage title="Priorite des Tickets" project={project} theme={theme} rows={data.priorityRows} total={data.total} chart="horizontal" tableLabel="Priorite" />
 
-      {enabled('appendix') && (
-        <StandardPage title="Annexe tickets" project={project} theme={theme}>
-          <TicketTable issues={issues} theme={theme} title="Liste des tickets exportes" />
-          {issues.length > 18 && <Text style={{ ...s.textMuted, marginTop: 8 }}>Seuls les 18 premiers tickets sont affiches dans cette annexe pour garder le PDF lisible.</Text>}
-        </StandardPage>
-      )}
+      <CompactPage title="Details des Tickets Clotures" project={project} theme={theme}>
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 }}>
+          <CounterCard label="Clotures" value={data.closedTickets.length} caption="Travail livre" theme={theme} />
+          <CounterCard label="Delai moyen" value={data.avgResolutionDays == null ? '-' : `${data.avgResolutionDays} j`} caption="Cycle de cloture" theme={theme} />
+        </View>
+        <VerticalBars rows={data.closedByType} theme={theme} />
+      </CompactPage>
+
+      <CompactPage title="Details des Tickets Ouverts" project={project} theme={theme}>
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 }}>
+          <CounterCard label="Ouverts" value={data.openTickets.length} caption="Demandes non resolues" theme={theme} status={data.openTickets.length ? 'warning' : 'success'} />
+          <CounterCard label="Anciennete" value={data.avgOpenDays == null ? '-' : `${data.avgOpenDays} j`} caption="Age moyen ouvert" theme={theme} status={(data.avgOpenDays || 0) > 30 ? 'danger' : 'warning'} />
+        </View>
+        <HorizontalBars rows={data.openByType} theme={theme} />
+      </CompactPage>
+
+      <CompactPage title="Tickets En Cours de Test" project={project} theme={theme}>
+        <CounterCard label="En test" value={data.testingTickets.length} caption="En attente de validation" theme={theme} status={data.testingTickets.length ? 'warning' : 'success'} />
+        <TicketDetailCard issue={data.testingTickets[0]} theme={theme} emptyLabel="Aucun ticket en test sur cette periode." />
+      </CompactPage>
+
+      <CompactPage title="Details des Tickets En Cours de Traitement" project={project} theme={theme}>
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 }}>
+          <CounterCard label="En traitement" value={data.activeTickets.length} caption="Charge active" theme={theme} status={data.activeTickets.length ? 'warning' : 'success'} />
+          <CounterCard label="Types actifs" value={data.activeByType.length} caption="Categories concernees" theme={theme} />
+        </View>
+        <VerticalBars rows={data.activeByType} theme={theme} />
+      </CompactPage>
+
+      <CompactPage title="Tickets En Cours de Traitement" project={project} theme={theme}>
+        <DenseTicketTable issues={data.activeTickets} theme={theme} title="Vue operationnelle des tickets actifs" limit={11} />
+      </CompactPage>
+
+      <CompactPage title="Tickets Pris En Charge" project={project} theme={theme}>
+        <CounterCard label="Pris en charge" value={data.acknowledgedTickets.length} caption="Acceptes non clotures" theme={theme} status={data.acknowledgedTickets.length ? 'warning' : 'success'} />
+        <TicketDetailCard issue={data.acknowledgedTickets[0]} theme={theme} emptyLabel="Aucun ticket uniquement pris en charge sur cette periode." />
+      </CompactPage>
+
+      <CompactPage title="Tickets Bloques" project={project} theme={theme}>
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 }}>
+          <CounterCard label="Bloques" value={data.blockedTickets.length} caption="Backlog a debloquer" theme={theme} status={data.blockedTickets.length ? 'danger' : 'success'} />
+          <CounterCard label="Features" value={data.blockedFeatureTickets.length} caption="Demandes fonctionnelles" theme={theme} status={data.blockedFeatureTickets.length ? 'warning' : 'success'} />
+          <CounterCard label="Autres" value={data.blockedOtherTickets.length} caption="Bugs ou autres types" theme={theme} status={data.blockedOtherTickets.length ? 'warning' : 'success'} />
+          <CounterCard label="Priorites" value={data.blockedByPriority.length} caption="Niveaux impactes" theme={theme} />
+        </View>
+        <View style={{ flexDirection: 'row', gap: 10 }}>
+          <View style={{ flex: 1 }}>
+            <HorizontalBars rows={data.blockedByPriority} theme={theme} limit={5} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <DonutChart rows={data.blockedByStatus} theme={theme} size={118} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <DonutChart rows={data.blockedByType} theme={theme} size={118} />
+          </View>
+        </View>
+      </CompactPage>
+
+      <CompactPage title="Tickets Bloques" project={project} theme={theme}>
+        <DenseTicketTable issues={data.blockedFeatureTickets} theme={theme} title="Feature tickets bloques" limit={11} />
+      </CompactPage>
+
+      <CompactPage title="Tickets Bloques" project={project} theme={theme}>
+        <DenseTicketTable issues={data.blockedOtherTickets} theme={theme} title="Bugs et autres tickets bloques" limit={11} />
+      </CompactPage>
+
+      <CompactPage title="Reunions et Points d'Echange" project={project} theme={theme}>
+        <CounterCard label="Reunions" value={data.meetings.length} caption="Historique de gouvernance" theme={theme} status={data.meetings.length ? 'success' : 'warning'} />
+        <DenseTicketTable issues={data.meetings} theme={theme} title="Historique des reunions et points d'echange" limit={10} />
+      </CompactPage>
 
       {enabled('merci') && (
         <Page size="A4" style={s.page}>

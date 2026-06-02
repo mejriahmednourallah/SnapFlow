@@ -29,3 +29,39 @@ func TestFindLoginFormAcceptsPasswordLogin(t *testing.T) {
 		t.Fatalf("expected password login target, got %q", target)
 	}
 }
+
+func TestRobotsTxtPrestashopStandardDisallowsAreNotDisclosure(t *testing.T) {
+	robots := `User-agent: *
+Disallow: /cache/
+Disallow: /classes/
+Disallow: /config/
+Disallow: /controllers/
+Disallow: /img/
+Disallow: /modules/
+Disallow: /themes/
+Disallow: /translations/`
+
+	result := checkRobotsTxtInfoDisclosure(robots)
+	if result.Status != "pass" {
+		t.Fatalf("expected standard PrestaShop robots paths to pass, got status %q with paths %#v", result.Status, result.DisclosedPaths)
+	}
+	if len(result.DisclosedPaths) != 0 {
+		t.Fatalf("expected no disclosed paths, got %#v", result.DisclosedPaths)
+	}
+}
+
+func TestRobotsTxtStillFlagsNonStandardSensitivePath(t *testing.T) {
+	robots := `User-agent: *
+Disallow: /cache/
+Disallow: /classes/
+Disallow: /modules/
+Disallow: /private/`
+
+	result := checkRobotsTxtInfoDisclosure(robots)
+	if result.Status != "warning" {
+		t.Fatalf("expected sensitive non-standard path to warn, got %q", result.Status)
+	}
+	if len(result.DisclosedPaths) != 1 || result.DisclosedPaths[0] != "/private/" {
+		t.Fatalf("expected /private/ disclosed, got %#v", result.DisclosedPaths)
+	}
+}

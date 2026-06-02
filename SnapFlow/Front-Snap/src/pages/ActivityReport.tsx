@@ -37,24 +37,17 @@ interface ProjectInfo {
   site_name: string;
   url: string;
   redmine_url?: string | null;
+  logo_url?: string | null;
 }
 
 const DEFAULT_ACTIVITY_PDF_SECTIONS: Record<string, boolean> = {
   sommaire: true,
-  indicateurs: true,
-  statuts: true,
-  trackers: true,
-  priorities: true,
-  evolution: true,
-  bloqueSynth: true,
-  validation: true,
-  insights: true,
-  appendix: true,
-  merci: true,
+  merci: false,
 };
 
 const DEFAULT_ACTIVITY_COVER_KPIS: Record<string, boolean> = {
   total: true,
+  meetings: true,
   open: true,
   resolved: true,
   critical: true,

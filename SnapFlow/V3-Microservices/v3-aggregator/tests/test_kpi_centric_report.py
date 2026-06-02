@@ -664,6 +664,98 @@ class TestKPICentricReport(unittest.TestCase):
         self.assertEqual(kpi["evidence"]["risky_module_count"], 1)
         self.assertEqual(kpi["evidence"]["module_version_rows"][0]["verification_result"], "risque_confirme")
 
+    def test_null_numeric_kpi_payload_values_do_not_crash(self):
+        report = json.loads(json.dumps(self.report))
+        report["pages_scanned"] = None
+        da = report.setdefault("domain_analysis", {})
+        da["cms_kpi"] = {
+            "cms_detected": "PrestaShop",
+            "cms_version": None,
+            "cms_version_eol": None,
+            "module_versions": [],
+            "cve_severity": {"critical": None, "high": None, "medium": None, "low": None},
+        }
+        da.setdefault("security", {})["cookie_security_kpi"] = {
+            "missing_cookie_flag_count": None,
+            "cookies_with_missing_flags": [],
+        }
+        metrics = report.setdefault("site_metrics", {})
+        metrics.setdefault("seo", {}).update({
+            "images_missing_alt": None,
+            "pages_missing_meta_desc": None,
+            "pages_missing_title": None,
+            "node_style_url_count": None,
+            "duplicate_content_kpi": {
+                "duplicate_content_rate_pct": None,
+                "duplicate_page_count": None,
+                "passed": True,
+            },
+        })
+        metrics.setdefault("performance", {}).setdefault("button_kpi", {})["pages_with_nonfunc_buttons"] = None
+        metrics.setdefault("ux", {})["pages_missing_contextual_links"] = None
+
+        rebuilt = build_kpi_centric_report(report)
+
+        self.assertIn("axes", rebuilt)
+        self.assertEqual(self._find_kpi(rebuilt, "tech_cve_check")["status"], "passing")
+        self.assertEqual(self._find_kpi(rebuilt, "sec_session_cookies")["status"], "passing")
+        self.assertEqual(self._find_kpi(rebuilt, "seo_duplication")["evidence"]["duplicate_content_rate_pct"], 0.0)
+
+    def test_service_exposure_low_public_web_ports_pass(self):
+        report = json.loads(json.dumps(self.report))
+        sec = report.setdefault("domain_analysis", {}).setdefault("security", {})
+        sec["service_exposure"] = {
+            "enabled": True,
+            "host": "example.com",
+            "timeout_ms": 900,
+            "ports_scanned": [80, 443],
+            "status": "fail",
+            "severity": "low",
+            "open_services": [
+                {"port": 80, "service": "HTTP", "state": "open", "risk": "low"},
+                {"port": 443, "service": "HTTPS", "state": "open", "risk": "low"},
+            ],
+        }
+
+        rebuilt = build_kpi_centric_report(report)
+        kpi = self._find_kpi(rebuilt, "sec_service_exposure")
+
+        self.assertEqual(kpi["status"], "passing")
+        self.assertIsNone(kpi["severity"])
+        self.assertEqual(kpi["evidence"]["applicability_context"], "public_web_ports_expected")
+
+    def test_mobile_attempted_without_valid_measurements_is_not_evaluated_with_reason(self):
+        report = json.loads(json.dumps(self.report))
+        perf = report.setdefault("site_metrics", {}).setdefault("performance", {})
+        perf["mobile_kpi"] = {
+            "available": False,
+            "passed": None,
+            "pages_attempted": 1,
+            "pages_measured": 0,
+            "measurement_status": "measurement_failed",
+            "failure_reason": "mobile_cwv_measurement_failed",
+            "data_quality": "MISSING",
+        }
+
+        rebuilt = build_kpi_centric_report(report)
+        kpi = self._find_kpi(rebuilt, "perf_mobile_speed")
+
+        self.assertEqual(kpi["status"], "not_evaluated")
+        self.assertEqual(kpi["evidence"]["failure_reason"], "mobile_cwv_measurement_failed")
+
+    def test_privacy_score_fails_when_privacy_policy_is_missing(self):
+        report = json.loads(json.dumps(self.report))
+        da = report.setdefault("domain_analysis", {})
+        da.setdefault("privacy_kpi", {})["has_privacy_policy"] = False
+        metrics = report.setdefault("site_metrics", {})
+        metrics.setdefault("content", {}).setdefault("advanced_rgpd_kpis", {})["privacy_score_low_pages"] = 0
+
+        rebuilt = build_kpi_centric_report(report)
+        kpi = self._find_kpi(rebuilt, "rgpd_privacy_score")
+
+        self.assertEqual(kpi["status"], "failing")
+        self.assertEqual(kpi["evidence"]["failure_reason"], "privacy_policy_missing")
+
 
 if __name__ == "__main__":
     unittest.main()

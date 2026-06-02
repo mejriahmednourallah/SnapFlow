@@ -1,4 +1,5 @@
 import { Buffer } from 'buffer';
+import { supabase } from '@/integrations/supabase/client';
 import type { DashboardProject, RedmineIssue, ActivityPdfOptions } from '@/components/activity/pdf/pdfTypes';
 
 export interface GenerateActivityPdfParams {
@@ -27,6 +28,56 @@ function slugify(value: string) {
     .replace(/^-|-$/g, '');
 }
 
+function blobToDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      if (typeof reader.result === 'string') {
+        resolve(reader.result);
+        return;
+      }
+      reject(new Error('Unable to convert activity logo to data URL'));
+    };
+    reader.onerror = () => reject(reader.error ?? new Error('Unable to read activity logo blob'));
+    reader.readAsDataURL(blob);
+  });
+}
+
+async function fetchLogoAsDataUrl(url?: string | null): Promise<string | undefined> {
+  if (!url) return undefined;
+  if (/^(data:|blob:)/i.test(url)) return url;
+
+  try {
+    const response = await fetch(url);
+    if (!response.ok) return url;
+    return await blobToDataUrl(await response.blob());
+  } catch {
+    return url;
+  }
+}
+
+async function resolveActivityLogoSource(project: DashboardProject): Promise<string | undefined> {
+  const storedLogo = project.logo_url?.trim();
+  const siteUrl = project.url?.trim();
+
+  try {
+    const { data, error } = await supabase.functions.invoke('detect-logo', {
+      body: storedLogo
+        ? { logoUrl: storedLogo, returnDataUrl: true }
+        : { siteUrl, returnDataUrl: true },
+    });
+
+    if (!error) {
+      if (data?.data_url) return data.data_url;
+      if (data?.logo_url) return await fetchLogoAsDataUrl(data.logo_url);
+    }
+  } catch {
+    // The activity export still works without the edge function; direct URL is the fallback.
+  }
+
+  return fetchLogoAsDataUrl(storedLogo);
+}
+
 export async function generateActivityPdf(params: GenerateActivityPdfParams): Promise<void> {
   if (typeof globalThis.Buffer === 'undefined') {
     globalThis.Buffer = Buffer;
@@ -37,7 +88,9 @@ export async function generateActivityPdf(params: GenerateActivityPdfParams): Pr
     import('@/components/activity/pdf/ActivityDocument'),
   ]);
 
-  const blob = await pdf(<ActivityDocument {...params} />).toBlob();
+  const clientLogoSrc = await resolveActivityLogoSource(params.project);
+  const project = clientLogoSrc ? { ...params.project, logo_url: clientLogoSrc } : params.project;
+  const blob = await pdf(<ActivityDocument {...params} project={project} />).toBlob();
   const today = new Date().toISOString().slice(0, 10);
   const filename = `rapport-activite-${slugify(params.project.site_name || 'projet')}-${today}.pdf`;
 

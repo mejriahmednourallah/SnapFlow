@@ -49,6 +49,7 @@ export interface DashboardProject {
   site_name: string;
   url: string;
   redmine_url?: string | null;
+  logo_url?: string | null;
 }
 
 export interface PdfConfig {

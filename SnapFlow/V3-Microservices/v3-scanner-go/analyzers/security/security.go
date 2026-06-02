@@ -1330,9 +1330,55 @@ var weakErrorIndicators = []string{
 	"Warning:", "Notice:", "Parse error", "Deprecated:",
 }
 
-func isStandardCMSRobotsDisallow(path string) bool {
+func isLikelyPrestashopRobotsTxt(lines []string) bool {
+	standardSignals := map[string]bool{
+		"/cache": true, "/classes": true, "/config": true, "/controllers": true,
+		"/download": true, "/img": true, "/mails": true, "/modules": true,
+		"/override": true, "/themes": true, "/translations": true,
+	}
+	found := map[string]bool{}
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(strings.ToLower(line), "disallow:") {
+			continue
+		}
+		parts := strings.SplitN(line, ":", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		path := strings.TrimSpace(parts[1])
+		path = strings.TrimSuffix(strings.ToLower(path), "*")
+		path = "/" + strings.Trim(path, "/")
+		for signal := range standardSignals {
+			if path == signal || strings.HasPrefix(path, signal+"/") {
+				found[signal] = true
+			}
+		}
+	}
+	return len(found) >= 3
+}
+
+func isStandardCMSRobotsDisallow(path string, likelyPrestashop bool) bool {
 	p := strings.ToLower(strings.TrimSpace(path))
 	p = strings.TrimSuffix(p, "*")
+	if likelyPrestashop {
+		prestashopStandard := map[string]bool{
+			"/cache": true, "/cache/": true,
+			"/classes": true, "/classes/": true,
+			"/config": true, "/config/": true,
+			"/controllers": true, "/controllers/": true,
+			"/download": true, "/download/": true,
+			"/img": true, "/img/": true,
+			"/mails": true, "/mails/": true,
+			"/modules": true, "/modules/": true,
+			"/override": true, "/override/": true,
+			"/themes": true, "/themes/": true,
+			"/translations": true, "/translations/": true,
+		}
+		if prestashopStandard[p] {
+			return true
+		}
+	}
 	standard := map[string]bool{
 		"/admin":            true,
 		"/admin/":           true,
@@ -1373,16 +1419,21 @@ func checkRobotsTxtInfoDisclosure(robotsTxtContent string) RobotsTxtResult {
 
 	// Parse Disallow lines
 	lines := strings.Split(robotsTxtContent, "\n")
+	likelyPrestashop := isLikelyPrestashopRobotsTxt(lines)
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
 		if strings.HasPrefix(strings.ToLower(line), "disallow:") {
-			path := strings.TrimPrefix(line, "Disallow:")
+			parts := strings.SplitN(line, ":", 2)
+			if len(parts) != 2 {
+				continue
+			}
+			path := parts[1]
 			path = strings.TrimSpace(path)
 
 			if path == "" || path == "/" {
 				continue // Non-interesting paths
 			}
-			if isStandardCMSRobotsDisallow(path) {
+			if isStandardCMSRobotsDisallow(path, likelyPrestashop) {
 				continue
 			}
 
