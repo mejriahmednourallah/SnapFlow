@@ -55,27 +55,9 @@ async function fetchLogoAsDataUrl(url?: string | null, fallbackToDirect = true):
   }
 }
 
-function inferredLogoCandidates(project: DashboardProject): string[] {
-  try {
-    const origin = new URL(project.url).origin;
-    return [
-      `${origin}/apple-touch-icon.png`,
-      `${origin}/favicon-32x32.png`,
-      `${origin}/favicon.ico`,
-    ];
-  } catch {
-    return [];
-  }
-}
-
 async function resolveActivityLogoSource(project: DashboardProject): Promise<string | undefined> {
   const storedLogo = project.logo_url?.trim();
   if (storedLogo) return fetchLogoAsDataUrl(storedLogo);
-
-  for (const candidate of inferredLogoCandidates(project)) {
-    const resolved = await fetchLogoAsDataUrl(candidate, false);
-    if (resolved) return resolved;
-  }
   return undefined;
 }
 
