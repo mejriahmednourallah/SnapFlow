@@ -1,15 +1,11 @@
-import { Document, Page, Text, View, Svg, Circle } from '@react-pdf/renderer';
+import { Document, Image, Page, Path, Svg, Text, View } from '@react-pdf/renderer';
 import type { ReactNode } from 'react';
-import { format, differenceInDays, startOfWeek } from 'date-fns';
+import { differenceInDays, format } from 'date-fns';
 import { fr } from 'date-fns/locale';
+import snapflowLogo from '@/assets/snapflow-logo.png';
 import type { PdfTheme } from '@/components/pdf/theme';
 import { getStatusColor, makePageStyles } from '@/components/pdf/theme';
-import { PageHeader } from '@/components/pdf/shared/PageHeader';
-import { PageFooter } from '@/components/pdf/shared/PageFooter';
-import { SectionTitle } from '@/components/pdf/shared/SectionTitle';
-import { ScoreGauge } from '@/components/pdf/shared/ScoreGauge';
-import { ProgressBar } from '@/components/pdf/shared/ProgressBar';
-import type { RedmineIssue, DashboardProject, ActivityPdfOptions } from './pdfTypes';
+import type { ActivityPdfOptions, DashboardProject, RedmineIssue } from './pdfTypes';
 
 interface ActivityDocumentProps {
   project: DashboardProject;
@@ -27,56 +23,56 @@ interface ActivityDocumentProps {
 }
 
 type SeverityStatus = 'success' | 'warning' | 'danger';
-
-interface ActivityKpi {
+type CountRow = { name: string; count: number; color?: string };
+type ActivityKpi = {
   key: string;
   label: string;
   value: string;
   caption: string;
   status: SeverityStatus;
-}
+};
 
-type CountRow = { name: string; count: number; color?: string };
-
-const CHART_COLORS = ['#1E3A5F', '#4E8CCF', '#3B9B86', '#BD8C4F', '#F97316', '#DC2626', '#64748B', '#7C3AED'];
 const LANDSCAPE_PAGE = { size: 'A4' as const, orientation: 'landscape' as const };
+const CHART_COLORS = ['#0E9FB0', '#F6B21A', '#1E3A5F', '#4E8CCF', '#3B9B86', '#F97316', '#DC2626', '#64748B'];
+const PAGE_PADDING_X = 34;
+const TABLE_PAGE_SIZE = 15;
 
 const clean = (value?: string | null) => (value || '').trim();
 const deAccent = (value: string) => value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
-const normalizeLabel = (value: string) => deAccent(value).replace(/\s+/g, ' ').trim();
-const matchesExact = (value: string, labels: string[]) => labels.some(label => normalizeLabel(value) === normalizeLabel(label));
-
-const ASCII_STATUS_LABELS = {
-  closed: ['Ferme', 'Closed', 'Cloture', 'Resolu'],
-  resolvedOnly: ['Resolu'],
-  blocked: ['Bloque'],
-  testing: ['En cours de test'],
-  acknowledged: ['Pris en charge'],
-  active: ['En cours de traitement'],
+const normalizeLabel = (value: string) => deAccent(value).replace(/[^a-z0-9]+/g, ' ').replace(/\s+/g, ' ').trim();
+const matchesAny = (value: string, needles: string[]) => {
+  const normalized = normalizeLabel(value);
+  return needles.some(needle => normalized.includes(normalizeLabel(needle)));
 };
 
-const ASCII_TRACKER_LABELS = {
-  meetings: ['Reunion', 'Point d echange', "Point d'echange"],
-  feature: ['Feature'],
-};
-
-const ASCII_PRIORITY_LABELS = {
-  critical: ['Critique', 'Critical', 'Urgent', 'Immediat', 'Immediate'],
-};
-
-const isClosed = (value: string) => matchesExact(value, ASCII_STATUS_LABELS.closed);
-const isResolvedOnly = (value: string) => matchesExact(value, ASCII_STATUS_LABELS.resolvedOnly);
-const isBlocked = (value: string) => matchesExact(value, ASCII_STATUS_LABELS.blocked);
-const isTesting = (value: string) => matchesExact(value, ASCII_STATUS_LABELS.testing);
-const isAcknowledged = (value: string) => matchesExact(value, ASCII_STATUS_LABELS.acknowledged);
-const isInProgress = (value: string) => matchesExact(value, ASCII_STATUS_LABELS.active);
-const isCritical = (value: string) => matchesExact(value, ASCII_PRIORITY_LABELS.critical);
-const isMeeting = (value: string) => matchesExact(value, ASCII_TRACKER_LABELS.meetings);
-const isFeature = (value: string) => matchesExact(value, ASCII_TRACKER_LABELS.feature);
+const isClosed = (value: string) => matchesAny(value, ['clotur', 'closed', 'clos', 'ferme', 'resolu', 'resolved']);
+const isResolvedOnly = (value: string) => matchesAny(value, ['resolu', 'resolved']);
+const isBlocked = (value: string) => matchesAny(value, ['bloqu', 'attente', 'hold', 'suspend']);
+const isTesting = (value: string) => matchesAny(value, ['test', 'validation', 'recette']);
+const isAcknowledged = (value: string) => matchesAny(value, ['pris en charge', 'assign', 'ack']);
+const isInProgress = (value: string) => matchesAny(value, ['en cours de traitement', 'traitement', 'progress']);
+const isCritical = (value: string) => matchesAny(value, ['critique', 'critical', 'urgent', 'immediat', 'immediate']);
+const isMeeting = (value: string) => matchesAny(value, ['reunion', 'point d echange', "point d'echange"]);
 
 function pct(count: number, total: number) {
   if (!total) return 0;
   return Math.round((count / total) * 100);
+}
+
+function clamp(value: number) {
+  return Math.max(0, Math.min(100, Math.round(value)));
+}
+
+function short(value: string, max = 84) {
+  const text = clean(value);
+  return text.length > max ? `${text.slice(0, max - 1)}...` : text;
+}
+
+function safeDate(value?: string | null, pattern = 'dd/MM/yyyy') {
+  if (!value) return '-';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '-';
+  return format(date, pattern, { locale: fr });
 }
 
 function countBy<T>(items: T[], key: (item: T) => string): CountRow[] {
@@ -90,16 +86,7 @@ function countBy<T>(items: T[], key: (item: T) => string): CountRow[] {
     .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
 }
 
-function groupByWeek(issues: RedmineIssue[]) {
-  const counts = new Map<string, number>();
-  issues.forEach((issue) => {
-    const week = format(startOfWeek(new Date(issue.created_on), { weekStartsOn: 1 }), 'dd/MM');
-    counts.set(week, (counts.get(week) || 0) + 1);
-  });
-  return Array.from(counts.entries()).map(([name, count]) => ({ name, count }));
-}
-
-function avgDays(issues: RedmineIssue[]) {
+function avgResolutionDays(issues: RedmineIssue[]) {
   if (!issues.length) return null;
   const sum = issues.reduce((acc, issue) => {
     return acc + Math.max(0, differenceInDays(new Date(issue.updated_on), new Date(issue.created_on)));
@@ -107,16 +94,31 @@ function avgDays(issues: RedmineIssue[]) {
   return Math.round(sum / issues.length);
 }
 
-function clamp(value: number) {
-  return Math.max(0, Math.min(100, Math.round(value)));
+function avgAgeDays(issues: RedmineIssue[]) {
+  if (!issues.length) return null;
+  const sum = issues.reduce((acc, issue) => {
+    return acc + Math.max(0, differenceInDays(new Date(), new Date(issue.created_on)));
+  }, 0);
+  return Math.round(sum / issues.length);
 }
 
-function short(value: string, max = 74) {
-  return value.length > max ? `${value.slice(0, max - 1)}...` : value;
-}
-
-function withColors(rows: CountRow[]) {
+function colorize(rows: CountRow[]) {
   return rows.map((row, index) => ({ ...row, color: CHART_COLORS[index % CHART_COLORS.length] }));
+}
+
+function rowsWithOther(rows: CountRow[], limit: number): CountRow[] {
+  if (rows.length <= limit) return rows;
+  const visible = rows.slice(0, Math.max(1, limit - 1));
+  const otherCount = rows.slice(Math.max(1, limit - 1)).reduce((sum, row) => sum + row.count, 0);
+  return [...visible, { name: 'Autres', count: otherCount, color: '#64748B' }];
+}
+
+function paginate<T>(items: T[], size = TABLE_PAGE_SIZE): T[][] {
+  const chunks: T[][] = [];
+  for (let index = 0; index < items.length; index += size) {
+    chunks.push(items.slice(index, index + size));
+  }
+  return chunks;
 }
 
 function buildData(issues: RedmineIssue[], totalCount: number) {
@@ -125,8 +127,13 @@ function buildData(issues: RedmineIssue[], totalCount: number) {
   const closedTickets = issues.filter(issue => isClosed(issue.status.name));
   const openTickets = issues.filter(issue => !isClosed(issue.status.name));
   const blockedTickets = issues.filter(issue => isBlocked(issue.status.name));
-  const testingTickets = issues.filter(issue => isTesting(issue.status.name));
-  const acknowledgedTickets = issues.filter(issue => isAcknowledged(issue.status.name) && !isClosed(issue.status.name) && !isBlocked(issue.status.name));
+  const testingTickets = issues.filter(issue => isTesting(issue.status.name) && !isClosed(issue.status.name));
+  const acknowledgedTickets = issues.filter(issue =>
+    isAcknowledged(issue.status.name) &&
+    !isClosed(issue.status.name) &&
+    !isBlocked(issue.status.name) &&
+    !isTesting(issue.status.name)
+  );
   const activeTickets = issues.filter(issue =>
     isInProgress(issue.status.name) &&
     !isClosed(issue.status.name) &&
@@ -134,37 +141,36 @@ function buildData(issues: RedmineIssue[], totalCount: number) {
     !isTesting(issue.status.name)
   );
   const criticalIssues = issues.filter(issue => isCritical(issue.priority.name));
-  const pendingValidation = issues.filter(issue => isResolvedOnly(issue.status.name) && differenceInDays(Date.now(), new Date(issue.updated_on).getTime()) > 2);
-  const blockedFeatureTickets = blockedTickets.filter(issue => isFeature(issue.tracker.name));
-  const blockedOtherTickets = blockedTickets.filter(issue => !isFeature(issue.tracker.name));
-  const avgResolutionDays = avgDays(closedTickets);
-  const avgOpenDays = avgDays(openTickets);
-  const health = clamp(100 - pct(blockedTickets.length, Math.max(total, 1)) * 0.5 - pct(criticalIssues.length, Math.max(total, 1)) * 0.35 - Math.min(avgOpenDays || 0, 60) * 0.35);
-  const status: SeverityStatus = health >= 75 ? 'success' : health >= 50 ? 'warning' : 'danger';
+  const pendingValidation = issues.filter(issue => isResolvedOnly(issue.status.name) && differenceInDays(new Date(), new Date(issue.updated_on)) > 2);
+  const avgClosed = avgResolutionDays(closedTickets);
+  const avgOpen = avgAgeDays(openTickets);
+  const health = clamp(
+    100 -
+    pct(blockedTickets.length, Math.max(total, 1)) * 0.5 -
+    pct(criticalIssues.length, Math.max(total, 1)) * 0.35 -
+    Math.min(avgOpen || 0, 60) * 0.35
+  );
+  const healthStatus: SeverityStatus = health >= 75 ? 'success' : health >= 50 ? 'warning' : 'danger';
 
   const kpis: ActivityKpi[] = [
-    { key: 'total', label: 'Tickets', value: String(totalCount || total), caption: totalCount !== total ? `${total} dans la vue filtree` : 'Perimetre complet', status: 'success' },
+    { key: 'total', label: 'Tickets', value: String(totalCount || total), caption: totalCount !== total ? `${total} charges dans le PDF` : 'Perimetre complet', status: 'success' },
     { key: 'meetings', label: 'Reunions', value: String(meetings.length), caption: "Points d'echange", status: meetings.length ? 'success' : 'warning' },
-    { key: 'open', label: 'Ouverts', value: String(openTickets.length), caption: `${pct(openTickets.length, total)} % des tickets`, status: openTickets.length ? 'warning' : 'success' },
+    { key: 'open', label: 'Ouverts', value: String(openTickets.length), caption: `${pct(openTickets.length, total)} % du volume`, status: openTickets.length ? 'warning' : 'success' },
     { key: 'resolved', label: 'Clotures', value: String(closedTickets.length), caption: `${pct(closedTickets.length, total)} % livres`, status: 'success' },
     { key: 'critical', label: 'Critiques', value: String(criticalIssues.length), caption: 'Priorite urgente ou critique', status: criticalIssues.length ? 'danger' : 'success' },
-    { key: 'blocked', label: 'Bloques', value: String(blockedTickets.length), caption: 'Tickets en attente', status: blockedTickets.length ? 'danger' : 'success' },
-    { key: 'closure', label: 'Delai moyen', value: avgResolutionDays == null ? '-' : `${avgResolutionDays} j`, caption: 'Resolution des tickets clos', status: avgResolutionDays == null || avgResolutionDays <= 7 ? 'success' : avgResolutionDays <= 21 ? 'warning' : 'danger' },
+    { key: 'blocked', label: 'Bloques', value: String(blockedTickets.length), caption: 'Actions en attente', status: blockedTickets.length ? 'danger' : 'success' },
+    { key: 'closure', label: 'Delai moyen', value: avgClosed == null ? '-' : `${avgClosed} j`, caption: 'Cycle des tickets clos', status: avgClosed == null || avgClosed <= 7 ? 'success' : avgClosed <= 21 ? 'warning' : 'danger' },
   ];
 
   const insights = [
-    blockedTickets.length > 0 ? `Traiter en priorite les ${blockedTickets.length} ticket(s) bloques ou en attente.` : 'Aucun blocage majeur detecte dans la selection.',
-    pendingValidation.length > 0 ? `${pendingValidation.length} ticket(s) resolus attendent une validation client.` : 'Aucun ticket resolu ne semble attendre une validation prolongee.',
-    criticalIssues.length > 0 ? `Surveiller les ${criticalIssues.length} ticket(s) critiques pour eviter un impact projet.` : 'La selection ne contient pas de ticket critique.',
+    blockedTickets.length > 0 ? `${blockedTickets.length} ticket(s) bloques demandent une decision ou une action de deblocage.` : 'Aucun blocage majeur detecte sur la periode.',
+    pendingValidation.length > 0 ? `${pendingValidation.length} ticket(s) resolus attendent une validation client prolongee.` : 'Aucun ticket resolu ne semble attendre une validation prolongee.',
+    criticalIssues.length > 0 ? `${criticalIssues.length} ticket(s) critiques doivent rester sous surveillance projet.` : 'La selection ne contient pas de ticket critique.',
   ];
 
   return {
     total,
     totalCount,
-    open: openTickets.length,
-    resolved: closedTickets.length,
-    blocked: blockedTickets.length,
-    critical: criticalIssues.length,
     meetings,
     openTickets,
     closedTickets,
@@ -172,26 +178,34 @@ function buildData(issues: RedmineIssue[], totalCount: number) {
     testingTickets,
     acknowledgedTickets,
     activeTickets,
-    pendingValidation,
-    blockedFeatureTickets,
-    blockedOtherTickets,
     criticalIssues,
-    avgResolutionDays,
-    avgOpenDays,
+    pendingValidation,
+    avgClosed,
+    avgOpen,
     health,
-    healthStatus: status,
+    healthStatus,
     kpis,
-    statusRows: withColors(countBy(issues, issue => issue.status.name)),
-    trackerRows: withColors(countBy(issues, issue => issue.tracker.name)),
-    priorityRows: withColors(countBy(issues, issue => issue.priority.name)),
-    closedByType: withColors(countBy(closedTickets, issue => issue.tracker.name)),
-    openByType: withColors(countBy(openTickets, issue => issue.tracker.name)),
-    activeByType: withColors(countBy(activeTickets, issue => issue.tracker.name)),
-    blockedByType: withColors(countBy(blockedTickets, issue => issue.tracker.name)),
-    blockedByPriority: withColors(countBy(blockedTickets, issue => issue.priority.name)),
-    blockedByStatus: withColors(countBy(blockedTickets, issue => issue.status.name)),
-    timelineRows: groupByWeek(issues),
     insights,
+    statusRows: colorize(countBy(issues, issue => issue.status.name)),
+    trackerRows: colorize(countBy(issues, issue => issue.tracker.name)),
+    priorityRows: colorize(countBy(issues, issue => issue.priority.name)),
+    closedByType: colorize(countBy(closedTickets, issue => issue.tracker.name)),
+    openByType: colorize(countBy(openTickets, issue => issue.tracker.name)),
+    activeByType: colorize(countBy(activeTickets, issue => issue.tracker.name)),
+    blockedByType: colorize(countBy(blockedTickets, issue => issue.tracker.name)),
+    blockedByPriority: colorize(countBy(blockedTickets, issue => issue.priority.name)),
+    blockedByStatus: colorize(countBy(blockedTickets, issue => issue.status.name)),
+  };
+}
+
+type ActivityData = ReturnType<typeof buildData>;
+
+function buildActivitySections(data: ActivityData) {
+  return {
+    showActiveTables: data.activeTickets.length > 0,
+    showBlockedAnalysis: data.blockedTickets.length > 0,
+    showBlockedTables: data.blockedTickets.length > 0,
+    showMeetings: data.meetings.length > 0,
   };
 }
 
@@ -212,72 +226,169 @@ function periodLabel(filters?: ActivityDocumentProps['filters']) {
   return 'Toutes periodes confondues';
 }
 
-function EmptyState({ theme, label = 'Aucun element sur cette periode' }: { theme?: PdfTheme; label?: string }) {
-  return (
-    <View wrap={false} style={{ borderWidth: 0.8, borderColor: theme?.border ?? '#D7E0EA', backgroundColor: theme?.recBg ?? '#F1F4F8', borderRadius: 10, padding: 12 }}>
-      <Text style={{ fontSize: 9, color: theme?.textMuted ?? '#64748B' }}>{label}</Text>
-    </View>
-  );
+function pageText(theme?: PdfTheme) {
+  return {
+    text: theme?.text ?? '#111827',
+    muted: theme?.textMuted ?? '#64748B',
+    primary: theme?.primary ?? '#1E3A5F',
+    accent: theme?.accent ?? '#0E9FB0',
+    surface: theme?.surface ?? '#FFFFFF',
+    border: theme?.border ?? '#D7E0EA',
+    bg: theme?.bg ?? '#F8FAFC',
+    hero: theme?.heroBg ?? '#10243C',
+    recBg: theme?.recBg ?? '#F1F4F8',
+    headerBg: theme?.headerBg ?? '#E7EEF7',
+  };
 }
 
-function KpiCard({ item, theme, compact = false }: { item: ActivityKpi; theme?: PdfTheme; compact?: boolean }) {
-  const s = makePageStyles(theme);
-  const color = getStatusColor(item.status);
+function ActivitySlidePage({
+  title,
+  subtitle,
+  project,
+  theme,
+  options,
+  children,
+  tone = 'light',
+}: {
+  title: string;
+  subtitle?: string;
+  project: DashboardProject;
+  theme?: PdfTheme;
+  options: ActivityPdfOptions;
+  children: ReactNode;
+  tone?: 'light' | 'brand';
+}) {
+  const t = pageText(theme);
+  const brandColor = options.pdfColor || t.accent;
+  const dark = tone === 'brand';
   return (
-    <View wrap={false} style={{ ...s.card, width: '23.5%', minHeight: compact ? 58 : 62, marginBottom: 7, padding: compact ? 8 : 9 }}>
-      <Text style={{ fontSize: 7.2, color: theme?.textMuted ?? '#64748B', textTransform: 'uppercase' }}>{item.label}</Text>
-      <Text style={{ fontSize: compact ? 20 : 22, fontFamily: 'DMSans', fontWeight: 700, color, marginTop: 3 }}>{item.value}</Text>
-      <Text style={{ fontSize: 7.4, color: theme?.textMuted ?? '#64748B', marginTop: 3 }}>{item.caption}</Text>
-    </View>
-  );
-}
-
-function CounterCard({ label, value, caption, theme, status = 'success' }: { label: string; value: number | string; caption: string; theme?: PdfTheme; status?: SeverityStatus }) {
-  return (
-    <KpiCard
-      compact
-      theme={theme}
-      item={{ key: label, label, value: String(value), caption, status }}
-    />
-  );
-}
-
-function LegendTable({ rows, theme, total, label = 'Libelle', limit = 9 }: { rows: CountRow[]; theme?: PdfTheme; total: number; label?: string; limit?: number }) {
-  const visible = rows.slice(0, limit);
-  if (!visible.length) return <EmptyState theme={theme} />;
-  const widths = [270, 45, 45];
-  return (
-    <View wrap={false} style={{ borderWidth: 0.7, borderColor: theme?.border ?? '#D7E0EA', borderRadius: 9, overflow: 'hidden' }}>
-      <View style={{ flexDirection: 'row', backgroundColor: theme?.headerBg ?? '#E7EEF7', paddingVertical: 5, paddingHorizontal: 7 }}>
-        <Text style={{ width: widths[0], fontSize: 7.2, fontFamily: 'DMSans', fontWeight: 700, color: theme?.primary ?? '#1E3A5F' }}>{label}</Text>
-        <Text style={{ width: widths[1], fontSize: 7.2, fontFamily: 'DMSans', fontWeight: 700, color: theme?.primary ?? '#1E3A5F', textAlign: 'right' }}>Nb</Text>
-        <Text style={{ width: widths[2], fontSize: 7.2, fontFamily: 'DMSans', fontWeight: 700, color: theme?.primary ?? '#1E3A5F', textAlign: 'right' }}>%</Text>
+    <Page {...LANDSCAPE_PAGE} style={{ backgroundColor: dark ? t.hero : t.bg, color: dark ? '#FFFFFF' : t.text, fontFamily: 'DMSans', padding: 28 }}>
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 9 }}>
+          <View style={{ width: 30, height: 4, backgroundColor: dark ? '#FFFFFF' : brandColor, borderRadius: 3 }} />
+          <Text style={{ fontSize: 8, fontFamily: 'DMSans', fontWeight: 700, color: dark ? 'rgba(255,255,255,0.82)' : t.muted }}>
+            {options.brandLeft || "RAPPORT D'ACTIVITE"}
+          </Text>
+        </View>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+          {project.logo_url ? <Image src={project.logo_url} style={{ width: 72, height: 22, objectFit: 'contain' }} /> : <Text style={{ fontSize: 8, color: dark ? 'rgba(255,255,255,0.82)' : t.muted }}>{project.site_name}</Text>}
+          <View style={{ width: 1, height: 18, backgroundColor: dark ? 'rgba(255,255,255,0.28)' : t.border }} />
+          <Image src={snapflowLogo} style={{ width: 78, height: 24, objectFit: 'contain' }} />
+        </View>
       </View>
-      {visible.map((row, index) => (
-        <View key={`${row.name}-${index}`} style={{ flexDirection: 'row', paddingVertical: 5, paddingHorizontal: 7, borderTopWidth: index ? 0.4 : 0, borderTopColor: theme?.border ?? '#D7E0EA' }}>
-          <Text style={{ width: widths[0], fontSize: 7.4, color: theme?.text ?? '#111827' }}>{short(row.name, 48)}</Text>
-          <Text style={{ width: widths[1], fontSize: 7.4, color: theme?.text ?? '#111827', textAlign: 'right' }}>{row.count}</Text>
-          <Text style={{ width: widths[2], fontSize: 7.4, color: theme?.textMuted ?? '#64748B', textAlign: 'right' }}>{pct(row.count, total)}%</Text>
+
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 16 }}>
+        <View>
+          <Text style={{ fontFamily: 'DMSans', fontWeight: 700, fontSize: 23, color: dark ? '#FFFFFF' : t.text, textTransform: 'uppercase' }}>{title}</Text>
+          {subtitle ? <Text style={{ fontSize: 8.5, marginTop: 5, color: dark ? 'rgba(255,255,255,0.72)' : t.muted }}>{subtitle}</Text> : null}
+        </View>
+        <Text style={{ fontSize: 8, color: dark ? 'rgba(255,255,255,0.72)' : t.muted }}>{project.site_name}</Text>
+      </View>
+
+      <View style={{ flex: 1 }}>
+        {children}
+      </View>
+
+      <View style={{ position: 'absolute', left: PAGE_PADDING_X, right: PAGE_PADDING_X, bottom: 18, borderTopWidth: 0.8, borderTopColor: dark ? 'rgba(255,255,255,0.24)' : t.border, paddingTop: 7, flexDirection: 'row', justifyContent: 'space-between' }}>
+        <Text style={{ fontSize: 7, color: dark ? 'rgba(255,255,255,0.68)' : t.muted }}>Medianet x Snapflow App | Rapport confidentiel</Text>
+        <Text render={({ pageNumber, totalPages }) => `${pageNumber} / ${totalPages}`} style={{ fontSize: 7, color: dark ? 'rgba(255,255,255,0.68)' : t.muted }} fixed />
+      </View>
+    </Page>
+  );
+}
+
+function SectionNote({ children, theme, accentColor }: { children: ReactNode; theme?: PdfTheme; accentColor: string }) {
+  const t = pageText(theme);
+  return (
+    <View style={{ backgroundColor: t.surface, borderLeftWidth: 5, borderLeftColor: accentColor, borderRadius: 10, padding: 11, borderWidth: 0.7, borderColor: t.border }}>
+      <Text style={{ fontSize: 8.8, lineHeight: 1.45, color: t.text }}>{children}</Text>
+    </View>
+  );
+}
+
+function BigNumberPanel({
+  value,
+  label,
+  caption,
+  theme,
+  status = 'success',
+  accentColor,
+  grow = false,
+}: {
+  value: string | number;
+  label: string;
+  caption?: string;
+  theme?: PdfTheme;
+  status?: SeverityStatus;
+  accentColor: string;
+  grow?: boolean;
+}) {
+  const t = pageText(theme);
+  const color = status === 'success' ? accentColor : getStatusColor(status);
+  return (
+    <View style={{ flex: grow ? 1 : undefined, backgroundColor: t.surface, borderRadius: 12, padding: 16, borderWidth: 0.8, borderColor: t.border, minHeight: 120, justifyContent: 'center' }}>
+      <Text style={{ fontSize: 8, color: t.muted, fontFamily: 'DMSans', fontWeight: 700, textTransform: 'uppercase' }}>{label}</Text>
+      <Text style={{ fontSize: 54, lineHeight: 1, color, fontFamily: 'DMSans', fontWeight: 700, marginTop: 5 }}>{value}</Text>
+      {caption ? <Text style={{ fontSize: 8.2, color: t.muted, marginTop: 8, lineHeight: 1.35 }}>{caption}</Text> : null}
+    </View>
+  );
+}
+
+function MetricStrip({ kpis, theme, accentColor }: { kpis: ActivityKpi[]; theme?: PdfTheme; accentColor: string }) {
+  const t = pageText(theme);
+  return (
+    <View style={{ flexDirection: 'row', gap: 9 }}>
+      {kpis.map(kpi => (
+        <View key={kpi.key} style={{ flex: 1, backgroundColor: t.surface, borderRadius: 10, borderWidth: 0.7, borderColor: t.border, padding: 10, minHeight: 78 }}>
+          <Text style={{ fontSize: 7.2, color: t.muted, textTransform: 'uppercase', fontFamily: 'DMSans', fontWeight: 700 }}>{kpi.label}</Text>
+          <Text style={{ fontSize: 24, color: kpi.status === 'success' ? accentColor : getStatusColor(kpi.status), fontFamily: 'DMSans', fontWeight: 700, marginTop: 3 }}>{kpi.value}</Text>
+          <Text style={{ fontSize: 7.1, color: t.muted, marginTop: 3 }}>{kpi.caption}</Text>
         </View>
       ))}
     </View>
   );
 }
 
-function HorizontalBars({ rows, theme, limit = 8 }: { rows: CountRow[]; theme?: PdfTheme; limit?: number }) {
-  const visible = rows.slice(0, limit);
-  const max = Math.max(...visible.map(row => row.count), 1);
-  if (!visible.length) return <EmptyState theme={theme} />;
+function TableLegend({ rows, total, theme, accentColor, label = 'Libelle', limit = 8 }: { rows: CountRow[]; total: number; theme?: PdfTheme; accentColor: string; label?: string; limit?: number }) {
+  const t = pageText(theme);
+  const visible = rowsWithOther(rows, limit);
+  if (!visible.length) {
+    return <SectionNote theme={theme} accentColor={accentColor}>Aucune donnee disponible pour cette repartition.</SectionNote>;
+  }
   return (
-    <View style={{ gap: 6 }}>
+    <View style={{ backgroundColor: '#F6B21A', borderRadius: 12, padding: 12, minHeight: 218 }}>
+      <View style={{ flexDirection: 'row', borderBottomWidth: 0.8, borderBottomColor: 'rgba(255,255,255,0.45)', paddingBottom: 7 }}>
+        <Text style={{ width: 170, fontSize: 8.5, fontFamily: 'DMSans', fontWeight: 700, color: '#FFFFFF' }}>{label}</Text>
+        <Text style={{ width: 42, fontSize: 8.5, fontFamily: 'DMSans', fontWeight: 700, color: '#FFFFFF', textAlign: 'right' }}>Tickets</Text>
+        <Text style={{ width: 42, fontSize: 8.5, fontFamily: 'DMSans', fontWeight: 700, color: '#FFFFFF', textAlign: 'right' }}>%</Text>
+      </View>
+      {visible.map((row, index) => (
+        <View key={`${row.name}-${index}`} style={{ flexDirection: 'row', paddingVertical: 7, borderBottomWidth: index === visible.length - 1 ? 0 : 0.5, borderBottomColor: 'rgba(255,255,255,0.25)' }}>
+          <Text style={{ width: 170, fontSize: 8.4, color: '#FFFFFF' }}>{short(row.name, 34)}</Text>
+          <Text style={{ width: 42, fontSize: 8.4, color: '#FFFFFF', textAlign: 'right', fontFamily: 'DMSans', fontWeight: 700 }}>{row.count}</Text>
+          <Text style={{ width: 42, fontSize: 8.4, color: '#FFFFFF', textAlign: 'right' }}>{pct(row.count, total)}%</Text>
+        </View>
+      ))}
+      <Text style={{ fontSize: 6.8, color: 'rgba(255,255,255,0.82)', marginTop: 8 }}>Chiffres bases sur les tickets charges dans le rapport.</Text>
+    </View>
+  );
+}
+
+function HorizontalBars({ rows, theme, limit = 8 }: { rows: CountRow[]; theme?: PdfTheme; limit?: number }) {
+  const t = pageText(theme);
+  const visible = rowsWithOther(rows, limit);
+  const max = Math.max(...visible.map(row => row.count), 1);
+  if (!visible.length) return <Text style={{ fontSize: 9, color: t.muted }}>Aucune donnee.</Text>;
+  return (
+    <View style={{ gap: 10 }}>
       {visible.map((row, index) => (
         <View key={`${row.name}-${index}`}>
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 2 }}>
-            <Text style={{ fontSize: 7.7, color: theme?.text ?? '#111827' }}>{short(row.name, 32)}</Text>
-            <Text style={{ fontSize: 7.7, color: theme?.textMuted ?? '#64748B' }}>{row.count}</Text>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 3 }}>
+            <Text style={{ fontSize: 9, color: t.text }}>{short(row.name, 32)}</Text>
+            <Text style={{ fontSize: 9, color: t.muted, fontFamily: 'DMSans', fontWeight: 700 }}>{row.count}</Text>
           </View>
-          <View style={{ height: 8, backgroundColor: theme?.border ?? '#D7E0EA', borderRadius: 5 }}>
-            <View style={{ width: `${Math.max(5, (row.count / max) * 100)}%`, height: 8, backgroundColor: row.color ?? theme?.accent ?? '#4E8CCF', borderRadius: 5 }} />
+          <View style={{ height: 13, backgroundColor: t.border, borderRadius: 8 }}>
+            <View style={{ width: `${Math.max(4, (row.count / max) * 100)}%`, height: 13, backgroundColor: row.color ?? CHART_COLORS[index % CHART_COLORS.length], borderRadius: 8 }} />
           </View>
         </View>
       ))}
@@ -286,18 +397,19 @@ function HorizontalBars({ rows, theme, limit = 8 }: { rows: CountRow[]; theme?: 
 }
 
 function VerticalBars({ rows, theme, limit = 7 }: { rows: CountRow[]; theme?: PdfTheme; limit?: number }) {
-  const visible = rows.slice(0, limit);
+  const t = pageText(theme);
+  const visible = rowsWithOther(rows, limit);
   const max = Math.max(...visible.map(row => row.count), 1);
-  if (!visible.length) return <EmptyState theme={theme} />;
+  if (!visible.length) return <Text style={{ fontSize: 9, color: t.muted }}>Aucune donnee.</Text>;
   return (
-    <View style={{ height: 170, flexDirection: 'row', alignItems: 'flex-end', gap: 8, paddingTop: 6 }}>
+    <View style={{ height: 248, flexDirection: 'row', alignItems: 'flex-end', gap: 10, paddingTop: 12 }}>
       {visible.map((row, index) => {
-        const height = Math.max(18, (row.count / max) * 132);
+        const height = Math.max(24, (row.count / max) * 188);
         return (
           <View key={`${row.name}-${index}`} style={{ flex: 1, alignItems: 'center' }}>
-            <Text style={{ fontSize: 8, fontFamily: 'DMSans', fontWeight: 700, color: row.color ?? theme?.accent ?? '#4E8CCF', marginBottom: 3 }}>{row.count}</Text>
-            <View style={{ height, width: '70%', backgroundColor: row.color ?? theme?.accent ?? '#4E8CCF', borderRadius: 5 }} />
-            <Text style={{ fontSize: 6.5, color: theme?.textMuted ?? '#64748B', textAlign: 'center', marginTop: 4 }}>{short(row.name, 13)}</Text>
+            <Text style={{ fontSize: 10, fontFamily: 'DMSans', fontWeight: 700, color: row.color ?? CHART_COLORS[index % CHART_COLORS.length], marginBottom: 5 }}>{row.count}</Text>
+            <View style={{ height, width: '72%', backgroundColor: row.color ?? CHART_COLORS[index % CHART_COLORS.length], borderRadius: 6 }} />
+            <Text style={{ fontSize: 7.2, color: t.muted, textAlign: 'center', marginTop: 6 }}>{short(row.name, 15)}</Text>
           </View>
         );
       })}
@@ -305,45 +417,50 @@ function VerticalBars({ rows, theme, limit = 7 }: { rows: CountRow[]; theme?: Pd
   );
 }
 
-function DonutChart({ rows, theme, size = 132 }: { rows: CountRow[]; theme?: PdfTheme; size?: number }) {
-  const visible = rows.filter(row => row.count > 0).slice(0, 6);
+function polar(cx: number, cy: number, radius: number, angle: number) {
+  const rad = ((angle - 90) * Math.PI) / 180;
+  return { x: cx + radius * Math.cos(rad), y: cy + radius * Math.sin(rad) };
+}
+
+function donutSegmentPath(cx: number, cy: number, outerR: number, innerR: number, startAngle: number, endAngle: number) {
+  const end = Math.min(endAngle, startAngle + 359.99);
+  const largeArc = end - startAngle > 180 ? 1 : 0;
+  const outerStart = polar(cx, cy, outerR, startAngle);
+  const outerEnd = polar(cx, cy, outerR, end);
+  const innerEnd = polar(cx, cy, innerR, end);
+  const innerStart = polar(cx, cy, innerR, startAngle);
+  return [
+    `M ${outerStart.x} ${outerStart.y}`,
+    `A ${outerR} ${outerR} 0 ${largeArc} 1 ${outerEnd.x} ${outerEnd.y}`,
+    `L ${innerEnd.x} ${innerEnd.y}`,
+    `A ${innerR} ${innerR} 0 ${largeArc} 0 ${innerStart.x} ${innerStart.y}`,
+    'Z',
+  ].join(' ');
+}
+
+function DonutChart({ rows, theme, size = 190, limit = 7 }: { rows: CountRow[]; theme?: PdfTheme; size?: number; limit?: number }) {
+  const t = pageText(theme);
+  const visible = rowsWithOther(rows.filter(row => row.count > 0), limit);
   const total = visible.reduce((sum, row) => sum + row.count, 0);
-  if (!visible.length || !total) return <HorizontalBars rows={rows} theme={theme} limit={5} />;
-  const radius = 42;
-  const circumference = 2 * Math.PI * radius;
-  let offset = 0;
+  if (!visible.length || !total) return <HorizontalBars rows={rows} theme={theme} limit={limit} />;
+  let cursor = 0;
   return (
-    <View wrap={false} style={{ flexDirection: 'row', gap: 12, alignItems: 'center' }}>
-      <Svg width={size} height={size} viewBox="0 0 120 120">
-        <Circle cx="60" cy="60" r={radius} stroke={theme?.border ?? '#D7E0EA'} strokeWidth="14" fill="none" />
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 18 }}>
+      <Svg width={size} height={size} viewBox="0 0 140 140">
         {visible.map((row, index) => {
-          const length = (row.count / total) * circumference;
-          const dashOffset = -offset;
-          offset += length;
-          return (
-            <Circle
-              key={`${row.name}-${index}`}
-              cx="60"
-              cy="60"
-              r={radius}
-              stroke={row.color ?? CHART_COLORS[index % CHART_COLORS.length]}
-              strokeWidth="15"
-              fill="none"
-              strokeDasharray={`${length} ${circumference}`}
-              strokeDashoffset={dashOffset}
-              transform="rotate(-90 60 60)"
-            />
-          );
+          const angle = (row.count / total) * 360;
+          const path = donutSegmentPath(70, 70, 54, 30, cursor, cursor + angle);
+          cursor += angle;
+          return <Path key={`${row.name}-${index}`} d={path} fill={row.color ?? CHART_COLORS[index % CHART_COLORS.length]} />;
         })}
-        <Circle cx="60" cy="60" r="25" fill={theme?.surface ?? '#FFFFFF'} />
       </Svg>
-      <View style={{ flex: 1, gap: 5 }}>
-        <Text style={{ fontSize: 16, fontFamily: 'DMSans', fontWeight: 700, color: theme?.primary ?? '#1E3A5F' }}>{total}</Text>
+      <View style={{ flex: 1, gap: 7 }}>
+        <Text style={{ fontSize: 44, lineHeight: 1, fontFamily: 'DMSans', fontWeight: 700, color: t.primary }}>{total}</Text>
         {visible.map((row, index) => (
-          <View key={`${row.name}-${index}`} style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
-            <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: row.color ?? CHART_COLORS[index % CHART_COLORS.length] }} />
-            <Text style={{ fontSize: 7.6, color: theme?.text ?? '#111827', width: 110 }}>{short(row.name, 26)}</Text>
-            <Text style={{ fontSize: 7.3, color: theme?.textMuted ?? '#64748B', textAlign: 'right', width: 30 }}>{row.count}</Text>
+          <View key={`${row.name}-${index}`} style={{ flexDirection: 'row', alignItems: 'center', gap: 7 }}>
+            <View style={{ width: 9, height: 9, borderRadius: 5, backgroundColor: row.color ?? CHART_COLORS[index % CHART_COLORS.length] }} />
+            <Text style={{ fontSize: 8.5, color: t.text, width: 145 }}>{short(row.name, 29)}</Text>
+            <Text style={{ fontSize: 8.5, color: t.muted, textAlign: 'right', width: 38 }}>{row.count}</Text>
           </View>
         ))}
       </View>
@@ -351,335 +468,360 @@ function DonutChart({ rows, theme, size = 132 }: { rows: CountRow[]; theme?: Pdf
   );
 }
 
-function TicketDetailCard({ issue, theme, emptyLabel }: { issue?: RedmineIssue; theme?: PdfTheme; emptyLabel: string }) {
-  if (!issue) return <EmptyState theme={theme} label={emptyLabel} />;
-  const s = makePageStyles(theme);
-  return (
-    <View style={{ ...s.card, padding: 11 }}>
-      <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 5 }}>
-        <Text style={{ fontSize: 9, fontFamily: 'DMSans', fontWeight: 700, color: theme?.primary ?? '#1E3A5F' }}>#{issue.id}</Text>
-        <Text style={{ fontSize: 7.5, color: theme?.textMuted ?? '#64748B' }}>{format(new Date(issue.updated_on), 'dd/MM/yyyy', { locale: fr })}</Text>
-      </View>
-      <Text style={{ fontSize: 12, fontFamily: 'DMSans', fontWeight: 700, color: theme?.text ?? '#111827', marginBottom: 5 }}>{short(issue.subject, 110)}</Text>
-      <View style={{ flexDirection: 'row', gap: 8, marginTop: 4 }}>
-        <Text style={{ fontSize: 8, color: theme?.textMuted ?? '#64748B' }}>Statut: {issue.status.name}</Text>
-        <Text style={{ fontSize: 8, color: theme?.textMuted ?? '#64748B' }}>Type: {issue.tracker.name}</Text>
-        <Text style={{ fontSize: 8, color: theme?.textMuted ?? '#64748B' }}>Priorite: {issue.priority.name}</Text>
-      </View>
-      <View style={{ marginTop: 8 }}>
-        <ProgressBar label="Avancement" value={issue.done_ratio} status={issue.done_ratio >= 80 ? 'success' : issue.done_ratio >= 40 ? 'warning' : 'danger'} theme={theme} />
-      </View>
-    </View>
-  );
-}
-
-function DenseTicketTable({ issues, theme, title, limit = 15, emptyLabel }: { issues: RedmineIssue[]; theme?: PdfTheme; title: string; limit?: number; emptyLabel?: string }) {
-  const rows = issues.slice(0, limit);
-  if (!rows.length) return <EmptyState theme={theme} label={emptyLabel} />;
-  const widths = [48, 350, 110, 108, 102, 32];
-  return (
-    <View wrap={false} style={{ borderWidth: 0.7, borderColor: theme?.border ?? '#D7E0EA', borderRadius: 9, overflow: 'hidden' }}>
-      <View style={{ backgroundColor: theme?.headerBg ?? '#E7EEF7', padding: 7 }}>
-        <Text style={{ fontSize: 9, fontFamily: 'DMSans', fontWeight: 700, color: theme?.primary ?? '#1E3A5F' }}>{title}</Text>
-      </View>
-      <View style={{ flexDirection: 'row', paddingVertical: 4, paddingHorizontal: 7, borderTopWidth: 0.4, borderTopColor: theme?.border ?? '#D7E0EA' }}>
-        {['ID', 'Sujet', 'Statut', 'Type', 'Priorite', '%'].map((label, index) => (
-          <Text key={label} style={{ width: widths[index], fontSize: 7.2, color: theme?.textMuted ?? '#64748B', fontFamily: 'DMSans', fontWeight: 700 }}>{label}</Text>
-        ))}
-      </View>
-      {rows.map((issue, index) => (
-        <View key={issue.id} wrap={false} style={{ flexDirection: 'row', paddingVertical: 4, paddingHorizontal: 7, borderTopWidth: 0.35, borderTopColor: theme?.border ?? '#D7E0EA', backgroundColor: index % 2 ? theme?.recBg ?? '#F1F4F8' : theme?.surface ?? '#FFFFFF' }}>
-          <Text style={{ width: widths[0], fontSize: 7.35 }}>#{issue.id}</Text>
-          <Text style={{ width: widths[1], fontSize: 7.35 }}>{short(issue.subject, 94)}</Text>
-          <Text style={{ width: widths[2], fontSize: 7.35 }}>{short(issue.status.name, 24)}</Text>
-          <Text style={{ width: widths[3], fontSize: 7.35 }}>{short(issue.tracker.name, 22)}</Text>
-          <Text style={{ width: widths[4], fontSize: 7.35 }}>{short(issue.priority.name, 22)}</Text>
-          <Text style={{ width: widths[5], fontSize: 7.35 }}>{issue.done_ratio}%</Text>
-        </View>
-      ))}
-      {issues.length > limit && (
-        <Text style={{ fontSize: 7.2, color: theme?.textMuted ?? '#64748B', padding: 6 }}>+ {issues.length - limit} ticket(s) non affiches pour conserver une page lisible.</Text>
-      )}
-    </View>
-  );
-}
-
-function CompactPage({ title, project, theme, children }: { title: string; project: DashboardProject; theme?: PdfTheme; children: ReactNode }) {
-  const s = makePageStyles(theme);
-  return (
-    <Page {...LANDSCAPE_PAGE} style={s.page}>
-      <PageHeader title={title} siteName={project.site_name} theme={theme} siteLogoSrc={project.logo_url ?? undefined} />
-      <View style={{ paddingHorizontal: 30, gap: 7 }}>
-        <SectionTitle title={title} theme={theme} />
-        {children}
-      </View>
-      <PageFooter preparedBy="Medianet x Snapflow App" theme={theme} />
-    </Page>
-  );
-}
-
-function ChartTablePage({
-  title, project, theme, rows, total, chart, tableLabel,
+function FigureTableLayout({
+  chart,
+  rows,
+  total,
+  tableLabel,
+  theme,
+  accentColor,
+  reverse = false,
 }: {
-  title: string;
-  project: DashboardProject;
-  theme?: PdfTheme;
+  chart: 'donut' | 'vertical' | 'horizontal';
   rows: CountRow[];
   total: number;
-  chart: 'donut' | 'vertical' | 'horizontal';
   tableLabel: string;
+  theme?: PdfTheme;
+  accentColor: string;
+  reverse?: boolean;
 }) {
+  const t = pageText(theme);
+  const chartNode = (
+    <View style={{ flex: 1.35, backgroundColor: t.surface, borderRadius: 14, borderWidth: 0.8, borderColor: t.border, padding: 18, minHeight: 318, justifyContent: 'center' }}>
+      {chart === 'donut' && <DonutChart rows={rows} theme={theme} />}
+      {chart === 'vertical' && <VerticalBars rows={rows} theme={theme} />}
+      {chart === 'horizontal' && <HorizontalBars rows={rows} theme={theme} />}
+    </View>
+  );
+  const tableNode = (
+    <View style={{ flex: 0.9 }}>
+      <TableLegend rows={rows} total={total} theme={theme} accentColor={accentColor} label={tableLabel} />
+    </View>
+  );
   return (
-    <CompactPage title={title} project={project} theme={theme}>
-      <View style={{ flexDirection: 'row', gap: 12 }}>
-        <View style={{ flex: 1.1, backgroundColor: theme?.surface ?? '#FFFFFF', borderColor: theme?.border ?? '#D7E0EA', borderWidth: 0.8, borderRadius: 10, padding: 10 }}>
-          {chart === 'donut' && <DonutChart rows={rows} theme={theme} />}
-          {chart === 'vertical' && <VerticalBars rows={rows} theme={theme} />}
-          {chart === 'horizontal' && <HorizontalBars rows={rows} theme={theme} />}
-        </View>
-        <View style={{ flex: 1 }}>
-          <LegendTable rows={rows} theme={theme} total={total} label={tableLabel} />
-        </View>
-      </View>
-    </CompactPage>
+    <View style={{ flexDirection: 'row', gap: 18, alignItems: 'stretch' }}>
+      {reverse ? tableNode : chartNode}
+      {reverse ? chartNode : tableNode}
+    </View>
   );
 }
 
-function StandardPage({ title, project, theme, children }: { title: string; project: DashboardProject; theme?: PdfTheme; children: ReactNode }) {
-  const s = makePageStyles(theme);
+function TicketMiniCard({ issue, theme, accentColor, emptyLabel }: { issue?: RedmineIssue; theme?: PdfTheme; accentColor: string; emptyLabel: string }) {
+  const t = pageText(theme);
+  if (!issue) {
+    return <SectionNote theme={theme} accentColor={accentColor}>{emptyLabel}</SectionNote>;
+  }
   return (
-    <Page {...LANDSCAPE_PAGE} style={s.page}>
-      <PageHeader title={title} siteName={project.site_name} theme={theme} siteLogoSrc={project.logo_url ?? undefined} />
-      <View style={s.body}>{children}</View>
-      <PageFooter preparedBy="Medianet x Snapflow App" theme={theme} />
+    <View style={{ backgroundColor: t.surface, borderRadius: 10, borderWidth: 0.7, borderColor: t.border, padding: 11, minHeight: 86 }}>
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 }}>
+        <Text style={{ fontSize: 8, color: accentColor, fontFamily: 'DMSans', fontWeight: 700 }}>#{issue.id}</Text>
+        <Text style={{ fontSize: 7.4, color: t.muted }}>{safeDate(issue.updated_on)}</Text>
+      </View>
+      <Text style={{ fontSize: 10, color: t.text, fontFamily: 'DMSans', fontWeight: 700, lineHeight: 1.25 }}>{short(issue.subject, 72)}</Text>
+      <Text style={{ fontSize: 7.8, color: t.muted, marginTop: 7 }}>Type: {issue.tracker.name} | Priorite: {issue.priority.name} | Avancement: {issue.done_ratio}%</Text>
+    </View>
+  );
+}
+
+function WorkflowPanel({ data, theme, accentColor }: { data: ActivityData; theme?: PdfTheme; accentColor: string }) {
+  const t = pageText(theme);
+  const cards = [
+    { label: 'En test', value: data.testingTickets.length, caption: 'Validation ou recette', status: data.testingTickets.length ? 'warning' as const : 'success' as const },
+    { label: 'En traitement', value: data.activeTickets.length, caption: 'Charge en execution', status: data.activeTickets.length ? 'warning' as const : 'success' as const },
+    { label: 'Pris en charge', value: data.acknowledgedTickets.length, caption: 'Acceptes non clotures', status: data.acknowledgedTickets.length ? 'warning' as const : 'success' as const },
+    { label: 'Bloques', value: data.blockedTickets.length, caption: 'Decision attendue', status: data.blockedTickets.length ? 'danger' as const : 'success' as const },
+  ];
+  return (
+    <View style={{ gap: 14 }}>
+      <View style={{ flexDirection: 'row', gap: 10 }}>
+        {cards.map(card => (
+          <BigNumberPanel key={card.label} value={card.value} label={card.label} caption={card.caption} theme={theme} status={card.status} accentColor={accentColor} grow />
+        ))}
+      </View>
+      <View style={{ flexDirection: 'row', gap: 14 }}>
+        <View style={{ flex: 1, backgroundColor: t.surface, borderRadius: 12, borderWidth: 0.8, borderColor: t.border, padding: 14 }}>
+          <Text style={{ fontSize: 10, fontFamily: 'DMSans', fontWeight: 700, color: t.primary, marginBottom: 10 }}>Charge active par type</Text>
+          <HorizontalBars rows={data.activeByType} theme={theme} limit={5} />
+        </View>
+        <View style={{ flex: 1, gap: 9 }}>
+          <TicketMiniCard issue={data.testingTickets[0]} theme={theme} accentColor={accentColor} emptyLabel="Aucun ticket en test: la section est conservee ici au lieu de creer une page vide." />
+          <TicketMiniCard issue={data.acknowledgedTickets[0]} theme={theme} accentColor={accentColor} emptyLabel="Aucun ticket pris en charge sur la periode." />
+        </View>
+      </View>
+    </View>
+  );
+}
+
+function FullWidthTicketTable({
+  issues,
+  title,
+  theme,
+  accentColor,
+  continuation,
+  totalRows,
+}: {
+  issues: RedmineIssue[];
+  title: string;
+  theme?: PdfTheme;
+  accentColor: string;
+  continuation?: string;
+  totalRows: number;
+}) {
+  const t = pageText(theme);
+  const widths = [78, 408, 92, 92, 92];
+  return (
+    <View style={{ backgroundColor: t.surface, borderRadius: 12, borderWidth: 0.8, borderColor: t.border, overflow: 'hidden' }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: accentColor, paddingVertical: 10, paddingHorizontal: 12 }}>
+        <Text style={{ fontSize: 11, fontFamily: 'DMSans', fontWeight: 700, color: '#FFFFFF', textTransform: 'uppercase' }}>{title}</Text>
+        <Text style={{ fontSize: 8, color: 'rgba(255,255,255,0.84)' }}>{continuation || `${totalRows} ticket(s)`}</Text>
+      </View>
+      <View style={{ flexDirection: 'row', backgroundColor: t.headerBg, paddingVertical: 7, paddingHorizontal: 10 }}>
+        {['Identifiant', 'Sujet', 'Type', 'Priorite', 'Date ouverture'].map((label, index) => (
+          <Text key={label} style={{ width: widths[index], fontSize: 8, color: t.primary, fontFamily: 'DMSans', fontWeight: 700 }}>{label}</Text>
+        ))}
+      </View>
+      {issues.map((issue, index) => (
+        <View key={issue.id} wrap={false} style={{ flexDirection: 'row', paddingVertical: 8, paddingHorizontal: 10, borderTopWidth: 0.45, borderTopColor: t.border, backgroundColor: index % 2 ? t.recBg : t.surface }}>
+          <Text style={{ width: widths[0], fontSize: 8.3, color: t.text, fontFamily: 'DMSans', fontWeight: 700 }}>#{issue.id}</Text>
+          <Text style={{ width: widths[1], fontSize: 8.3, color: t.text, lineHeight: 1.22 }}>{short(issue.subject, 96)}</Text>
+          <Text style={{ width: widths[2], fontSize: 8.1, color: t.text }}>{short(issue.tracker.name, 18)}</Text>
+          <Text style={{ width: widths[3], fontSize: 8.1, color: t.text }}>{short(issue.priority.name, 18)}</Text>
+          <Text style={{ width: widths[4], fontSize: 8.1, color: t.text }}>{safeDate(issue.created_on, 'yyyy')}</Text>
+        </View>
+      ))}
+    </View>
+  );
+}
+
+function renderTicketTablePages({
+  issues,
+  title,
+  subtitle,
+  project,
+  theme,
+  options,
+  accentColor,
+}: {
+  issues: RedmineIssue[];
+  title: string;
+  subtitle: string;
+  project: DashboardProject;
+  theme?: PdfTheme;
+  options: ActivityPdfOptions;
+  accentColor: string;
+}) {
+  return paginate(issues).map((chunk, index, chunks) => (
+    <ActivitySlidePage
+      key={`${title}-${index}`}
+      title={title}
+      subtitle={chunks.length > 1 ? `${subtitle} | suite ${index + 1}/${chunks.length}` : subtitle}
+      project={project}
+      theme={theme}
+      options={options}
+    >
+      <FullWidthTicketTable
+        issues={chunk}
+        title={title}
+        theme={theme}
+        accentColor={accentColor}
+        totalRows={issues.length}
+        continuation={`${index * TABLE_PAGE_SIZE + 1}-${index * TABLE_PAGE_SIZE + chunk.length} / ${issues.length}`}
+      />
+    </ActivitySlidePage>
+  ));
+}
+
+function CoverPage({ project, filters, options, data, theme, accentColor }: { project: DashboardProject; filters?: ActivityDocumentProps['filters']; options: ActivityPdfOptions; data: ActivityData; theme?: PdfTheme; accentColor: string }) {
+  const selectedKpis = data.kpis.filter(kpi => options.coverKpis[kpi.key] !== false);
+  const t = pageText(theme);
+  return (
+    <Page {...LANDSCAPE_PAGE} style={{ backgroundColor: t.hero, color: '#FFFFFF', fontFamily: 'DMSans', padding: 34 }}>
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 46 }}>
+        <Text style={{ color: 'rgba(255,255,255,0.8)', fontSize: 9, fontFamily: 'DMSans', fontWeight: 700 }}>{options.brandLeft || "RAPPORT D'ACTIVITE"}</Text>
+        <Text style={{ color: 'rgba(255,255,255,0.8)', fontSize: 9, fontFamily: 'DMSans', fontWeight: 700 }}>{options.brandRight || 'SNAPFLOW'}</Text>
+      </View>
+      <Text style={{ fontFamily: 'PlayfairDisplay', fontSize: 44, color: '#FFFFFF', lineHeight: 1.06 }}>Rapport{'\n'}d'activite</Text>
+      <Text style={{ color: 'rgba(255,255,255,0.84)', fontSize: 13, marginTop: 16 }}>{project.site_name}</Text>
+      <Text style={{ color: 'rgba(255,255,255,0.72)', fontSize: 9, marginTop: 8 }}>{periodLabel(filters)}</Text>
+      <Text style={{ color: 'rgba(255,255,255,0.64)', fontSize: 8, marginTop: 4 }}>{filterSummary(filters)}</Text>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 9, marginTop: 30 }}>
+        {selectedKpis.map(kpi => (
+          <View key={kpi.key} wrap={false} style={{ width: '23.2%', minHeight: 68, backgroundColor: 'rgba(255,255,255,0.12)', borderRadius: 10, padding: 9 }}>
+            <Text style={{ color: 'rgba(255,255,255,0.72)', fontSize: 7, textTransform: 'uppercase' }}>{kpi.label}</Text>
+            <Text style={{ color: kpi.status === 'danger' ? '#FCA5A5' : kpi.status === 'warning' ? '#FDBA74' : '#FFFFFF', fontSize: 22, fontFamily: 'DMSans', fontWeight: 700, marginTop: 3 }}>{kpi.value}</Text>
+            <Text style={{ color: 'rgba(255,255,255,0.65)', fontSize: 7, marginTop: 3 }}>{kpi.caption}</Text>
+          </View>
+        ))}
+      </View>
+      <View style={{ position: 'absolute', bottom: 28, left: 34, right: 34, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+        <Text style={{ color: 'rgba(255,255,255,0.7)', fontSize: 8 }}>Genere le {format(new Date(), 'dd MMMM yyyy a HH:mm', { locale: fr })}</Text>
+        <View style={{ width: 92, height: 3, backgroundColor: accentColor, borderRadius: 4 }} />
+      </View>
     </Page>
+  );
+}
+
+function SommairePage({ project, options, theme, sections }: { project: DashboardProject; options: ActivityPdfOptions; theme?: PdfTheme; sections: string[] }) {
+  const t = pageText(theme);
+  return (
+    <ActivitySlidePage title="Sommaire" subtitle="Structure dynamique du rapport" project={project} theme={theme} options={options}>
+      <View style={{ backgroundColor: t.surface, borderRadius: 16, padding: 24, borderWidth: 0.8, borderColor: t.border, width: '78%', alignSelf: 'center', marginTop: 10 }}>
+        {sections.map((section, index) => (
+          <View key={section} style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 11, borderBottomWidth: index === sections.length - 1 ? 0 : 0.7, borderBottomColor: t.border }}>
+            <Text style={{ fontSize: 11, color: t.text, fontFamily: 'DMSans', fontWeight: 700 }}>{section}</Text>
+            <Text style={{ fontSize: 10, color: t.muted }}>{String(index + 1).padStart(2, '0')}</Text>
+          </View>
+        ))}
+      </View>
+    </ActivitySlidePage>
   );
 }
 
 export function ActivityDocument({ project, issues, totalCount, filters, options }: ActivityDocumentProps) {
   const theme = options.theme;
-  const s = makePageStyles(theme);
+  makePageStyles(theme);
   const data = buildData(issues, totalCount);
-  const selectedKpis = data.kpis.filter(kpi => options.coverKpis[kpi.key] !== false);
-  const enabled = (key: string) => options.sections[key] !== false;
+  const sections = buildActivitySections(data);
+  const t = pageText(theme);
+  const accentColor = options.pdfColor || t.accent;
+  const generatedSections = [
+    'Contexte et indicateurs',
+    'Etat des tickets',
+    'Typologie des tickets',
+    'Priorite des tickets',
+    'Tickets clotures et ouverts',
+    'Workflow operationnel',
+    sections.showActiveTables ? 'Tickets en cours de traitement' : null,
+    sections.showBlockedAnalysis ? 'Blocages' : null,
+    sections.showMeetings ? "Reunions et points d'echange" : null,
+  ].filter(Boolean) as string[];
 
   return (
     <Document title={`Rapport activite - ${project.site_name}`}>
-      <Page {...LANDSCAPE_PAGE} style={s.page}>
-        <View style={{ backgroundColor: theme?.heroBg ?? '#1E3A5F', minHeight: '100%', padding: 34 }}>
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 54 }}>
-            <Text style={{ color: '#FFFFFF', fontSize: 9, fontFamily: 'DMSans', fontWeight: 700 }}>{options.brandLeft || "RAPPORT D'ACTIVITE"}</Text>
-            <Text style={{ color: '#FFFFFF', fontSize: 9, fontFamily: 'DMSans', fontWeight: 700 }}>{options.brandRight || 'SNAPFLOW'}</Text>
-          </View>
-          <Text style={{ fontFamily: 'PlayfairDisplay', fontSize: 44, color: '#FFFFFF', lineHeight: 1.08 }}>Rapport{'\n'}d'activite</Text>
-          <Text style={{ color: 'rgba(255,255,255,0.82)', fontSize: 13, marginTop: 18 }}>{project.site_name}</Text>
-          <Text style={{ color: 'rgba(255,255,255,0.72)', fontSize: 9, marginTop: 8 }}>{periodLabel(filters)}</Text>
-          <Text style={{ color: 'rgba(255,255,255,0.65)', fontSize: 8, marginTop: 4 }}>{filterSummary(filters)}</Text>
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 9, marginTop: 32 }}>
-            {selectedKpis.map(kpi => (
-              <View key={kpi.key} wrap={false} style={{ width: '23.2%', minHeight: 72, backgroundColor: 'rgba(255,255,255,0.12)', borderRadius: 10, padding: 9 }}>
-                <Text style={{ color: 'rgba(255,255,255,0.72)', fontSize: 7, textTransform: 'uppercase' }}>{kpi.label}</Text>
-                <Text style={{ color: '#FFFFFF', fontSize: 21, fontFamily: 'DMSans', fontWeight: 700, marginTop: 3 }}>{kpi.value}</Text>
-                <Text style={{ color: 'rgba(255,255,255,0.65)', fontSize: 7, marginTop: 3 }}>{kpi.caption}</Text>
-              </View>
-            ))}
-          </View>
-          <Text style={{ position: 'absolute', bottom: 30, left: 34, color: 'rgba(255,255,255,0.7)', fontSize: 8 }}>
-            Genere le {format(new Date(), 'dd MMMM yyyy a HH:mm', { locale: fr })}
-          </Text>
-        </View>
-      </Page>
+      <CoverPage project={project} filters={filters} options={options} data={data} theme={theme} accentColor={accentColor} />
 
-      {enabled('sommaire') && (
-        <StandardPage title="Table des matieres" project={project} theme={theme}>
-          <SectionTitle title="Structure du rapport" theme={theme} />
-          {[
-            'Resume executif',
-            'Cadre du rapport',
-            'Periode et filtres',
-            'Synthese avant analyse',
-            'Indicateurs globaux',
-            'Etat des tickets',
-            'Typologie des tickets',
-            'Priorites des tickets',
-            'Details par cycle de traitement',
-            'Blocages et reunions',
-          ].map((section, index) => (
-            <View key={section} style={{ ...s.card, flexDirection: 'row', justifyContent: 'space-between', marginBottom: 7, padding: 9 }}>
-              <Text style={{ fontSize: 8.8, color: theme?.text ?? '#111827' }}>{section}</Text>
-              <Text style={{ fontSize: 8.2, color: theme?.textMuted ?? '#64748B' }}>{String(index + 1).padStart(2, '0')}</Text>
-            </View>
-          ))}
-        </StandardPage>
+      {options.sections.sommaire !== false && (
+        <SommairePage project={project} options={options} theme={theme} sections={generatedSections} />
       )}
 
-      <StandardPage title="Resume executif" project={project} theme={theme}>
-        <SectionTitle title="Vue globale" theme={theme} />
-        <View style={{ flexDirection: 'row', gap: 12, marginBottom: 12 }}>
-          <View style={{ ...s.card, width: 165, alignItems: 'center' }}>
-            <ScoreGauge score={data.health} status={data.healthStatus} caption="Score activite" theme={theme} />
+      <ActivitySlidePage title="Indicateurs globaux" subtitle={periodLabel(filters)} project={project} theme={theme} options={options}>
+        <View style={{ flexDirection: 'row', gap: 18 }}>
+          <View style={{ flex: 1.05, gap: 12 }}>
+            <View style={{ backgroundColor: t.surface, borderRadius: 15, padding: 18, borderWidth: 0.8, borderColor: t.border }}>
+              <Text style={{ fontSize: 10, color: t.muted, lineHeight: 1.45 }}>
+                Ce rapport consolide les interventions Redmine du projet {project.site_name}. Il couvre {data.totalCount || data.total} ticket(s), dont {data.meetings.length} reunion(s), avec une lecture orientee pilotage: charge, priorites, avancement, blocages et actions a suivre.
+              </Text>
+            </View>
+            <MetricStrip kpis={data.kpis.slice(0, 4)} theme={theme} accentColor={accentColor} />
+            <MetricStrip kpis={data.kpis.slice(4)} theme={theme} accentColor={accentColor} />
           </View>
-          <View style={{ ...s.card, flex: 1 }}>
-            <Text style={s.h3}>Lecture rapide</Text>
-            <Text style={s.bodyText}>
-              Le rapport couvre {data.total} ticket(s) pour {project.site_name}. {data.open} restent ouverts, {data.resolved} sont clotures et {data.blocked} demandent une attention particuliere.
-            </Text>
-            <Text style={{ ...s.textMuted, marginTop: 7 }}>{filterSummary(filters)}</Text>
-          </View>
-        </View>
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between' }}>
-          {data.kpis.map(kpi => <KpiCard key={kpi.key} item={kpi} theme={theme} />)}
-        </View>
-      </StandardPage>
-
-      <StandardPage title="Cadre du rapport" project={project} theme={theme}>
-        <SectionTitle title="Perimetre operationnel" theme={theme} />
-        <View style={{ flexDirection: 'row', gap: 12 }}>
-          <View style={{ ...s.card, flex: 1 }}>
-            <Text style={s.h3}>Source</Text>
-            <Text style={s.bodyText}>Donnees Redmine consolidees pour le projet {project.site_name}. Les tickets sont classes par statut, type, priorite et avancement.</Text>
-          </View>
-          <View style={{ ...s.card, flex: 1 }}>
-            <Text style={s.h3}>Lecture</Text>
-            <Text style={s.bodyText}>Les pages suivantes distinguent le travail livre, le travail ouvert, les blocages et les points d'echange de gouvernance.</Text>
+          <View style={{ flex: 0.78, gap: 10 }}>
+            <BigNumberPanel value={`${data.health}`} label="Score activite" caption="Synthese interne calculee sur blocages, criticite et anciennete." theme={theme} status={data.healthStatus} accentColor={accentColor} />
+            {data.insights.map(insight => <SectionNote key={insight} theme={theme} accentColor={accentColor}>{insight}</SectionNote>)}
           </View>
         </View>
-      </StandardPage>
+      </ActivitySlidePage>
 
-      <StandardPage title="Periode et filtres" project={project} theme={theme}>
-        <SectionTitle title="Contexte de generation" theme={theme} />
-        <View style={{ ...s.card, marginBottom: 12 }}>
-          <Text style={s.h3}>{periodLabel(filters)}</Text>
-          <Text style={s.bodyText}>{filterSummary(filters)}</Text>
-        </View>
-        <View style={{ gap: 9 }}>
-          <ProgressBar label="Taux de cloture" value={pct(data.resolved, data.total)} status={data.resolved >= data.open ? 'success' : 'warning'} theme={theme} />
-          <ProgressBar label="Tickets ouverts" value={pct(data.open, data.total)} status={data.open ? 'warning' : 'success'} theme={theme} />
-          <ProgressBar label="Tickets bloques" value={pct(data.blocked, data.total)} status={data.blocked ? 'danger' : 'success'} theme={theme} />
-        </View>
-      </StandardPage>
+      <ActivitySlidePage title="Etat des tickets" subtitle={`${data.total} tickets repartis par statut`} project={project} theme={theme} options={options}>
+        <FigureTableLayout chart="donut" rows={data.statusRows} total={data.total} tableLabel="Statut" theme={theme} accentColor={accentColor} />
+      </ActivitySlidePage>
 
-      <StandardPage title="Synthese avant analyse" project={project} theme={theme}>
-        <SectionTitle title="Points de pilotage" theme={theme} />
-        {data.insights.map(insight => (
-          <View key={insight} style={{ ...s.card, marginBottom: 9, padding: 10 }}>
-            <Text style={s.bodyText}>{insight}</Text>
+      <ActivitySlidePage title="Typologie des tickets" subtitle="Quels types de demandes consomment le plus de charge ?" project={project} theme={theme} options={options}>
+        <FigureTableLayout chart="vertical" rows={data.trackerRows} total={data.total} tableLabel="Type" theme={theme} accentColor={accentColor} />
+      </ActivitySlidePage>
+
+      <ActivitySlidePage title="Priorite des tickets" subtitle="Profil d'urgence des demandes entrantes" project={project} theme={theme} options={options}>
+        <FigureTableLayout chart="horizontal" rows={data.priorityRows} total={data.total} tableLabel="Priorite" theme={theme} accentColor={accentColor} reverse />
+      </ActivitySlidePage>
+
+      <ActivitySlidePage title="Tickets clotures et ouverts" subtitle="Travail livre et reste a traiter" project={project} theme={theme} options={options}>
+        <View style={{ flexDirection: 'row', gap: 18 }}>
+          <View style={{ flex: 1, gap: 12 }}>
+            <View style={{ flexDirection: 'row', gap: 10 }}>
+              <BigNumberPanel value={data.closedTickets.length} label="Tickets clotures" caption="Travail livre sur la periode" theme={theme} accentColor={accentColor} grow />
+              <BigNumberPanel value={data.avgClosed == null ? '-' : `${data.avgClosed} j`} label="Delai moyen" caption="Cycle moyen des tickets clos" theme={theme} status={(data.avgClosed || 0) > 21 ? 'danger' : (data.avgClosed || 0) > 7 ? 'warning' : 'success'} accentColor={accentColor} grow />
+            </View>
+            <View style={{ backgroundColor: t.surface, borderRadius: 12, padding: 14, borderWidth: 0.8, borderColor: t.border }}>
+              <Text style={{ fontSize: 10, fontFamily: 'DMSans', fontWeight: 700, color: t.primary, marginBottom: 10 }}>Typologie des tickets clotures</Text>
+              <VerticalBars rows={data.closedByType} theme={theme} />
+            </View>
           </View>
-        ))}
-      </StandardPage>
-
-      <CompactPage title="Indicateurs Globaux" project={project} theme={theme}>
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between' }}>
-          <CounterCard label="Tickets" value={data.totalCount || data.total} caption="Charge globale" theme={theme} />
-          <CounterCard label="Reunions" value={data.meetings.length} caption="Points d'echange" theme={theme} status={data.meetings.length ? 'success' : 'warning'} />
-          <CounterCard label="Ouverts" value={data.openTickets.length} caption="Demandes non cloturees" theme={theme} status={data.openTickets.length ? 'warning' : 'success'} />
-          <CounterCard label="Bloques" value={data.blockedTickets.length} caption="Actions en attente" theme={theme} status={data.blockedTickets.length ? 'danger' : 'success'} />
+          <View style={{ flex: 1, gap: 12 }}>
+            <View style={{ flexDirection: 'row', gap: 10 }}>
+              <BigNumberPanel value={data.openTickets.length} label="Tickets ouverts" caption="Demandes non cloturees" theme={theme} status={data.openTickets.length ? 'warning' : 'success'} accentColor={accentColor} grow />
+              <BigNumberPanel value={data.avgOpen == null ? '-' : `${data.avgOpen} j`} label="Anciennete" caption="Age moyen des tickets ouverts" theme={theme} status={(data.avgOpen || 0) > 45 ? 'danger' : 'warning'} accentColor={accentColor} grow />
+            </View>
+            <View style={{ backgroundColor: t.surface, borderRadius: 12, padding: 14, borderWidth: 0.8, borderColor: t.border }}>
+              <Text style={{ fontSize: 10, fontFamily: 'DMSans', fontWeight: 700, color: t.primary, marginBottom: 10 }}>Typologie des tickets ouverts</Text>
+              <HorizontalBars rows={data.openByType} theme={theme} />
+            </View>
+          </View>
         </View>
-        <View style={{ ...s.card, padding: 10 }}>
-          <Text style={s.bodyText}>Synthese executive de la charge: {data.total} ticket(s) et {data.meetings.length} reunion(s) sur la periode analysee.</Text>
-        </View>
-      </CompactPage>
+      </ActivitySlidePage>
 
-      <ChartTablePage title="Etat des Tickets" project={project} theme={theme} rows={data.statusRows} total={data.total} chart="donut" tableLabel="Statut" />
-      <ChartTablePage title="Typologie des Tickets" project={project} theme={theme} rows={data.trackerRows} total={data.total} chart="vertical" tableLabel="Categorie" />
-      <ChartTablePage title="Priorite des Tickets" project={project} theme={theme} rows={data.priorityRows} total={data.total} chart="horizontal" tableLabel="Priorite" />
+      <ActivitySlidePage title="Workflow operationnel" subtitle="Etats actionnables regroupes pour eviter les pages vides" project={project} theme={theme} options={options}>
+        <WorkflowPanel data={data} theme={theme} accentColor={accentColor} />
+      </ActivitySlidePage>
 
-      <CompactPage title="Details des Tickets Clotures" project={project} theme={theme}>
-        <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 }}>
-          <CounterCard label="Clotures" value={data.closedTickets.length} caption="Travail livre" theme={theme} />
-          <CounterCard label="Delai moyen" value={data.avgResolutionDays == null ? '-' : `${data.avgResolutionDays} j`} caption="Cycle de cloture" theme={theme} />
-        </View>
-        <VerticalBars rows={data.closedByType} theme={theme} />
-      </CompactPage>
+      {sections.showActiveTables && renderTicketTablePages({
+        issues: data.activeTickets,
+        title: 'Tickets en cours de traitement',
+        subtitle: 'Vue operationnelle des tickets actuellement executes',
+        project,
+        theme,
+        options,
+        accentColor,
+      })}
 
-      <CompactPage title="Details des Tickets Ouverts" project={project} theme={theme}>
-        <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 }}>
-          <CounterCard label="Ouverts" value={data.openTickets.length} caption="Demandes non resolues" theme={theme} status={data.openTickets.length ? 'warning' : 'success'} />
-          <CounterCard label="Anciennete" value={data.avgOpenDays == null ? '-' : `${data.avgOpenDays} j`} caption="Age moyen ouvert" theme={theme} status={(data.avgOpenDays || 0) > 30 ? 'danger' : 'warning'} />
-        </View>
-        <HorizontalBars rows={data.openByType} theme={theme} />
-      </CompactPage>
-
-      <CompactPage title="Tickets En Cours de Test" project={project} theme={theme}>
-        <CounterCard label="En test" value={data.testingTickets.length} caption="En attente de validation" theme={theme} status={data.testingTickets.length ? 'warning' : 'success'} />
-        <TicketDetailCard issue={data.testingTickets[0]} theme={theme} emptyLabel={'Aucun ticket avec statut exact "En cours de test".'} />
-      </CompactPage>
-
-      <CompactPage title="Details des Tickets En Cours de Traitement" project={project} theme={theme}>
-        <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 }}>
-          <CounterCard label="En traitement" value={data.activeTickets.length} caption="Charge active" theme={theme} status={data.activeTickets.length ? 'warning' : 'success'} />
-          <CounterCard label="Types actifs" value={data.activeByType.length} caption="Categories concernees" theme={theme} />
-        </View>
-        <VerticalBars rows={data.activeByType} theme={theme} />
-      </CompactPage>
-
-      <CompactPage title="Tickets En Cours de Traitement" project={project} theme={theme}>
-        <DenseTicketTable issues={data.activeTickets} theme={theme} title="Vue operationnelle des tickets actifs" limit={15} emptyLabel={'Aucun ticket avec statut exact "En cours de traitement".'} />
-      </CompactPage>
-
-      <CompactPage title="Tickets Pris En Charge" project={project} theme={theme}>
-        <CounterCard label="Pris en charge" value={data.acknowledgedTickets.length} caption="Acceptes non clotures" theme={theme} status={data.acknowledgedTickets.length ? 'warning' : 'success'} />
-        <TicketDetailCard issue={data.acknowledgedTickets[0]} theme={theme} emptyLabel={'Aucun ticket avec statut exact "Pris en charge".'} />
-      </CompactPage>
-
-      <CompactPage title="Tickets Bloques" project={project} theme={theme}>
-        <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 }}>
-          <CounterCard label="Bloques" value={data.blockedTickets.length} caption="Backlog a debloquer" theme={theme} status={data.blockedTickets.length ? 'danger' : 'success'} />
-          <CounterCard label="Features" value={data.blockedFeatureTickets.length} caption="Demandes fonctionnelles" theme={theme} status={data.blockedFeatureTickets.length ? 'warning' : 'success'} />
-          <CounterCard label="Autres" value={data.blockedOtherTickets.length} caption="Bugs ou autres types" theme={theme} status={data.blockedOtherTickets.length ? 'warning' : 'success'} />
-          <CounterCard label="Priorites" value={data.blockedByPriority.length} caption="Niveaux impactes" theme={theme} />
-        </View>
-        {data.blockedTickets.length ? (
-          <View style={{ flexDirection: 'row', gap: 10 }}>
-            <View style={{ flex: 1 }}>
+      {sections.showBlockedAnalysis && (
+        <ActivitySlidePage title="Tickets bloques" subtitle="Analyse des causes de blocage et priorites concernees" project={project} theme={theme} options={options}>
+          <View style={{ flexDirection: 'row', gap: 16 }}>
+            <View style={{ width: 170 }}>
+              <BigNumberPanel value={data.blockedTickets.length} label="Tickets bloques" caption="Backlog a debloquer" theme={theme} status="danger" accentColor={accentColor} />
+            </View>
+            <View style={{ flex: 1, backgroundColor: t.surface, borderRadius: 12, borderWidth: 0.8, borderColor: t.border, padding: 14 }}>
+              <Text style={{ fontSize: 10, fontFamily: 'DMSans', fontWeight: 700, color: t.primary, marginBottom: 10 }}>Priorite des tickets bloques</Text>
               <HorizontalBars rows={data.blockedByPriority} theme={theme} limit={5} />
             </View>
-            <View style={{ flex: 1 }}>
-              <DonutChart rows={data.blockedByStatus} theme={theme} size={118} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <DonutChart rows={data.blockedByType} theme={theme} size={118} />
+            <View style={{ flex: 1, backgroundColor: t.surface, borderRadius: 12, borderWidth: 0.8, borderColor: t.border, padding: 14 }}>
+              <Text style={{ fontSize: 10, fontFamily: 'DMSans', fontWeight: 700, color: t.primary, marginBottom: 10 }}>Typologie des blocages</Text>
+              <DonutChart rows={data.blockedByType} theme={theme} size={150} limit={5} />
             </View>
           </View>
-        ) : (
-          <View wrap={false} style={{ ...s.card, padding: 16 }}>
-            <Text style={s.h3}>Aucun ticket bloque</Text>
-            <Text style={s.bodyText}>Aucun ticket avec le statut exact "Bloque" n'a ete trouve dans la periode analysee.</Text>
-          </View>
-        )}
-      </CompactPage>
-
-      {data.blockedTickets.length > 0 && (
-        <>
-          <CompactPage title="Tickets Bloques" project={project} theme={theme}>
-            <DenseTicketTable issues={data.blockedFeatureTickets} theme={theme} title="Feature tickets bloques" limit={15} emptyLabel={'Aucun ticket avec statut exact "Bloque" et tracker exact "Feature".'} />
-          </CompactPage>
-
-          <CompactPage title="Tickets Bloques" project={project} theme={theme}>
-            <DenseTicketTable issues={data.blockedOtherTickets} theme={theme} title="Bugs et autres tickets bloques" limit={15} emptyLabel={'Aucun autre ticket avec statut exact "Bloque".'} />
-          </CompactPage>
-        </>
+        </ActivitySlidePage>
       )}
 
-      <CompactPage title="Reunions et Points d'Echange" project={project} theme={theme}>
-        <CounterCard label="Reunions" value={data.meetings.length} caption="Historique de gouvernance" theme={theme} status={data.meetings.length ? 'success' : 'warning'} />
-        <DenseTicketTable issues={data.meetings} theme={theme} title="Historique des reunions et points d'echange" limit={15} emptyLabel={'Aucun ticket avec tracker exact "Reunion" ou "Point d echange".'} />
-      </CompactPage>
+      {sections.showBlockedTables && renderTicketTablePages({
+        issues: data.blockedTickets,
+        title: 'Tickets bloques',
+        subtitle: 'Liste actionnable des demandes en attente',
+        project,
+        theme,
+        options,
+        accentColor,
+      })}
 
-      {enabled('merci') && (
-        <Page {...LANDSCAPE_PAGE} style={s.page}>
-          <View style={{ flex: 1, backgroundColor: theme?.heroBg ?? '#1E3A5F', alignItems: 'center', justifyContent: 'center', padding: 48 }}>
-            <Text style={{ color: '#FFFFFF', fontFamily: 'PlayfairDisplay', fontSize: 36 }}>Merci</Text>
-            <Text style={{ color: 'rgba(255,255,255,0.78)', fontSize: 10, textAlign: 'center', marginTop: 16 }}>
-              Ce rapport a ete genere automatiquement a partir des donnees Redmine du projet {project.site_name}.
-            </Text>
+      {sections.showMeetings && renderTicketTablePages({
+        issues: data.meetings,
+        title: "Reunions et points d'echange",
+        subtitle: 'Historique de gouvernance et suivi client',
+        project,
+        theme,
+        options,
+        accentColor,
+      })}
+
+      {options.sections.merci === true && (
+        <ActivitySlidePage title="Merci" subtitle="Rapport genere automatiquement depuis Redmine" project={project} theme={theme} options={options} tone="brand">
+          <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+            <Text style={{ color: '#FFFFFF', fontFamily: 'PlayfairDisplay', fontSize: 44 }}>Merci !</Text>
             {(options.contactEmail || options.contactWeb || options.contactWeb2) && (
-              <Text style={{ color: 'rgba(255,255,255,0.72)', fontSize: 9, textAlign: 'center', marginTop: 22 }}>
+              <Text style={{ color: 'rgba(255,255,255,0.78)', fontSize: 10, textAlign: 'center', marginTop: 22 }}>
                 {[options.contactEmail, options.contactWeb, options.contactWeb2].filter(Boolean).join(' | ')}
               </Text>
             )}
           </View>
-        </Page>
+        </ActivitySlidePage>
       )}
     </Document>
   );

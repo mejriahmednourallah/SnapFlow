@@ -45,21 +45,16 @@ const SECTION_DEFS = [
   { key: 'merci', label: 'Page de cloture' },
 ] as const;
 
-const FIXED_PAGE_DEFS = [
-  'P6 Indicateurs globaux',
-  'P7 Etat des tickets',
-  'P8 Typologie des tickets',
-  'P9 Priorite des tickets',
-  'P10 Tickets clotures',
-  'P11 Tickets ouverts',
-  'P12 Tickets en test',
-  'P13 Charge active',
-  'P14 Details en traitement',
-  'P15 Pris en charge',
-  'P16 Analyse des blocages',
-  'P17 Blocages Feature',
-  'P18 Autres blocages',
-  'P19 Reunions',
+const REPORT_STRUCTURE_DEFS = [
+  'Contexte + indicateurs globaux',
+  'Etat des tickets avec graphique',
+  'Typologie des tickets',
+  'Priorites des tickets',
+  'Tickets clotures et ouverts',
+  'Workflow operationnel',
+  'Tables actionnables si donnees',
+  'Blocages si presents',
+  'Reunions si presentes',
 ] as const;
 
 export function PdfExportModal({
@@ -112,16 +107,16 @@ export function PdfExportModal({
         <hr className="my-3 border-stone-200" />
 
         <div>
-          <p className="text-sm font-semibold text-stone-700 mb-2">Pages analytiques fixes</p>
+          <p className="text-sm font-semibold text-stone-700 mb-2">Structure analytique dynamique</p>
           <div className="grid grid-cols-2 gap-1.5 rounded-lg border border-stone-200 bg-stone-50 p-2">
-            {FIXED_PAGE_DEFS.map(label => (
+            {REPORT_STRUCTURE_DEFS.map(label => (
               <div key={label} className="rounded-md bg-white px-2 py-1 text-xs font-medium text-stone-600">
                 {label}
               </div>
             ))}
           </div>
           <p className="mt-1.5 text-xs text-stone-500">
-            Ces pages restent incluses pour garantir le meme ordre et les memes graphiques a chaque export.
+            Les pages vides sont fusionnees automatiquement pour produire un rapport plus dense et plus lisible.
           </p>
         </div>
 
