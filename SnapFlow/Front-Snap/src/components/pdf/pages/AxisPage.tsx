@@ -45,11 +45,11 @@ export function AxisPage({ report, axis, index, theme, clientLogoSrc }: AxisPage
   const FIRST_PAGE_CAP = Math.max(140, PAGE_CAP - estimateSummaryHeight());
 
   const estimateFindingHeight = (finding: AuditAxisItem['findings'][number]) => {
-    const titleLines = estimateLines(finding.title, 52);
-    const descLines = estimateLines(finding.description, 70);
-    const recLines = finding.status !== 'pass' ? estimateLines(finding.recommendation, 70) : 0;
-    const impactLines = finding.status !== 'pass' ? estimateLines(finding.impact, 70) : 0;
-    return 54 + (titleLines + descLines + recLines + impactLines) * 11;
+    const titleLines = estimateLines(finding.title, 46);
+    const descLines = estimateLines(finding.description, 62);
+    const recLines = finding.status !== 'pass' ? estimateLines(finding.recommendation, 62) : 0;
+    const impactLines = finding.status !== 'pass' ? estimateLines(finding.impact, 62) : 0;
+    return 68 + (titleLines + descLines + recLines + impactLines) * 13.5;
   };
 
   const findingPages = packFindingsWithRebalance(axis.findings, estimateFindingHeight, FIRST_PAGE_CAP, PAGE_CAP, 0.7);
@@ -118,7 +118,7 @@ export function AxisPage({ report, axis, index, theme, clientLogoSrc }: AxisPage
                             }}
                             wrap={false}
                           >
-                            <Text style={{ fontSize: 8.4, color: t?.text ?? '#111827', width: '72%' }}>
+                            <Text style={{ fontSize: 9.2, color: t?.text ?? '#111827', width: '70%', lineHeight: 1.28 }}>
                               {finding.title}
                             </Text>
                             <StatusBadge label={findingBadgeLabel(finding)} status={findingStatus(finding.status)} />
@@ -133,34 +133,34 @@ export function AxisPage({ report, axis, index, theme, clientLogoSrc }: AxisPage
             ) : null}
 
             <View style={{ ...s.card, paddingVertical: 10 }}>
-              <Text style={s.h3}>Constats et impacts</Text>
+              <Text style={{ ...s.h3, fontSize: 14 }}>Constats et impacts</Text>
               {page.findings.map((finding) => (
                 <View
                   key={`finding-${finding.id}`}
                   style={{
                     borderBottomWidth: 0.5,
                     borderBottomColor: t?.border ?? '#D7E0EA',
-                    paddingBottom: 6,
-                    marginBottom: 6,
+                    paddingBottom: 8,
+                    marginBottom: 8,
                   }}
                   wrap={false}
                 >
-                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
-                    <Text style={{ fontSize: 9.2, fontFamily: 'DMSans', fontWeight: 700, width: '72%' }}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 5 }}>
+                    <Text style={{ fontSize: 10.8, fontFamily: 'DMSans', fontWeight: 700, width: '72%', lineHeight: 1.24 }}>
                       {finding.title}
                     </Text>
                     <StatusBadge label={findingBadgeLabel(finding)} status={findingStatus(finding.status)} />
                   </View>
-                  <Text style={{ fontSize: 8.2, color: t?.textMuted ?? '#64748B', marginBottom: 4 }}>
+                  <Text style={{ fontSize: 9.4, color: t?.textMuted ?? '#64748B', marginBottom: 5, lineHeight: 1.42 }}>
                     {finding.description}
                   </Text>
                   {finding.status !== 'pass' ? (
-                    <Text style={{ fontSize: 8.2, color: t?.text ?? '#111827' }}>
+                    <Text style={{ fontSize: 9.2, color: t?.text ?? '#111827', lineHeight: 1.42 }}>
                       Recommandation: {finding.recommendation}
                     </Text>
                   ) : null}
                   {finding.status !== 'pass' ? (
-                    <Text style={{ fontSize: 8.2, color: t?.textMuted ?? '#64748B' }}>
+                    <Text style={{ fontSize: 9.2, color: t?.textMuted ?? '#64748B', lineHeight: 1.42, marginTop: 2 }}>
                       Impact: {finding.impact}
                     </Text>
                   ) : null}

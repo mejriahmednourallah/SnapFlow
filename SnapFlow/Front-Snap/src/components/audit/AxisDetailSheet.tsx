@@ -46,7 +46,7 @@ export function AxisDetailSheet({ axis, open, onClose }: AxisDetailSheetProps) {
     <Sheet open={open} onOpenChange={v => { if (!v) onClose(); }}>
       <SheetContent
         side="right"
-        className="w-full sm:max-w-xl md:max-w-2xl overflow-y-auto flex flex-col gap-0 p-0"
+        className="w-full sm:max-w-2xl md:max-w-3xl xl:max-w-4xl overflow-y-auto flex flex-col gap-0 p-0"
       >
         {/* ── Header ── */}
         <SheetHeader className="p-6 border-b border-border/50 flex-shrink-0">
@@ -55,8 +55,8 @@ export function AxisDetailSheet({ axis, open, onClose }: AxisDetailSheetProps) {
               <AxisIcon id={axis.id} className="w-6 h-6 text-muted-foreground" />
             </div>
             <div className="flex-1 min-w-0">
-              <SheetTitle className="text-base font-semibold">{axis.name}</SheetTitle>
-              <p className="text-xs text-muted-foreground mt-1 leading-relaxed">{axis.description}</p>
+              <SheetTitle className="text-xl font-semibold leading-tight">{axis.name}</SheetTitle>
+              <p className="text-sm text-muted-foreground mt-2 leading-relaxed">{axis.description}</p>
             </div>
             <div className="flex-shrink-0">
               <ScoreGauge score={breakdown.scorePct} size={56} strokeWidth={5} />
@@ -65,34 +65,34 @@ export function AxisDetailSheet({ axis, open, onClose }: AxisDetailSheetProps) {
 
           {/* KPI summary chips */}
           <div className="flex flex-wrap gap-2 mt-4">
-            <span className={`text-xs font-mono font-bold px-3 py-1 rounded-full border ${getScoreColor(breakdown.scorePct)} bg-muted/30`}>
+            <span className={`text-sm font-mono font-bold px-3 py-1.5 rounded-full border ${getScoreColor(breakdown.scorePct)} bg-muted/30`}>
               {breakdown.x}/{breakdown.y}
             </span>
-            <span className="text-xs px-3 py-1 rounded-full border border-border text-muted-foreground">
+            <span className="text-sm px-3 py-1.5 rounded-full border border-border text-muted-foreground">
               {breakdown.passed}/{breakdown.y} réussis - {axis.findings.length} constat{axis.findings.length !== 1 ? 's' : ''}
             </span>
             {nonTestedCount > 0 && (
-              <span className="text-xs px-3 py-1 rounded-full border border-yellow-500/20 bg-yellow-500/10 text-yellow-400">
+              <span className="text-sm px-3 py-1.5 rounded-full border border-yellow-500/20 bg-yellow-500/10 text-yellow-400">
                 {nonTestedCount} Non testé{nonTestedCount > 1 ? 's' : ''}
               </span>
             )}
             {criticalCount > 0 && (
-              <span className="text-xs criticality-critical px-3 py-1 rounded-full border">
+              <span className="text-sm criticality-critical px-3 py-1.5 rounded-full border">
                 {criticalCount} critique{criticalCount > 1 ? 's' : ''}
               </span>
             )}
             {highCount > 0 && (
-              <span className="text-xs criticality-high px-3 py-1 rounded-full border">
+              <span className="text-sm criticality-high px-3 py-1.5 rounded-full border">
                 {highCount} {highCount > 1 ? 'élevés' : 'élevé'}
               </span>
             )}
             {mediumCount > 0 && (
-              <span className="text-xs criticality-medium px-3 py-1 rounded-full border">
+              <span className="text-sm criticality-medium px-3 py-1.5 rounded-full border">
                 {mediumCount} {mediumCount > 1 ? 'moyens' : 'moyen'}
               </span>
             )}
             {lowCount > 0 && (
-              <span className="text-xs criticality-low px-3 py-1 rounded-full border">
+              <span className="text-sm criticality-low px-3 py-1.5 rounded-full border">
                 {lowCount} {lowCount > 1 ? 'faibles' : 'faible'}
               </span>
             )}
@@ -100,14 +100,14 @@ export function AxisDetailSheet({ axis, open, onClose }: AxisDetailSheetProps) {
         </SheetHeader>
 
         {/* ── Findings accordion ── */}
-        <div className="flex-1 overflow-y-auto p-4">
+        <div className="flex-1 overflow-y-auto p-5">
           {sorted.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-12 text-muted-foreground gap-2">
               <CheckCircle className="w-8 h-8 text-emerald-400" />
               <p className="text-sm">Aucun constat pour cet axe.</p>
             </div>
           ) : (
-            <Accordion type="multiple" className="space-y-2">
+            <Accordion type="multiple" className="space-y-3">
               {sorted.map(f => {
                 const isPassing = f.status === 'pass' || f.origin === 'passing_kpi';
                 const isNonTested = isNonTestedFinding(f);
@@ -115,16 +115,16 @@ export function AxisDetailSheet({ axis, open, onClose }: AxisDetailSheetProps) {
                 <AccordionItem
                   key={f.id}
                   value={f.id}
-                  className={`glass-card border rounded-lg overflow-hidden px-0 ${
+                  className={`glass-card border rounded-xl overflow-hidden px-0 ${
                     isPassing ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-border/40'
                   }`}
                 >
-                  <AccordionTrigger className="px-4 py-3 hover:no-underline hover:bg-muted/20 [&[data-state=open]]:bg-muted/20 gap-3">
+                  <AccordionTrigger className="px-5 py-4 hover:no-underline hover:bg-muted/20 [&[data-state=open]]:bg-muted/20 gap-4">
                     <div className="flex items-start gap-3 flex-1 text-left">
                       {(() => {
                         if (isPassing) {
                           return (
-                            <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded border flex-shrink-0 mt-0.5 text-emerald-300 bg-emerald-500/20 border-emerald-500/40 font-semibold">
+                            <span className="inline-flex items-center gap-1.5 text-sm px-2.5 py-1 rounded-md border flex-shrink-0 mt-0.5 text-emerald-300 bg-emerald-500/20 border-emerald-500/40 font-semibold">
                               <CheckCircle className="w-3 h-3" />
                               <span>Validé</span>
                             </span>
@@ -132,7 +132,7 @@ export function AxisDetailSheet({ axis, open, onClose }: AxisDetailSheetProps) {
                         }
                         if (isNonTested) {
                           return (
-                            <span className="inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded border flex-shrink-0 mt-0.5 text-yellow-400 bg-yellow-500/10 border-yellow-500/20">
+                            <span className="inline-flex items-center gap-1.5 text-sm px-2.5 py-1 rounded-md border flex-shrink-0 mt-0.5 text-yellow-400 bg-yellow-500/10 border-yellow-500/20">
                               <FlaskConical className="w-3 h-3" />
                               <span>Non testé</span>
                             </span>
@@ -140,38 +140,38 @@ export function AxisDetailSheet({ axis, open, onClose }: AxisDetailSheetProps) {
                         }
                         if (f.origin === 'bug' || f.type === 'bug') {
                           return (
-                            <span className="inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded border flex-shrink-0 mt-0.5 text-red-400 bg-red-500/10 border-red-500/20">
+                            <span className="inline-flex items-center gap-1.5 text-sm px-2.5 py-1 rounded-md border flex-shrink-0 mt-0.5 text-red-400 bg-red-500/10 border-red-500/20">
                               <Bug className="w-3 h-3" />
                               <span>Bug</span>
                             </span>
                           );
                         }
                         return (
-                          <span className="inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded border flex-shrink-0 mt-0.5 text-blue-400 bg-blue-500/10 border-blue-500/20">
+                          <span className="inline-flex items-center gap-1.5 text-sm px-2.5 py-1 rounded-md border flex-shrink-0 mt-0.5 text-blue-400 bg-blue-500/10 border-blue-500/20">
                             <Lightbulb className="w-3 h-3" />
                             <span>Recommandation</span>
                           </span>
                         );
                       })()}
                       <div className="flex-1 min-w-0">
-                        <p className="text-base font-semibold leading-snug">{f.title}</p>
+                        <p className="text-lg font-semibold leading-snug">{f.title}</p>
                       </div>
                       {!isPassing && <CriticalityBadge level={f.criticality} />}
                     </div>
                   </AccordionTrigger>
 
-                  <AccordionContent className="px-4 pb-4 pt-0">
-                    <div className="space-y-3 pt-2 border-t border-border/30">
+                  <AccordionContent className="px-5 pb-5 pt-0">
+                    <div className="space-y-4 pt-3 border-t border-border/30">
 
-                      <p className="text-sm text-muted-foreground leading-relaxed">{f.description}</p>
+                      <p className="text-base text-muted-foreground leading-7">{f.description}</p>
 
                       <div className="flex items-center gap-2">
                         {f.status !== 'pass' && <PriorityBadge priority={f.priority} />}
                       </div>
 
                       {(!isPassing && f.risk) && (
-                        <div className="p-3 rounded-md bg-destructive/5 border border-destructive/15">
-                          <p className="text-sm">
+                        <div className="p-4 rounded-lg bg-destructive/5 border border-destructive/15">
+                          <p className="text-base leading-7">
                             <ShieldAlert className="w-3.5 h-3.5 inline mr-1.5 text-destructive" />
                             <span className="font-medium">Risque :</span> {f.risk}
                           </p>
@@ -179,9 +179,9 @@ export function AxisDetailSheet({ axis, open, onClose }: AxisDetailSheetProps) {
                       )}
 
                       {!isPassing && f.impact && (
-                        <div className="p-3 rounded-md bg-blue-500/5 border border-blue-500/15">
-                          <p className="text-sm flex items-start gap-1.5">
-                            <AlertTriangle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0 text-blue-500" />
+                        <div className="p-4 rounded-lg bg-blue-500/5 border border-blue-500/15">
+                          <p className="text-base leading-7 flex items-start gap-2">
+                            <AlertTriangle className="w-4 h-4 mt-1 flex-shrink-0 text-blue-500" />
                             <span>
                               <span className="font-medium">Impact :</span> {f.impact}
                             </span>
@@ -189,11 +189,11 @@ export function AxisDetailSheet({ axis, open, onClose }: AxisDetailSheetProps) {
                         </div>
                       )}
 
-                      <div className={`p-3 rounded-md border ${isPassing ? 'bg-emerald-500/10 border-emerald-500/30' : 'bg-primary/5 border-primary/15'}`}>
-                        <p className="text-sm flex items-start gap-1.5">
+                      <div className={`p-4 rounded-lg border ${isPassing ? 'bg-emerald-500/10 border-emerald-500/30' : 'bg-primary/5 border-primary/15'}`}>
+                        <p className="text-base leading-7 flex items-start gap-2">
                           {isPassing
-                            ? <CheckCircle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0 text-emerald-400" />
-                            : <Lightbulb className="w-3.5 h-3.5 mt-0.5 flex-shrink-0 text-primary" />}
+                            ? <CheckCircle className="w-4 h-4 mt-1 flex-shrink-0 text-emerald-400" />
+                            : <Lightbulb className="w-4 h-4 mt-1 flex-shrink-0 text-primary" />}
                           <span>
                             <span className="font-medium">{f.status === 'pass' ? 'Statut :' : 'Recommandation :'} </span>
                             {f.recommendation}
@@ -253,14 +253,14 @@ export function AxisDetailSheet({ axis, open, onClose }: AxisDetailSheetProps) {
                       */}
 
                       {f.testCases && f.testCases.length > 0 && (
-                        <div className="p-3 rounded-md bg-muted/30 border border-border/20">
-                          <p className="text-xs font-semibold mb-2 flex items-center gap-1">
+                        <div className="p-4 rounded-lg bg-muted/30 border border-border/20">
+                          <p className="text-sm font-semibold mb-3 flex items-center gap-1.5">
                             <FlaskConical className="w-3.5 h-3.5" />
                             Cas de test ({f.testCases.length})
                           </p>
-                          <div className="space-y-1.5">
+                          <div className="space-y-2">
                             {f.testCases.map((tc, i) => (
-                              <div key={i} className="flex items-start gap-2 text-xs">
+                              <div key={i} className="flex items-start gap-2 text-sm leading-6">
                                 <StatusIcon status={tc.status} />
                                 <span className="font-medium">{tc.name}</span>
                                 <span className="text-muted-foreground">— {tc.description}</span>
