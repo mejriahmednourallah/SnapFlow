@@ -20,7 +20,7 @@ import { fr } from 'date-fns/locale';
 import { useRedmineIssues } from '@/hooks/useRedmineIssues';
 import { useRedmineIdentifier } from '@/hooks/useRedmineIdentifier';
 import {
-  fetchIssues as fetchAllIssues,
+  fetchAllIssuesPaginated,
   fetchIssueFilters,
   type FilterOption,
   type RedmineIssue,
@@ -133,7 +133,7 @@ const ActivityReport = () => {
     setDashboardLoading(true);
     const newKey = `${filters.status}|${filters.tracker}|${filters.dateFrom}|${filters.dateTo}`;
     try {
-      const result = await fetchAllIssues({
+      const result = await fetchAllIssuesPaginated({
         projectIdentifier: redmineIdentifier,
         statusId: filters.status || undefined,
         trackerId: filters.tracker || undefined,
@@ -162,7 +162,7 @@ const ActivityReport = () => {
     if (!redmineIdentifier || !project) return;
     const newKey = `${filters.status}|${filters.tracker}|${filters.dateFrom}|${filters.dateTo}`;
     try {
-      const result = await fetchAllIssues({
+      const result = await fetchAllIssuesPaginated({
         projectIdentifier: redmineIdentifier,
         statusId: filters.status || undefined,
         trackerId: filters.tracker || undefined,
@@ -240,8 +240,9 @@ const ActivityReport = () => {
       const selectedTheme = PDF_THEMES.find(theme => theme.id === selectedThemeId) || PDF_THEMES[0];
       const currentKey = `${filters.status}|${filters.tracker}|${filters.dateFrom}|${filters.dateTo}`;
       let exportIssues = allIssuesForStats.length > 0 && statsFilterKey === currentKey ? allIssuesForStats : [];
+      let exportTotalCount = exportIssues.length || totalCount;
       if (exportIssues.length === 0) {
-        const result = await fetchAllIssues({
+        const result = await fetchAllIssuesPaginated({
           projectIdentifier: redmineIdentifier,
           statusId: filters.status || undefined,
           trackerId: filters.tracker || undefined,
@@ -251,6 +252,7 @@ const ActivityReport = () => {
           offset: 0,
         });
         exportIssues = result.issues;
+        exportTotalCount = result.totalCount || result.issues.length;
         setAllIssuesForStats(result.issues);
         setStatsFilterKey(currentKey);
       }
@@ -274,7 +276,7 @@ const ActivityReport = () => {
       await generateActivityPdf({
         project,
         issues: exportIssues,
-        totalCount,
+        totalCount: exportTotalCount,
         filters: {
           status: filters.status,
           tracker: filters.tracker,

@@ -89,6 +89,28 @@ export async function fetchIssues(params: FetchIssuesParams): Promise<FetchIssue
   return { issues: data.issues || [], totalCount: data.total_count || 0 };
 }
 
+/** Fetch every Redmine issue matching the filters by following pagination. */
+export async function fetchAllIssuesPaginated(params: FetchIssuesParams): Promise<FetchIssuesResult> {
+  const pageSize = Math.min(Math.max(params.limit ?? 100, 1), 500);
+  const allIssues: RedmineIssue[] = [];
+  let offset = params.offset ?? 0;
+  let totalCount = 0;
+
+  for (let guard = 0; guard < 100; guard += 1) {
+    const page = await fetchIssues({ ...params, limit: pageSize, offset });
+    totalCount = page.totalCount;
+    allIssues.push(...page.issues);
+
+    if (page.issues.length === 0 || allIssues.length >= totalCount || page.issues.length < pageSize) {
+      break;
+    }
+
+    offset += pageSize;
+  }
+
+  return { issues: allIssues, totalCount: totalCount || allIssues.length };
+}
+
 /** Fetch Redmine issue statuses and trackers. */
 export async function fetchIssueFilters(): Promise<{ statuses: FilterOption[]; trackers: FilterOption[] }> {
   const [statusRes, trackerRes] = await Promise.all([
