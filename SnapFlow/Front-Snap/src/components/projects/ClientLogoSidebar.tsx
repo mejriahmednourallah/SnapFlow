@@ -1,8 +1,7 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
-import { BadgeCheck, Loader2, RefreshCw, AlertCircle, Copy } from 'lucide-react';
+import { Loader2, RefreshCw, Copy } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { cn } from '@/lib/utils';
 
 interface ClientLogoSidebarProps {
   siteUrl: string;
@@ -28,26 +27,32 @@ export function ClientLogoSidebar({ siteUrl, projectId, currentUrl, onApply }: C
     setLoading(true);
     setError(null);
     setResult(null);
-    const { data, error } = await supabase.functions.invoke('detect-logo', {
-      body: { siteUrl },
-    });
-    if (error) {
-      // Hide noisy Edge errors; keep component silent on 401/500.
-      setError(null);
-      setResult(null);
-    } else {
-      setResult(data as DetectLogoResult);
-      if (data?.logo_url) {
-        setManualUrl(data.logo_url);
+    try {
+      const { data, error } = await supabase.functions.invoke('detect-logo', {
+        body: { siteUrl },
+      });
+      if (error) {
+        setError('Detection indisponible. Ajoutez l URL du logo manuellement.');
+        setResult(null);
+      } else {
+        setResult(data as DetectLogoResult);
+        if (data?.logo_url) {
+          setManualUrl(data.logo_url);
+        } else {
+          setError('Aucun logo detecte automatiquement. Ajoutez l URL du logo manuellement.');
+        }
       }
+    } catch {
+      setError('Detection indisponible. Ajoutez l URL du logo manuellement.');
+      setResult(null);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   useEffect(() => {
-    fetchLogo();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [siteUrl]);
+    setManualUrl(currentUrl ?? '');
+  }, [currentUrl]);
 
   const saveLogo = async (logoUrl: string) => {
     if (!logoUrl) return;
@@ -59,9 +64,11 @@ export function ClientLogoSidebar({ siteUrl, projectId, currentUrl, onApply }: C
 
   return (
     <div className="rounded-lg border border-border/60 bg-muted/10 p-3 space-y-3">
-      <div className="flex items-center justify-end gap-2">
-        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={fetchLogo} disabled={loading}>
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-xs text-muted-foreground">Logo client</p>
+        <Button variant="ghost" size="sm" className="h-8 px-2" onClick={fetchLogo} disabled={loading || !siteUrl}>
           {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+          <span className="ml-1.5 text-xs">Detecter</span>
         </Button>
       </div>
 
@@ -82,6 +89,10 @@ export function ClientLogoSidebar({ siteUrl, projectId, currentUrl, onApply }: C
             />
           </div>
         </div>
+      )}
+
+      {!loading && error && (
+        <p className="text-xs text-muted-foreground">{error}</p>
       )}
 
       <div className="space-y-2">

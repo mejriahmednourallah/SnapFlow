@@ -235,8 +235,9 @@ serve(async (req) => {
     });
   } catch (err) {
     console.error("[detect-logo] error", err);
-    return new Response(JSON.stringify({ error: "Server error" }), {
-      status: 500,
+    const fallback: DetectResult = { logo_url: null, source: "detection_failed", confidence: 0 };
+    return new Response(JSON.stringify(fallback), {
+      status: 200,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
