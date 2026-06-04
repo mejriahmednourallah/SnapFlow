@@ -91,21 +91,36 @@ export async function fetchIssues(params: FetchIssuesParams): Promise<FetchIssue
 
 /** Fetch every Redmine issue matching the filters by following pagination. */
 export async function fetchAllIssuesPaginated(params: FetchIssuesParams): Promise<FetchIssuesResult> {
-  const pageSize = Math.min(Math.max(params.limit ?? 100, 1), 500);
+  const requestedLimit = Math.min(Math.max(params.limit ?? 100, 1), 500);
   const allIssues: RedmineIssue[] = [];
+  const seenIssueIds = new Set<number>();
   let offset = params.offset ?? 0;
   let totalCount = 0;
 
   for (let guard = 0; guard < 100; guard += 1) {
-    const page = await fetchIssues({ ...params, limit: pageSize, offset });
-    totalCount = page.totalCount;
-    allIssues.push(...page.issues);
+    const page = await fetchIssues({ ...params, limit: requestedLimit, offset });
+    const receivedCount = page.issues.length;
+    totalCount = page.totalCount || totalCount;
 
-    if (page.issues.length === 0 || allIssues.length >= totalCount || page.issues.length < pageSize) {
+    const newIssues = page.issues.filter(issue => !seenIssueIds.has(issue.id));
+    newIssues.forEach(issue => seenIssueIds.add(issue.id));
+    allIssues.push(...newIssues);
+
+    if (receivedCount === 0 || newIssues.length === 0) {
       break;
     }
 
-    offset += pageSize;
+    if (totalCount > 0 && allIssues.length >= totalCount) {
+      break;
+    }
+
+    // Some Redmine gateways cap responses at 100 even when a higher limit is requested.
+    // Advance by what actually came back so exports do not stop at the first capped page.
+    offset += receivedCount;
+
+    if (totalCount <= 0 && receivedCount < requestedLimit) {
+      break;
+    }
   }
 
   return { issues: allIssues, totalCount: totalCount || allIssues.length };

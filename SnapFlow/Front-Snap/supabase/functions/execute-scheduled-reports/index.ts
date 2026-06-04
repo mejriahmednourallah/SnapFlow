@@ -335,25 +335,48 @@ async function executeActivity(
   const identifier = match ? match[1] : null;
   if (!identifier) throw new Error(`Cannot extract Redmine identifier from URL: ${redmineUrl}`);
 
-  // Call fetch-redmine to get issues
-  const response = await fetch(`${supabaseUrl}/functions/v1/fetch-redmine`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${anonKey}`,
-      'apikey': anonKey,
-    },
-    body: JSON.stringify({
-      type: 'issues',
-      project_identifier: identifier,
-      limit: 100,
-      offset: 0,
-    }),
-  });
+  const issues: any[] = [];
+  const seenIssueIds = new Set<number>();
+  const requestedLimit = 500;
+  let offset = 0;
+  let totalCount = 0;
 
-  const data = await response.json();
-  const issues = data.issues || [];
-  const totalCount = data.total_count || 0;
+  for (let guard = 0; guard < 100; guard += 1) {
+    const response = await fetch(`${supabaseUrl}/functions/v1/fetch-redmine`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${anonKey}`,
+        'apikey': anonKey,
+      },
+      body: JSON.stringify({
+        type: 'issues',
+        project_identifier: identifier,
+        limit: requestedLimit,
+        offset,
+      }),
+    });
+
+    const data = await response.json();
+    const pageIssues = data.issues || [];
+    const receivedCount = pageIssues.length;
+    totalCount = data.total_count || totalCount;
+
+    const newIssues = pageIssues.filter((issue: any) => !seenIssueIds.has(issue.id));
+    newIssues.forEach((issue: any) => seenIssueIds.add(issue.id));
+    issues.push(...newIssues);
+
+    if (receivedCount === 0 || newIssues.length === 0) break;
+    if (totalCount > 0 && issues.length >= totalCount) break;
+
+    // Redmine or the edge gateway can cap pages below the requested limit.
+    // Move by the actual response size so scheduled reports are not capped at 100.
+    offset += receivedCount;
+
+    if (totalCount <= 0 && receivedCount < requestedLimit) break;
+  }
+
+  if (totalCount <= 0) totalCount = issues.length;
 
   // Save activity report
   const reportData = {
