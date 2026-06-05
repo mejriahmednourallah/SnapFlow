@@ -1,4 +1,4 @@
-Khaled"""
+"""
 KPI-Centric Report Builder
 Converts raw report data to axis/sub-axis/KPI structure
 All output in French for easy client consumption
