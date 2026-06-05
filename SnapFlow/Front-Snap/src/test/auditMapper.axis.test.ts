@@ -820,5 +820,107 @@ describe('Axis Mapping', () => {
       expect(finding?.evidenceSummary?.join(' ')).toContain('Stabilite visuelle');
       expect(finding?.description).not.toMatch(/\bLCP\b|\bCLS\b|\bKPI\b/i);
     });
+
+    it('renders failed mobile CWV execution as non-tested without fake zero score', () => {
+      const api: ApiResponse = {
+        scan_id: 'test-scan-mobile-cwv-missing',
+        domain: 'https://example.com',
+        axes: {
+          Performance: {
+            mobile: {
+              kpi_id: 'perf_mobile_speed',
+              status: 'not_evaluated',
+              severity: null,
+              name: 'Temps de Chargement Mobile',
+              score: 0,
+              constat: 'Pages testees: 2, mesures valides: 0',
+              evidence: {
+                pages_checked: 2,
+                pages_attempted: 2,
+                pages_measured: 0,
+                valid_measurement_count: 0,
+                failure_reason: 'mobile_cwv_measurement_failed',
+                execution_status: 'failed',
+                data_quality: 'MISSING',
+              },
+              evidence_digest: {
+                quality: 'MISSING',
+                proof_lines: [
+                  'Pages testees: 2, mesures valides: 0',
+                  'Cause technique: mobile_cwv_measurement_failed',
+                  'Statut d execution: failed',
+                ],
+                missing_reason: 'mobile_cwv_measurement_failed',
+              },
+            },
+          },
+        },
+      };
+
+      const report = mapApiResponseToReport(api, 'audit-mobile-cwv-missing', {
+        url: 'https://example.com',
+        site_name: 'Test Site',
+      });
+
+      const finding = report.axes.find((axis) => axis.id === 'performance')?.findings.find((item) => item.id === 'perf_mobile_speed');
+
+      expect(finding?.kpiLabels?.statut).toBe('Non testé');
+      expect(finding?.status).toBe('not_evaluated');
+      expect([finding?.description, ...(finding?.evidenceSummary ?? [])].join(' ')).not.toContain('Score mobile estime : 0 %');
+      expect(finding?.evidenceSummary?.join(' ')).toContain('mobile_cwv_measurement_failed');
+    });
+
+    it('keeps form fuzzer no-signal cases non-tested with debugging counters', () => {
+      const api: ApiResponse = {
+        scan_id: 'test-scan-forms-no-signals',
+        domain: 'https://example.com',
+        axes: {
+          'Audit Fonctionnel': {
+            forms: {
+              kpi_id: 'func_forms',
+              status: 'non_evalue',
+              severity: null,
+              name: 'Les Formulaires',
+              score: 0,
+              constat: '122 formulaires detectes mais aucun test exploitable.',
+              evidence: {
+                forms_detected: 122,
+                forms_tested: 0,
+                tests_run: 50,
+                signal_count: 0,
+                anomalies_count: 0,
+                execution_status: 'failed',
+                failure_reason: 'form_fuzzer_no_usable_signals',
+                data_quality: 'MISSING',
+              },
+              evidence_digest: {
+                quality: 'MISSING',
+                proof_lines: [
+                  'Formulaires detectes/testes: 122/0',
+                  'Tests executes: 50, signaux exploitables: 0',
+                  'Cause technique: form_fuzzer_no_usable_signals',
+                  'Qualite des donnees: MISSING',
+                ],
+                missing_reason: 'form_fuzzer_no_usable_signals',
+              },
+            },
+          },
+        },
+      };
+
+      const report = mapApiResponseToReport(api, 'audit-forms-no-signals', {
+        url: 'https://example.com',
+        site_name: 'Test Site',
+      });
+
+      const finding = report.axes.find((axis) => axis.id === 'functional')?.findings.find((item) => item.id === 'func_forms');
+      const evidence = finding?.evidenceSummary?.join(' ') ?? '';
+
+      expect(finding?.kpiLabels?.statut).toBe('Non testé');
+      expect(finding?.status).toBe('not_evaluated');
+      expect(evidence).toContain('122/0');
+      expect(evidence).toContain('signaux exploitables: 0');
+      expect(evidence).toContain('form_fuzzer_no_usable_signals');
+    });
   });
 });

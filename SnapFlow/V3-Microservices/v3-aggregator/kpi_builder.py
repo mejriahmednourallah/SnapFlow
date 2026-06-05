@@ -1,4 +1,4 @@
-"""
+Khaled"""
 KPI-Centric Report Builder
 Converts raw report data to axis/sub-axis/KPI structure
 All output in French for easy client consumption
@@ -1766,7 +1766,15 @@ def _build_curated_evidence_digest(kpi_id: str, kpi_name: str, status: str, evid
     elif kpi_id == "func_forms":
         rows = _unique_digest_rows(_safe_list(evidence.get("anomalous_tests_all")))
         _append_digest_line(lines, f"Formulaires détectés/testés: {_safe_int(evidence.get('forms_detected'))}/{_safe_int(evidence.get('forms_tested'))}")
-        _append_digest_line(lines, f"Tests exécutés: {_safe_int(evidence.get('tests_run'))}, signaux: {_safe_int(evidence.get('anomalies_count'))}")
+        _append_digest_line(lines, f"Tests exécutés: {_safe_int(evidence.get('tests_run'))}, signaux exploitables: {_safe_int(evidence.get('signal_count'))}")
+        if _safe_int(evidence.get("anomalies_count")) > 0:
+            _append_digest_line(lines, f"Anomalies confirmées: {_safe_int(evidence.get('anomalies_count'))}")
+        if _digest_str(evidence.get("execution_status")):
+            _append_digest_line(lines, f"Statut d'exécution: {_digest_str(evidence.get('execution_status'))}")
+        if _digest_str(evidence.get("failure_reason")):
+            _append_digest_line(lines, f"Cause technique: {_digest_str(evidence.get('failure_reason'))}")
+        if _digest_str(evidence.get("data_quality")):
+            _append_digest_line(lines, f"Qualité des données: {_digest_str(evidence.get('data_quality'))}")
 
     elif kpi_id == "func_links":
         rows = _unique_digest_rows(_safe_list(evidence.get("broken_links_all")))
@@ -1878,7 +1886,7 @@ def _build_curated_evidence_digest(kpi_id: str, kpi_name: str, status: str, evid
         raw_perf_rows = _performance_digest_rows(data) if kpi_id in {"perf_desktop_speed", "perf_mobile_speed"} else []
         valid_perf_rows = [row for row in raw_perf_rows if _is_valid_performance_digest_row(row)]
         rows = _unique_digest_rows(
-            valid_perf_rows if kpi_id in {"perf_desktop_speed", "perf_mobile_speed"} else
+            (valid_perf_rows or (raw_perf_rows if kpi_id == "perf_mobile_speed" else [])) if kpi_id in {"perf_desktop_speed", "perf_mobile_speed"} else
             _safe_list(data.get("rows") or data.get("unoptimised_images") or data.get("broken_buttons") or data.get("homepage_console_errors"))
         )
         if not rows and kpi_id == "perf_cache":
@@ -1917,15 +1925,27 @@ def _build_curated_evidence_digest(kpi_id: str, kpi_name: str, status: str, evid
             checked = _safe_int(
                 evidence.get("pages_checked")
                 or data.get("pages_checked")
+                or evidence.get("pages_attempted")
+                or data.get("pages_attempted")
                 or data.get("headless_sample_size")
                 or data.get("sample_size")
             )
             if checked <= 0:
                 checked = len(valid_perf_rows) or len(raw_perf_rows)
-            available = len(valid_perf_rows)
+            measured_raw = evidence.get("pages_measured")
+            if measured_raw is None:
+                measured_raw = data.get("pages_measured")
+            available = _safe_int(measured_raw) if measured_raw is not None else len(valid_perf_rows)
             if checked > 0:
                 available = min(available, checked)
             _append_digest_line(lines, f"Pages testees: {checked}, mesures valides: {available}")
+            if kpi_id == "perf_mobile_speed":
+                if _digest_str(evidence.get("failure_reason") or data.get("failure_reason")):
+                    _append_digest_line(lines, f"Cause technique: {_digest_str(evidence.get('failure_reason') or data.get('failure_reason'))}")
+                if _digest_str(evidence.get("execution_status") or data.get("execution_status")):
+                    _append_digest_line(lines, f"Statut d'execution: {_digest_str(evidence.get('execution_status') or data.get('execution_status'))}")
+                if _digest_str(evidence.get("data_quality") or data.get("data_quality")):
+                    _append_digest_line(lines, f"Qualite des donnees: {_digest_str(evidence.get('data_quality') or data.get('data_quality'))}")
         if kpi_id == "perf_console_errors":
             _append_digest_line(lines, f"Pages avec erreurs console: {_safe_int(data.get('pages_with_console_errors'))}")
         if kpi_id == "perf_cache":
@@ -2488,12 +2508,15 @@ def _build_contract_evidence(kpi_id: str, kpi_obj: dict, pages_scanned: int, dom
         valid_rows = [row for row in rows if _is_valid_performance_digest_row(row)]
         pages_checked = _safe_int(
             data.get("pages_checked")
+            or data.get("pages_attempted")
             or data.get("headless_sample_size")
             or data.get("sample_size")
             or len(rows)
         )
         if pages_checked <= 0:
             pages_checked = len(valid_rows)
+        pages_measured_raw = data.get("pages_measured")
+        pages_measured = _safe_int(pages_measured_raw) if pages_measured_raw is not None else len(valid_rows)
         if not valid_rows:
             data_quality = "MISSING"
             status_override = "not_evaluated"
@@ -2504,7 +2527,9 @@ def _build_contract_evidence(kpi_id: str, kpi_obj: dict, pages_scanned: int, dom
         evidence.update({
             "data_quality": data_quality,
             "pages_checked": pages_checked,
-            "valid_measurement_count": len(valid_rows),
+            "pages_attempted": _safe_int(data.get("pages_attempted") or pages_checked),
+            "pages_measured": pages_measured,
+            "valid_measurement_count": pages_measured,
             "measurement_row_count": len(rows),
             "valid_measurement_rows": valid_rows[:200],
             "execution_status": data.get("execution_status"),
@@ -2548,6 +2573,7 @@ def _build_contract_evidence(kpi_id: str, kpi_obj: dict, pages_scanned: int, dom
         forms_tested = _safe_int(data.get("forms_tested") or data.get("unique_transactional_forms_tested"))
         non_transactional_forms_tested = _safe_int(data.get("non_transactional_forms_tested"))
         tests_run = _safe_int(data.get("tests_run"))
+        signal_count = _safe_int(data.get("signal_count"))
         anomalies_count = _safe_int(data.get("anomalies") or data.get("anomalies_count"))
         suppressed_low_confidence_anomalies = _safe_int(data.get("suppressed_low_confidence_anomalies"))
         anomalies_by_type = _safe_dict(data.get("anomalies_by_type"))
@@ -2557,7 +2583,17 @@ def _build_contract_evidence(kpi_id: str, kpi_obj: dict, pages_scanned: int, dom
         anomalous_tests_raw = _safe_list(data.get("anomalous_tests_all", []))
         anomalous_tests_all = [_normalize_anomalous_test_row(_safe_dict(row)) for row in anomalous_tests_raw]
 
-        if forms_detected > 0 and forms_tested == 0:
+        no_usable_signals = (
+            tests_run > 0
+            and signal_count == 0
+            and str(data.get("failure_reason") or "").strip() == "form_fuzzer_no_usable_signals"
+        )
+
+        if no_usable_signals:
+            status_override = "not_evaluated"
+            data_quality = "MISSING"
+            confidence_penalty = 2
+        elif forms_detected > 0 and forms_tested == 0:
             status_override = "not_evaluated"
             data_quality = "MISSING"
             confidence_penalty = 2
@@ -2579,6 +2615,11 @@ def _build_contract_evidence(kpi_id: str, kpi_obj: dict, pages_scanned: int, dom
             "forms_tested": forms_tested,
             "non_transactional_forms_tested": non_transactional_forms_tested,
             "tests_run": tests_run,
+            "signal_count": signal_count,
+            "execution_status": data.get("execution_status"),
+            "failure_reason": data.get("failure_reason"),
+            "response_type": data.get("response_type"),
+            "submitted": data.get("submitted"),
             "anomalies_count": anomalies_count,
             "suppressed_low_confidence_anomalies": suppressed_low_confidence_anomalies,
             "anomalies_by_type": anomalies_by_type if anomalies_by_type or anomalies_count == 0 else _missing_field("Le détail des signaux par type n'a pas été conservé"),
@@ -4370,8 +4411,8 @@ def build_kpi_centric_report(report: dict) -> dict:
                     "lcp_ms": mobile_kpi.get("lcp_ms"),
                     "cls": mobile_kpi.get("cls"),
                     "speed_index_ms": mobile_kpi.get("speed_index_ms"),
-                    "issue": ", ".join(str(item) for item in _safe_list(mobile_kpi.get("issues"))),
-                }] if mobile_is_available else []),
+                    "issue": ", ".join(str(item) for item in (_safe_list(mobile_kpi.get("issues")) or [mobile_kpi.get("failure_reason") or "mobile_cwv_measurement_failed"])),
+                }] if _safe_int(mobile_kpi.get("pages_attempted")) > 0 else []),
             },
         },
         "Optimisation des Images": {

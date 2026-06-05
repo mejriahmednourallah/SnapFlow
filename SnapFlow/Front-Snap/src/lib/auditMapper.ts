@@ -240,7 +240,7 @@ const KPI_LABEL_RULES: Record<string, (status: string, severity: string | null |
   // ── Fonctionnel ───────────────────────────────────────────────────────
   func_forms(rawStatus) {
     if (rawStatus === 'passing') return OK_DEFAULT;
-    if (rawStatus === 'not_available') return NT_DEFAULT;
+    if (isNonTestedStatus(rawStatus)) return NT_DEFAULT;
     return KO_BUG_MAJ; // tested form fails
   },
   func_links(rawStatus, severity) {
@@ -288,7 +288,7 @@ const KPI_LABEL_RULES: Record<string, (status: string, severity: string | null |
   },
   perf_mobile_speed(rawStatus) {
     if (rawStatus === 'passing') return OK_DEFAULT;
-    if (rawStatus === 'not_available') return NT_DEFAULT;
+    if (isNonTestedStatus(rawStatus)) return NT_DEFAULT;
     return KO_RECO_MIN; // measured slow
   },
   perf_image_optim(rawStatus) {
@@ -1299,13 +1299,48 @@ function scoreLineForFinding(finding: AuditFinding): string | undefined {
   if (source.includes('perf desktop speed') || source.includes('temps de chargement desktop')) {
     return `Score desktop estime : ${score} %.`;
   }
-  if (source.includes('perf mobile speed') || source.includes('mobile')) {
+  if (source.includes('perf mobile speed') || source.includes('temps de chargement mobile')) {
+    if (mobilePerformanceMeasurementFailed(finding)) return undefined;
     return `Score mobile estime : ${score} %.`;
   }
   if (source.includes('eco index')) {
     return `Score ecologique : ${score} %.`;
   }
   return undefined;
+}
+
+function mobilePerformanceMeasurementFailed(finding: AuditFinding): boolean {
+  if (isNonTestedStatus(finding.status)) return true;
+
+  const rawEvidence = (() => {
+    try {
+      return finding.evidenceRaw ? JSON.stringify(finding.evidenceRaw) : '';
+    } catch {
+      return '';
+    }
+  })();
+
+  const combined = normalizeForComparison([
+    finding.description,
+    finding.evidenceMissingReason,
+    ...(finding.evidenceSummary ?? []),
+    ...(finding.evidence ?? []),
+    ...(finding.annexes ?? []),
+    rawEvidence,
+  ].filter(Boolean).join(' '));
+
+  return [
+    'mobile cwv measurement failed',
+    'core web vitals unavailable',
+    'measurement failed',
+    'navigation error',
+    'browser error',
+    'mesures valides 0',
+    'valid measurement count 0',
+    'pages measured 0',
+    'data quality missing',
+    'donnees insuffisantes',
+  ].some((needle) => combined.includes(needle));
 }
 
 function findingHasUncertainEvidence(finding: AuditFinding, evidenceLines: string[]): boolean {

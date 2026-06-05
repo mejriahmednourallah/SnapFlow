@@ -487,6 +487,37 @@ class TestKPICentricReport(unittest.TestCase):
         self.assertEqual(len(evidence["affected_page_urls_all"]), 2)
         self.assertEqual(evidence["anomalous_tests_all"][0]["payload"], {"message": "<script>alert(1)</script>"})
 
+    def test_forms_kpi_no_usable_signals_is_not_evaluated_with_debug_counters(self):
+        report = json.loads(json.dumps(self.report))
+        da = report.setdefault("domain_analysis", {})
+        da["functional_kpi"] = {"total_forms": 122}
+        da["functional_fuzzer_kpi"] = {
+            "status": "non_evalue",
+            "total_forms_tested": 0,
+            "unique_transactional_forms_detected": 122,
+            "unique_transactional_forms_tested": 0,
+            "tests_run": 50,
+            "signal_count": 0,
+            "anomalies_count": 0,
+            "execution_status": "failed",
+            "failure_reason": "form_fuzzer_no_usable_signals",
+            "data_quality": "MISSING",
+        }
+
+        rebuilt = build_kpi_centric_report(report)
+        forms = rebuilt["axes"]["Audit Fonctionnel"]["Les Formulaires"]
+        evidence = forms["evidence"]
+        digest_lines = " ".join(forms.get("evidence_digest", {}).get("proof_lines", []))
+
+        self.assertEqual(forms["status"], "not_evaluated")
+        self.assertEqual(evidence["forms_detected"], 122)
+        self.assertEqual(evidence["forms_tested"], 0)
+        self.assertEqual(evidence["tests_run"], 50)
+        self.assertEqual(evidence["signal_count"], 0)
+        self.assertEqual(evidence["failure_reason"], "form_fuzzer_no_usable_signals")
+        self.assertIn("signaux exploitables: 0", digest_lines)
+        self.assertIn("form_fuzzer_no_usable_signals", digest_lines)
+
     def test_meta_kpi_returns_full_affected_url_lists(self):
         report = json.loads(json.dumps(self.report))
         seo = report.setdefault("site_metrics", {}).setdefault("seo", {})
@@ -742,6 +773,9 @@ class TestKPICentricReport(unittest.TestCase):
 
         self.assertEqual(kpi["status"], "not_evaluated")
         self.assertEqual(kpi["evidence"]["failure_reason"], "mobile_cwv_measurement_failed")
+        digest_lines = " ".join(kpi.get("evidence_digest", {}).get("proof_lines", []))
+        self.assertIn("Pages testees: 1, mesures valides: 0", digest_lines)
+        self.assertIn("mobile_cwv_measurement_failed", digest_lines)
 
     def test_privacy_score_fails_when_privacy_policy_is_missing(self):
         report = json.loads(json.dumps(self.report))
