@@ -20,7 +20,7 @@ export function AxisBarChart({ axes, theme, width = 460 }: AxisBarChartProps) {
       <Svg width={width} height={totalHeight}>
         {axes.map((axis, i) => {
           const y = i * (barHeight + gap);
-          const fillWidth = (Math.max(0, Math.min(100, axis.score.value)) / 100) * usable;
+          const fillWidth = (Math.max(0, Math.min(100, axis.score.scoreMeasured ?? 0)) / 100) * usable;
           return (
             [
               <Rect key={`bg-${axis.id}`} x={leftLabel} y={y} width={usable} height={barHeight} rx={7} ry={7} fill={theme?.border ?? '#D7E0EA'} />,
@@ -34,7 +34,7 @@ export function AxisBarChart({ axes, theme, width = 460 }: AxisBarChartProps) {
           <View key={`label-${axis.id}`} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', height: barHeight }}>
             <Text style={{ width: leftLabel - 8, fontSize: 7, color: theme?.textMuted ?? '#64748B' }}>{axis.name}</Text>
             <Text style={{ width: 32, textAlign: 'right', fontSize: 7.6, color: theme?.text ?? '#111827', fontFamily: 'DMSans', fontWeight: 600 }}>
-              {axis.score.value}
+              {axis.score.scoreMeasured === null ? 'N/C' : axis.score.scoreMeasured}
             </Text>
           </View>
         ))}

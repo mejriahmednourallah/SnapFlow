@@ -27,7 +27,7 @@ export function StatusBadge({ label, status }: StatusBadgeProps) {
         paddingVertical: 3,
       }}
     >
-      <Text style={{ fontSize: 7, color: color, fontFamily: 'DMSans', fontWeight: 700 }}>{label}</Text>
+      <Text style={{ fontSize: 8.1, color: color, fontFamily: 'DMSans', fontWeight: 700 }}>{label}</Text>
     </View>
   );
 }

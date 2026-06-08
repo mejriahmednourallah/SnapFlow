@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { getAxisScoreBreakdown, getAuditGlobalScore, getScoreColor, getCriticalCount, getTotalFindings, isNonTestedFinding, type AuditReport } from '@/data/mockAuditData';
+import { getAxisScoreBreakdown, getAuditGlobalScore, getScoreColor, getCriticalCount, getTotalFindings, isClientVisibleFinding, type AuditReport } from '@/data/mockAuditData';
 import { ScoreGauge } from '@/components/ScoreGauge';
 import { CriticalityBadge } from '@/components/CriticalityBadge';
 import { AlertTriangle, TrendingUp, CheckCircle, Pencil, Save, XCircle } from 'lucide-react';
@@ -79,7 +79,13 @@ export function TabResume({ audit, isEditMode = false, onSelectAxis, onUpdateSum
     setSummaryDialogOpen(false);
   };
 
+  const visibleAxes = audit.axes
+    .map((axis) => ({ ...axis, findings: axis.findings.filter(isClientVisibleFinding) }))
+    .filter((axis) => axis.findings.length > 0);
   const globalScore = getAuditGlobalScore(audit);
+  const axisBreakdowns = visibleAxes.map(getAxisScoreBreakdown);
+  const globalMeasuredKpis = axisBreakdowns.reduce((sum, item) => sum + item.measuredKpis, 0);
+  const globalScoreMeasured = globalMeasuredKpis > 0 ? globalScore : null;
   const summary = audit.summary;
   const passingCount = audit.passingKpis?.length ?? 0;
   const recommendationCount = audit.recommendations?.length ?? 0;
@@ -105,8 +111,16 @@ export function TabResume({ audit, isEditMode = false, onSelectAxis, onUpdateSum
       {/* Top KPIs */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <div className="glass-card p-6 flex flex-col items-center">
-          <ScoreGauge score={globalScore} size={100} strokeWidth={7} />
+          <ScoreGauge
+            score={globalScoreMeasured ?? 0}
+            size={100}
+            strokeWidth={7}
+            valueText={globalScoreMeasured === null ? 'N/T' : `${globalScoreMeasured}%`}
+          />
           <p className="text-sm font-semibold mt-2">Score Global</p>
+          <p className="text-xs text-muted-foreground mt-1">
+            {globalScoreMeasured === null ? 'Score non calculable' : 'Score sur contrôles mesurés'}
+          </p>
         </div>
         <div className="glass-card p-6">
           <p className="text-sm text-muted-foreground mb-1">Points analysés</p>
@@ -128,9 +142,9 @@ export function TabResume({ audit, isEditMode = false, onSelectAxis, onUpdateSum
         <div className="glass-card p-6 lg:col-span-2">
           <h3 className="font-semibold mb-4">Score par Axe</h3>
           <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-            {audit.axes.map(ax => {
+            {visibleAxes.map(ax => {
               const breakdown = getAxisScoreBreakdown(ax);
-              const allNonTeste = ax.findings.length > 0 && ax.findings.every(isNonTestedFinding);
+              const allNonTeste = breakdown.scoreMeasured === null;
               return (
                 <button
                   key={ax.id}
@@ -140,9 +154,12 @@ export function TabResume({ audit, isEditMode = false, onSelectAxis, onUpdateSum
                   <AxisIcon id={ax.id} className="w-5 h-5 text-muted-foreground flex-shrink-0" />
                   <div className="min-w-0">
                     <p className={`font-mono font-bold text-sm ${getScoreColor(breakdown.scorePct)}`}>
-                      {allNonTeste ? 'N/T' : `${breakdown.x}/${breakdown.y}`}
+                      {allNonTeste ? 'N/T' : `${breakdown.scoreMeasured}%`}
                     </p>
                     <p className="text-xs text-muted-foreground truncate">{ax.name}</p>
+                    <p className="text-[10px] text-muted-foreground">
+                      {breakdown.scoreMeasured === null ? 'Aucun contrôle mesuré' : `${breakdown.measuredKpis} contrôle${breakdown.measuredKpis > 1 ? 's' : ''} mesuré${breakdown.measuredKpis > 1 ? 's' : ''}`}
+                    </p>
                   </div>
                 </button>
               );

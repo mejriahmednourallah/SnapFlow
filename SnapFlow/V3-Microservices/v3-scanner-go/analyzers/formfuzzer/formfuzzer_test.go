@@ -1,6 +1,12 @@
 package formfuzzer
 
-import "testing"
+import (
+	"context"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+	"time"
+)
 
 func TestInferFieldSemanticUsesIdAndLabel(t *testing.T) {
 	field := FormField{Name: "", ID: "contact_email", Label: "Your email", Type: "text"}
@@ -159,5 +165,39 @@ func TestClassifySubmissionOutcomeFlagsConfirmedSilentAcceptance(t *testing.T) {
 	outcome := classifySubmissionOutcome(form, "fuzz", payload, 200, `Merci, votre demande a bien été envoyée. Nous vous contacterons prochainement.`)
 	if outcome != OutcomeSilentAcceptance {
 		t.Fatalf("expected confirmed success response to be silent acceptance, got %q", outcome)
+	}
+}
+
+func TestRunCountsValidResponsesWithoutAnomaliesAsUsable(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`<div class="form-item--error">Adresse email invalide</div>`))
+	}))
+	defer server.Close()
+
+	form := DiscoveredForm{
+		FormID:          "contact",
+		PageURL:         server.URL + "/contact",
+		ActionURL:       server.URL + "/submit",
+		Method:          http.MethodPost,
+		IsTransactional: true,
+		Fields: []FormField{
+			{Name: "email", Type: "email", Required: true},
+			{Name: "message", Type: "textarea"},
+		},
+	}
+	results, summary := Run(context.Background(), []DiscoveredForm{form}, Config{
+		Concurrency:    1,
+		MaxForms:       1,
+		RequestTimeout: time.Second,
+	})
+
+	if len(results) != 2 || summary.TestsRun != 2 {
+		t.Fatalf("expected baseline and fuzz tests, got results=%d summary=%#v", len(results), summary)
+	}
+	if summary.ResponsesReceived != 2 || summary.ValidResponses != 2 {
+		t.Fatalf("expected both HTTP responses to be usable, got %#v", summary)
+	}
+	if summary.TransportErrors != 0 || summary.Timeouts != 0 {
+		t.Fatalf("expected no transport errors, got %#v", summary)
 	}
 }

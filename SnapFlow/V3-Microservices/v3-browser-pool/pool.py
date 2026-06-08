@@ -111,6 +111,7 @@ class RenderResult:
     confidence: str = "primary"
     wait_until: str = _DEFAULT_RENDER_WAIT_UNTIL
     attempts: Optional[list[dict]] = None
+    profile: str = "desktop"
     error:         Optional[str] = None
 
 
@@ -126,6 +127,20 @@ class ScreenshotResult:
     wait_until:    str             = DEFAULT_SCREENSHOT_WAIT_UNTIL
     load_state_timeout_ignored: bool = False
     error:         Optional[str]   = None
+
+
+@dataclass
+class SearchProbeResult:
+    executed: bool
+    passed: bool
+    status: str
+    query: str
+    search_url: Optional[str] = None
+    final_url: Optional[str] = None
+    method: Optional[str] = None
+    query_param: Optional[str] = None
+    result_behavior: Optional[str] = None
+    details: Optional[str] = None
 
 
 # ── Browser pool ───────────────────────────────────────────────────────────────
@@ -836,6 +851,119 @@ class BrowserPool:
             self._active_sessions -= 1
             self._semaphore.release()
 
+    async def test_search(
+        self,
+        url: str,
+        query: str = "snapflow-test",
+        timeout_ms: int = DEFAULT_TIMEOUT,
+    ) -> SearchProbeResult:
+        if not self._started:
+            return SearchProbeResult(
+                executed=False,
+                passed=False,
+                status="not_executed",
+                query=query,
+                details="Browser pool not started",
+            )
+        if not await self._acquire():
+            return SearchProbeResult(
+                executed=False,
+                passed=False,
+                status="not_executed",
+                query=query,
+                details="All browser slots busy - queue timeout",
+            )
+
+        self._active_sessions += 1
+        context = None
+        page = None
+        try:
+            browser, _worker_idx = await self._pick_browser()
+            context = await browser.new_context(
+                viewport={"width": 1366, "height": 768},
+                ignore_https_errors=_BROWSER_POOL_IGNORE_HTTPS_ERRORS,
+            )
+            page = await context.new_page()
+            await page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
+
+            forms = page.locator("form")
+            selected_form = None
+            selected_input = None
+            for index in range(await forms.count()):
+                form = forms.nth(index)
+                candidate = form.locator(
+                    "input[type='search'], input[name='q'], input[name='s'], "
+                    "input[name='search'], input[name='query'], input[name='keyword'], "
+                    "input[name='keywords'], input[name='recherche']"
+                )
+                if await candidate.count() > 0:
+                    selected_form = form
+                    selected_input = candidate.first
+                    break
+
+            if selected_form is None or selected_input is None:
+                return SearchProbeResult(
+                    executed=False,
+                    passed=False,
+                    status="not_executed",
+                    query=query,
+                    search_url=url,
+                    final_url=page.url,
+                    details="No executable search form was found in the rendered DOM",
+                )
+
+            method = (await selected_form.get_attribute("method") or "GET").upper()
+            query_param = await selected_input.get_attribute("name")
+            before_url = page.url
+            before_text = (await page.locator("body").inner_text())[:20000]
+            await selected_input.fill(query)
+
+            submit = selected_form.locator("button[type='submit'], input[type='submit'], button")
+            if await submit.count() > 0:
+                await submit.first.click(timeout=min(timeout_ms, 10000))
+            else:
+                await selected_input.press("Enter")
+
+            try:
+                await page.wait_for_load_state("domcontentloaded", timeout=min(timeout_ms, 15000))
+            except Exception:
+                pass
+            await page.wait_for_timeout(1000)
+
+            final_url = page.url
+            after_text = (await page.locator("body").inner_text())[:20000]
+            changed = final_url != before_url or after_text != before_text
+            query_visible = query.lower() in after_text.lower() or query.lower() in final_url.lower()
+            passed = changed or query_visible
+            behavior = "search_results_changed" if changed else "query_reflected" if query_visible else "no_visible_result_change"
+            return SearchProbeResult(
+                executed=True,
+                passed=passed,
+                status="passed" if passed else "failed",
+                query=query,
+                search_url=before_url,
+                final_url=final_url,
+                method=method,
+                query_param=query_param,
+                result_behavior=behavior,
+                details="Rendered search form submitted with a neutral test query",
+            )
+        except Exception as exc:
+            return SearchProbeResult(
+                executed=False,
+                passed=False,
+                status="request_error",
+                query=query,
+                search_url=url,
+                final_url=page.url if page is not None else None,
+                details=str(exc),
+            )
+        finally:
+            await self._safe_close_page(page)
+            await self._safe_close_context(context)
+            self._active_sessions -= 1
+            self._semaphore.release()
+
     async def _render_once(
         self,
         url: str,
@@ -843,6 +971,7 @@ class BrowserPool:
         wait_until: str,
         settle_ms: int,
         engine: str,
+        profile: str,
     ) -> RenderResult:
         if not self._started:
             return RenderResult(status=PageStatus.POOL_EXHAUSTED, url=url, render_engine=engine, error="Pool not started")
@@ -863,20 +992,40 @@ class BrowserPool:
         page = None
         console_errors: list[str] = []
         try:
+            context_options = {
+                "viewport": {"width": 1366, "height": 768},
+                "ignore_https_errors": _BROWSER_POOL_IGNORE_HTTPS_ERRORS,
+            }
+            if profile == "mobile_3g":
+                context_options.update({
+                    "viewport": {"width": 375, "height": 812},
+                    "user_agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
+                    "is_mobile": True,
+                    "device_scale_factor": 2,
+                    "locale": "fr-FR",
+                })
+
             if use_obscura:
                 browser = await self._get_obscura_browser()
-                context = await browser.new_context(
-                    viewport={"width": 1366, "height": 768},
-                    ignore_https_errors=_BROWSER_POOL_IGNORE_HTTPS_ERRORS,
-                )
+                context = await browser.new_context(**context_options)
             else:
                 browser, _worker_idx = await self._pick_browser()
-                context = await browser.new_context(
-                    viewport={"width": 1366, "height": 768},
-                    ignore_https_errors=_BROWSER_POOL_IGNORE_HTTPS_ERRORS,
-                )
+                context = await browser.new_context(**context_options)
 
             page = await context.new_page()
+            if profile == "mobile_3g":
+                try:
+                    cdp = await context.new_cdp_session(page)
+                    await cdp.send("Network.enable")
+                    await cdp.send("Network.emulateNetworkConditions", {
+                        "offline": False,
+                        "latency": 300,
+                        "downloadThroughput": 1.5 * 1024 * 1024 / 8,
+                        "uploadThroughput": 750 * 1024 / 8,
+                        "connectionType": "cellular3g",
+                    })
+                except Exception as exc:
+                    logger.warning("mobile network emulation unavailable url=%s error=%s", url, exc)
             page.on(
                 "console",
                 lambda msg: console_errors.append(f"[{msg.type}] {msg.text}")
@@ -936,6 +1085,7 @@ class BrowserPool:
                 metrics_available=metrics_available,
                 render_engine=engine,
                 wait_until=wait_until,
+                profile=profile,
             )
         except asyncio.TimeoutError:
             if use_obscura:
@@ -973,6 +1123,7 @@ class BrowserPool:
         engine: str = "chromium",
         allow_obscura_fallback: bool = False,
         settle_ms: int = _DEFAULT_RENDER_SETTLE_MS,
+        profile: str = "desktop",
     ) -> RenderResult:
         """Open *url*, wait for the DOM to settle, and return the rendered HTML."""
         wait_until = _normalize_wait_until(wait_until, _DEFAULT_RENDER_WAIT_UNTIL)
@@ -980,8 +1131,11 @@ class BrowserPool:
         if engine not in {"chromium", "obscura", "auto"}:
             engine = "chromium"
         settle_ms = max(0, min(int(settle_ms or 0), 10000))
+        profile = (profile or "desktop").strip().lower()
+        if profile not in {"desktop", "mobile_3g"}:
+            profile = "desktop"
         first_engine = "chromium" if engine == "auto" else engine
-        first = await self._render_once(url, timeout_ms, wait_until, settle_ms, first_engine)
+        first = await self._render_once(url, timeout_ms, wait_until, settle_ms, first_engine, profile)
         attempts = [{
             "engine": first.render_engine,
             "status": first.status.value if isinstance(first.status, PageStatus) else str(first.status),
@@ -992,7 +1146,7 @@ class BrowserPool:
             first.attempts = attempts
             return first
 
-        fallback = await self._render_once(url, timeout_ms, wait_until, settle_ms, "obscura")
+        fallback = await self._render_once(url, timeout_ms, wait_until, settle_ms, "obscura", profile)
         attempts.append({
             "engine": fallback.render_engine,
             "status": fallback.status.value if isinstance(fallback.status, PageStatus) else str(fallback.status),

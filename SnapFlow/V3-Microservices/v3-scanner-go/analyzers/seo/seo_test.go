@@ -48,6 +48,65 @@ func TestCheckRobotsTxtFollowsRedirect(t *testing.T) {
 	}
 }
 
+func TestAnalyzeAIRobotsPolicyExplicitAllow(t *testing.T) {
+	robots := `User-agent: GPTBot
+Allow: /
+
+User-agent: OAI-SearchBot
+Allow: /
+
+User-agent: ClaudeBot
+Allow: /
+
+User-agent: PerplexityBot
+Allow: /
+
+User-agent: bingbot
+Allow: /
+`
+	policy := AnalyzeAIRobotsPolicy(robots)
+	if policy.Status != "allowed" {
+		t.Fatalf("expected allowed policy, got %q", policy.Status)
+	}
+	if len(policy.AllowedBots) != 5 {
+		t.Fatalf("expected 5 allowed bots, got %#v", policy.AllowedBots)
+	}
+}
+
+func TestAnalyzeAIRobotsPolicyExplicitBlock(t *testing.T) {
+	robots := `User-agent: GPTBot
+Disallow: /
+`
+	policy := AnalyzeAIRobotsPolicy(robots)
+	if policy.Status != "blocked" {
+		t.Fatalf("expected blocked policy, got %q", policy.Status)
+	}
+	if len(policy.BlockedBots) != 1 || policy.BlockedBots[0] != "GPTBot" {
+		t.Fatalf("expected GPTBot blocked, got %#v", policy.BlockedBots)
+	}
+}
+
+func TestAnalyzeAIRobotsPolicyMissingRobots(t *testing.T) {
+	policy := AnalyzeAIRobotsPolicy("")
+	if policy.Status != "robots_missing" {
+		t.Fatalf("expected robots_missing policy, got %q", policy.Status)
+	}
+}
+
+func TestAnalyzeAIRobotsPolicyStandardRobotsImplicitAllowed(t *testing.T) {
+	robots := `User-agent: *
+Disallow: /admin/
+Disallow: /tmp/
+`
+	policy := AnalyzeAIRobotsPolicy(robots)
+	if policy.Status != "implicit_allowed" {
+		t.Fatalf("expected implicit_allowed policy, got %q", policy.Status)
+	}
+	if len(policy.BlockedBots) != 0 {
+		t.Fatalf("expected no blocked AI bots for path-level standard robots, got %#v", policy.BlockedBots)
+	}
+}
+
 func TestExtractLinksCapturesUniqueExternalDomains(t *testing.T) {
 	html := `
 		<a href="https://www.google.com/maps">Maps</a>

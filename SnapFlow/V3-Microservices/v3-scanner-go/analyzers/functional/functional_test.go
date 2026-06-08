@@ -1,8 +1,10 @@
 package functional
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 )
@@ -64,5 +66,35 @@ func TestAnalyzeWithBaseURLSkipsUnsafePostSearchProbe(t *testing.T) {
 	}
 	if result.SearchTests[0].Status != "not_executed" {
 		t.Fatalf("expected not_executed row, got %#v", result.SearchTests[0])
+	}
+}
+
+func TestAnalyzeWithBaseURLExecutesPostSearchViaBrowserPool(t *testing.T) {
+	oldPoolURL := os.Getenv("BROWSER_POOL_URL")
+	defer os.Setenv("BROWSER_POOL_URL", oldPoolURL)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/test-search" {
+			http.NotFound(w, r)
+			return
+		}
+		var payload map[string]interface{}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode search payload: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"executed":true,"passed":true,"status":"passed","query":"snapflow-test","search_url":"https://example.com/search","final_url":"https://example.com/search","method":"POST","query_param":"q","result_behavior":"dom_changed","details":"Search results changed"}`))
+	}))
+	defer server.Close()
+	os.Setenv("BROWSER_POOL_URL", server.URL)
+
+	html := `<form action="/search" method="POST"><input type="search" name="q"></form>`
+	result := AnalyzeWithBaseURL("https://example.com", html)
+
+	if !result.SearchExecuted || result.SearchPassed == nil || !*result.SearchPassed {
+		t.Fatalf("expected browser-backed POST search to pass, got %#v", result)
+	}
+	if len(result.SearchTests) != 1 || result.SearchTests[0].Method != "POST" {
+		t.Fatalf("expected POST search proof row, got %#v", result.SearchTests)
 	}
 }

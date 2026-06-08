@@ -26,7 +26,7 @@ export function RadarChart({ axes, size = 150, theme }: RadarChartProps) {
 
   const polygonPoints = data
     .map((axis, i) => {
-      const ratio = Math.max(0, Math.min(100, axis.score.value)) / 100;
+      const ratio = Math.max(0, Math.min(100, axis.score.scoreMeasured ?? 0)) / 100;
       const p = pointAt(cx, cy, maxR * ratio, -Math.PI / 2 + i * step);
       return `${p.x},${p.y}`;
     })

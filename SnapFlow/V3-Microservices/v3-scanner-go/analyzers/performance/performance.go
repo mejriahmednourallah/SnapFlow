@@ -134,16 +134,18 @@ type HeadlessResult struct {
 
 // MobilePerformanceResult holds metrics captured from a 3G mobile emulation of the homepage.
 type MobilePerformanceResult struct {
-	FCPMS             float64  `json:"fcp_ms"`
-	LCPMS             float64  `json:"lcp_ms"`
-	CLS               float64  `json:"cls"`
-	SpeedIndexMS      float64  `json:"speed_index_ms"`
-	Available         bool     `json:"available"`
-	MeasurementStatus string   `json:"measurement_status,omitempty"`
-	DataQuality       string   `json:"data_quality,omitempty"`
-	Passed            bool     `json:"passed"`
-	Issues            []string `json:"issues"`
-	Error             string   `json:"error,omitempty"`
+	FCPMS             float64                  `json:"fcp_ms"`
+	LCPMS             float64                  `json:"lcp_ms"`
+	CLS               float64                  `json:"cls"`
+	SpeedIndexMS      float64                  `json:"speed_index_ms"`
+	Available         bool                     `json:"available"`
+	MeasurementStatus string                   `json:"measurement_status,omitempty"`
+	DataQuality       string                   `json:"data_quality,omitempty"`
+	Passed            bool                     `json:"passed"`
+	Issues            []string                 `json:"issues"`
+	RenderEngine      string                   `json:"render_engine,omitempty"`
+	Attempts          []map[string]interface{} `json:"attempts,omitempty"`
+	Error             string                   `json:"error,omitempty"`
 }
 
 // findChromePath returns the Chromium/Chrome binary path and true when one is
@@ -1171,13 +1173,69 @@ func RunMobileTraces(urls []string) []MobilePerformanceResult {
 		return results
 	}
 
+	if browserpool.IsEnabled() {
+		var wg sync.WaitGroup
+		for i, targetURL := range urls {
+			wg.Add(1)
+			go func(idx int, pageURL string) {
+				defer wg.Done()
+				rendered, err := browserpool.RenderWithOptions(context.Background(), pageURL, browserpool.RenderOptions{
+					TimeoutMS:            90000,
+					WaitUntil:            "domcontentloaded",
+					Engine:               "chromium",
+					AllowObscuraFallback: true,
+					SettleMS:             3500,
+					Profile:              "mobile_3g",
+				})
+				if err != nil {
+					results[idx] = MobilePerformanceResult{
+						MeasurementStatus: "browser_pool_error",
+						DataQuality:       "MISSING",
+						Error:             err.Error(),
+					}
+					return
+				}
+
+				result := MobilePerformanceResult{
+					FCPMS:             rendered.FCPMS,
+					LCPMS:             rendered.LCPMS,
+					CLS:               rendered.CLS,
+					RenderEngine:      rendered.RenderEngine,
+					Attempts:          rendered.Attempts,
+					MeasurementStatus: "core_web_vitals_unavailable",
+					DataQuality:       "MISSING",
+					Error:             rendered.Error,
+				}
+				if rendered.FCPMS > 0 && rendered.LCPMS > 0 {
+					result.Available = true
+					result.MeasurementStatus = "measured"
+					result.DataQuality = "VALID"
+					result.SpeedIndexMS = math.Round((rendered.FCPMS*0.3+rendered.LCPMS*0.7)*10) / 10
+					if rendered.FCPMS > 1800 {
+						result.Issues = append(result.Issues, fmt.Sprintf("FCP %.0f ms exceeds 1800 ms threshold on mobile", rendered.FCPMS))
+					}
+					if rendered.LCPMS > 2500 {
+						result.Issues = append(result.Issues, fmt.Sprintf("LCP %.0f ms exceeds 2500 ms threshold on mobile", rendered.LCPMS))
+					}
+					if rendered.CLS >= 0.25 {
+						result.Issues = append(result.Issues, fmt.Sprintf("CLS %.3f exceeds 0.25 threshold on mobile", rendered.CLS))
+					}
+					result.Passed = len(result.Issues) == 0
+				} else if result.Error == "" {
+					result.Error = "browser pool returned no valid FCP/LCP metrics for mobile_3g profile"
+				}
+				results[idx] = result
+			}(i, targetURL)
+		}
+		wg.Wait()
+		return results
+	}
+
 	if _, found := findChromePath(); !found {
 		for i := range results {
-			if browserpool.IsEnabled() {
-				results[i].Error = "mobile CWV capture still requires a local Chromium-based browser even when BROWSER_POOL_URL is configured"
-				continue
-			}
 			results[i].Error = "no local Chromium-based browser available — set CHROME_PATH, configure BROWSER_POOL_URL, or install Chrome/Edge/Chromium"
+			results[i].MeasurementStatus = "browser_unavailable"
+			results[i].DataQuality = "MISSING"
 		}
 		return results
 	}

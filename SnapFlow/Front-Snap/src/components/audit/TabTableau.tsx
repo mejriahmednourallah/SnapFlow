@@ -1,7 +1,7 @@
-import { getAxisScoreBreakdown, getRiskLevelFromScore, getScoreColor, getCriticalityLabel, getPriorityLabel, isNonTestedFinding, type Criticality, type FindingStatus, type FindingType, type FindingOrigin, type AuditReport } from '@/data/mockAuditData';
+import { getAxisScoreBreakdown, getRiskLevelFromScore, getScoreColor, getCriticalityLabel, getPriorityLabel, isClientVisibleFinding, type Criticality, type FindingStatus, type FindingType, type FindingOrigin, type AuditReport } from '@/data/mockAuditData';
 import { useState } from 'react';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
-import { Bug, CheckCircle, FlaskConical, Lightbulb } from 'lucide-react';
+import { Bug, CheckCircle, Lightbulb } from 'lucide-react';
 import { AxisIcon } from '@/components/audit/AxisIcon';
 
 interface TabTableauProps {
@@ -13,7 +13,11 @@ export function TabTableau({ audit }: TabTableauProps) {
   const [filterType, setFilterType] = useState<FindingType | 'all'>('all');
   const [filterStatus, setFilterStatus] = useState<FindingStatus | 'all'>('all');
 
-  const allFindings = audit.axes.flatMap(ax =>
+  const visibleAxes = audit.axes
+    .map((axis) => ({ ...axis, findings: axis.findings.filter(isClientVisibleFinding) }))
+    .filter((axis) => axis.findings.length > 0);
+
+  const allFindings = visibleAxes.flatMap(ax =>
     ax.findings.map(f => {
       const breakdown = getAxisScoreBreakdown(ax);
       const derivedStatus: FindingStatus = f.status ?? (f.type === 'pass' ? 'pass' : f.type === 'bug' ? 'fail' : 'not_measured');
@@ -32,10 +36,7 @@ export function TabTableau({ audit }: TabTableauProps) {
   const filtered = allFindings.filter(f => {
     if (filterCrit !== 'all' && f.criticality !== filterCrit) return false;
     if (filterType !== 'all' && f.type !== filterType) return false;
-    if (filterStatus !== 'all') {
-      if (filterStatus === 'not_measured' && !isNonTestedFinding(f)) return false;
-      if (filterStatus !== 'not_measured' && f.status !== filterStatus) return false;
-    }
+    if (filterStatus !== 'all' && f.status !== filterStatus) return false;
     return true;
   });
 
@@ -68,24 +69,19 @@ export function TabTableau({ audit }: TabTableauProps) {
                   </tr>
                 </thead>
                 <tbody>
-                  {audit.axes.map(ax => {
+                  {visibleAxes.map(ax => {
                     const breakdown = getAxisScoreBreakdown(ax);
                     const cc = ax.findings.filter(f => f.criticality === 'critical').length;
                     const bugs = ax.findings.filter(f => f.status === 'fail' && f.type === 'bug').length;
-                    const allNonTeste = ax.findings.length > 0 && ax.findings.every(isNonTestedFinding);
                     const riskLevel = getRiskLevelFromScore(breakdown.scorePct);
                     return (
                       <tr key={ax.id} className="border-b border-border/30 hover:bg-muted/20">
                         <td className="p-3 font-medium"><span className="inline-flex items-center gap-2"><AxisIcon id={ax.id} className="w-4 h-4" />{ax.name}</span></td>
                         <td className={`p-3 text-center font-mono font-bold ${getScoreColor(breakdown.scorePct)}`}>
-                          {allNonTeste ? 'N/T' : `${breakdown.x}/${breakdown.y}`}
+                          {`${breakdown.x}/${breakdown.y}`}
                         </td>
                         <td className="p-3 text-center">
-                          {allNonTeste ? (
-                            <span className="px-2 py-0.5 rounded-full text-xs border text-yellow-400 bg-yellow-500/10 border-yellow-500/20">Non testé</span>
-                          ) : (
-                            <span className={`criticality-${riskLevel} px-2 py-0.5 rounded-full text-xs border`}>{getCriticalityLabel(riskLevel)}</span>
-                          )}
+                          <span className={`criticality-${riskLevel} px-2 py-0.5 rounded-full text-xs border`}>{getCriticalityLabel(riskLevel)}</span>
                         </td>
                         <td className="p-3 text-center font-mono">{bugs}</td>
                         <td className="p-3 text-center font-mono">{cc}</td>
@@ -121,7 +117,6 @@ export function TabTableau({ audit }: TabTableauProps) {
                   <option value="all">Tout statut</option>
                   <option value="pass">Pass</option>
                   <option value="fail">Fail</option>
-                  <option value="not_measured">Non testé</option>
                 </select>
               </div>
               <span className="text-xs text-muted-foreground">{sorted.length} résultat{sorted.length > 1 ? 's' : ''}</span>
@@ -145,8 +140,6 @@ export function TabTableau({ audit }: TabTableauProps) {
                       <td className="p-3 text-center">
                         {(() => {
                           const origin: FindingOrigin | undefined = f.origin;
-                          if (isNonTestedFinding(f))
-                            return <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border text-yellow-400 bg-yellow-500/10 border-yellow-500/20"><FlaskConical className="w-3 h-3" />Non testé</span>;
                           if (origin === 'passing_kpi' || f.status === 'pass')
                             return <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border text-emerald-400 bg-emerald-500/10 border-emerald-500/20"><CheckCircle className="w-3 h-3" />Validé</span>;
                           if (origin === 'bug' || f.type === 'bug')

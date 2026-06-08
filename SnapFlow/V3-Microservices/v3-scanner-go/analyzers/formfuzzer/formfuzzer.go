@@ -79,6 +79,11 @@ type Summary struct {
 	FormsTested                      int      `json:"forms_tested"`
 	TestsRun                         int      `json:"tests_run"`
 	AnomaliesFound                   int      `json:"anomalies_found"`
+	AnomalyCount                     int      `json:"anomaly_count"`
+	ResponsesReceived                int      `json:"responses_received"`
+	ValidResponses                   int      `json:"valid_responses"`
+	TransportErrors                  int      `json:"transport_errors"`
+	Timeouts                         int      `json:"timeouts"`
 	UniqueTransactionalFormsDetected int      `json:"unique_transactional_forms_detected"`
 	UniqueTransactionalFormsTested   int      `json:"unique_transactional_forms_tested"`
 	NonTransactionalFormsTested      int      `json:"non_transactional_forms_tested"`
@@ -249,6 +254,16 @@ func Run(ctx context.Context, forms []DiscoveredForm, cfg Config) ([]FormTestRes
 	applyResponseDiffing(results)
 	affectedPages := map[string]struct{}{}
 	for _, r := range results {
+		if r.StatusCode > 0 && strings.TrimSpace(r.Error) == "" {
+			summary.ResponsesReceived++
+			summary.ValidResponses++
+		} else {
+			summary.TransportErrors++
+			errorText := strings.ToLower(r.Error)
+			if strings.Contains(errorText, "timeout") || strings.Contains(errorText, "deadline exceeded") {
+				summary.Timeouts++
+			}
+		}
 		if r.Anomaly && r.CountsTowardsMainKPI {
 			summary.AnomaliesFound++
 			if page := strings.TrimSpace(r.PageURL); page != "" {
@@ -258,6 +273,7 @@ func Run(ctx context.Context, forms []DiscoveredForm, cfg Config) ([]FormTestRes
 			summary.SuppressedLowConfidenceAnomalies++
 		}
 	}
+	summary.AnomalyCount = summary.AnomaliesFound
 	if len(affectedPages) > 0 {
 		affectedURLs := make([]string, 0, len(affectedPages))
 		for u := range affectedPages {
@@ -283,7 +299,7 @@ func Run(ctx context.Context, forms []DiscoveredForm, cfg Config) ([]FormTestRes
 		return results[i].TestType < results[j].TestType
 	})
 
-	if summary.UniqueTransactionalFormsTested == 0 {
+	if summary.UniqueTransactionalFormsTested == 0 || summary.ValidResponses == 0 {
 		summary.Status = "non_evalue"
 	} else if summary.AnomaliesFound > 0 {
 		summary.Status = "failing"

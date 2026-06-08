@@ -6,7 +6,6 @@ import { PageHeader } from '../shared/PageHeader';
 import { PageFooter } from '../shared/PageFooter';
 import { SectionTitle } from '../shared/SectionTitle';
 import { StatusBadge } from '../shared/StatusBadge';
-import { estimateLines, paginateByHeight } from '../shared/pagination';
 
 interface KpiGridPageProps {
   report: AuditDocumentData;
@@ -15,6 +14,7 @@ interface KpiGridPageProps {
 }
 
 function cardStatusLabel(axis: AuditAxisItem) {
+  if (axis.score.scoreMeasured === null) return 'Non calc.';
   if (axis.score.status === 'danger') return 'Critique';
   if (axis.score.status === 'warning') return 'Alerte';
   return 'Bon';
@@ -24,24 +24,20 @@ export function KpiGridPage({ report, theme, clientLogoSrc }: KpiGridPageProps) 
   const s = makePageStyles(theme);
   const t = theme ?? undefined;
   const axes = report.axes;
-  const rows: Array<[AuditAxisItem, AuditAxisItem | null]> = [];
-  for (let i = 0; i < axes.length; i += 2) {
-    rows.push([axes[i], axes[i + 1] ?? null]);
+  const columns = axes.length > 9 && axes.length <= 10 ? 2 : 3;
+  const rowsPerPage = axes.length > 9 && axes.length <= 10 ? 5 : 3;
+  const cardMinHeight = columns === 2 ? 93 : 128;
+  const cardPadding = columns === 2 ? 7 : 8;
+  const titleWidth = columns === 2 ? '70%' : '64%';
+  const rows: AuditAxisItem[][] = [];
+  for (let i = 0; i < axes.length; i += columns) {
+    rows.push(axes.slice(i, i + columns));
   }
 
-  const estimateCardHeight = (axis: AuditAxisItem) => {
-    const titleLines = estimateLines(axis.name, 26);
-    const descLines = estimateLines(axis.description, 90);
-    return 92 + (titleLines + descLines) * 9;
-  };
-
-  const estimateRowHeight = (row: [AuditAxisItem, AuditAxisItem | null]) => {
-    const left = estimateCardHeight(row[0]);
-    const right = row[1] ? estimateCardHeight(row[1]) : 0;
-    return Math.max(left, right) + 10;
-  };
-
-  const rowPages = paginateByHeight(rows, estimateRowHeight, 500);
+  const rowPages: AuditAxisItem[][][] = [];
+  for (let i = 0; i < rows.length; i += rowsPerPage) {
+    rowPages.push(rows.slice(i, i + rowsPerPage));
+  }
 
   return (
     <>
@@ -51,42 +47,52 @@ export function KpiGridPage({ report, theme, clientLogoSrc }: KpiGridPageProps) 
 
           <View style={s.body}>
             <SectionTitle title="Tableau de score par axe" theme={theme} />
-            {pageRows.map((row, rowIndex) => (
-              <View key={`row-${pageIndex}-${rowIndex}`} style={{ flexDirection: 'row', gap: 10, marginBottom: 10 }}>
-                {[row[0], row[1]].map((axis) => (
-                  axis ? (
+            <View style={{ ...s.card, padding: 8 }}>
+              {pageRows.map((row, rowIndex) => (
+                <View key={`row-${pageIndex}-${rowIndex}`} style={{ flexDirection: 'row', gap: 7, marginBottom: rowIndex === pageRows.length - 1 ? 0 : 7 }}>
+                  {Array.from({ length: columns }, (_, cellIndex) => row[cellIndex]).map((axis, cellIndex) => (
+                    axis ? (
                     <View
                       key={axis.id}
                       style={{
-                        ...s.card,
-                        width: '48.5%',
+                        flex: 1,
+                        minHeight: cardMinHeight,
+                        borderWidth: 0.8,
+                        borderColor: t?.border ?? '#D7E0EA',
+                        borderRadius: 9,
+                        padding: cardPadding,
                         borderLeftWidth: 4,
                         borderLeftColor: getStatusColor(axis.score.status),
                       }}
                     >
-                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 }}>
-                        <Text style={{ fontSize: 10.5, fontFamily: 'DMSans', fontWeight: 700, color: t?.text ?? '#111827', width: '70%' }}>
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 6, marginBottom: 4 }}>
+                        <Text style={{ fontSize: 10.2, fontFamily: 'DMSans', fontWeight: 700, color: t?.text ?? '#111827', width: titleWidth, lineHeight: 1.18 }}>
                           {axis.name}
                         </Text>
                         <StatusBadge label={cardStatusLabel(axis)} status={axis.score.status} />
                       </View>
-                      <Text style={{ fontSize: 8.2, color: t?.textMuted ?? '#64748B', marginBottom: 8 }}>{axis.description}</Text>
+                      <Text style={{ fontSize: 8.4, color: t?.textMuted ?? '#64748B', marginBottom: 5, lineHeight: 1.2 }}>{axis.description}</Text>
                       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end' }}>
                         <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 6 }}>
-                          <Text style={{ fontSize: 30, color: getStatusColor(axis.score.status), fontFamily: 'DMSans', fontWeight: 700 }}>
-                            {axis.score.value}
+                          <Text style={{ fontSize: columns === 2 ? 21 : 23, color: getStatusColor(axis.score.status), fontFamily: 'DMSans', fontWeight: 700 }}>
+                            {axis.score.scoreMeasured === null ? 'N/C' : axis.score.scoreMeasured}
                           </Text>
-                          <Text style={{ fontSize: 14, color: getStatusColor(axis.score.status), fontFamily: 'DMSans', fontWeight: 700 }}>%</Text>
+                          {axis.score.scoreMeasured !== null ? (
+                            <Text style={{ fontSize: 12, color: getStatusColor(axis.score.status), fontFamily: 'DMSans', fontWeight: 700 }}>%</Text>
+                          ) : null}
                         </View>
-                        <Text style={{ fontSize: 8.2, color: t?.textMuted ?? '#64748B', textAlign: 'right' }}>/100</Text>
+                        <Text style={{ fontSize: 8.7, color: t?.textMuted ?? '#64748B', textAlign: 'right' }}>
+                          {axis.score.measuredKpis} mesure{axis.score.measuredKpis > 1 ? 's' : ''}
+                        </Text>
                       </View>
                     </View>
                   ) : (
-                    <View key={`empty-${rowIndex}`} style={{ width: '48.5%' }} />
+                    <View key={`empty-${rowIndex}-${cellIndex}`} style={{ flex: 1 }} />
                   )
                 ))}
               </View>
-            ))}
+              ))}
+            </View>
           </View>
 
           <PageFooter preparedBy={report.preparedBy} theme={theme} />

@@ -72,6 +72,15 @@ function cleanColumnLabel(value: string): string {
     .replace(/\bthreshold ms\b/gi, 'seuil attendu');
 }
 
+function splitSummaryLine(value: string): { label: string; value: string } | null {
+  const idx = value.indexOf(':');
+  if (idx <= 0 || idx > 48) return null;
+  const label = value.slice(0, idx).trim();
+  const lineValue = value.slice(idx + 1).trim();
+  if (!label || !lineValue) return null;
+  return { label: cleanColumnLabel(label), value: lineValue };
+}
+
 function shouldShowEvidenceColumn(value: string): boolean {
   const normalized = String(value ?? '')
     .replace(/_/g, ' ')
@@ -202,7 +211,7 @@ export function EvidenceDetailsDialog({
             <section className="grid grid-cols-3 gap-3">
               <div className="rounded-lg bg-muted/20 border border-border/30 p-3 text-center">
                 <p className="text-xs text-muted-foreground mb-1">Statut</p>
-                <span className={finding.kpiLabels.statut === 'Concluant' ? 'text-emerald-400 font-semibold' : finding.kpiLabels.statut === 'Non testé' ? 'text-yellow-400 font-semibold' : 'text-red-400 font-semibold'}>
+                <span className={finding.kpiLabels.statut === 'Concluant' ? 'text-emerald-400 font-semibold' : 'text-red-400 font-semibold'}>
                   {finding.kpiLabels.statut}
                 </span>
               </div>
@@ -224,14 +233,21 @@ export function EvidenceDetailsDialog({
                 {finding.evidenceMissingReason ?? 'Aucune preuve textuelle resumee.'}
               </p>
             ) : (
-              <ul className="space-y-1.5">
-                {summaryLines.map((line, index) => (
-                  <li key={`${line}-${index}`} className="text-sm text-muted-foreground flex items-start gap-2">
-                    <span className="text-muted-foreground/60 mt-0.5">-</span>
-                    <span>{line}</span>
-                  </li>
-                ))}
-              </ul>
+              <div className="overflow-hidden rounded border border-border/40">
+                {summaryLines.map((line, index) => {
+                  const split = splitSummaryLine(line);
+                  return split ? (
+                    <div key={`${line}-${index}`} className="grid grid-cols-[160px_1fr] gap-3 border-t first:border-t-0 border-border/30 px-3 py-2 text-sm">
+                      <span className="font-medium text-foreground">{split.label}</span>
+                      <span className="text-muted-foreground break-words">{split.value}</span>
+                    </div>
+                  ) : (
+                    <div key={`${line}-${index}`} className="border-t first:border-t-0 border-border/30 px-3 py-2 text-sm text-muted-foreground">
+                      {line}
+                    </div>
+                  );
+                })}
+              </div>
             )}
           </section>
 

@@ -1,4 +1,4 @@
-import { Settings, Eye, Zap, Search, FileText, Palette, Leaf, Shield, Lock, Server, Wrench } from 'lucide-react';
+import { Settings, Eye, Zap, Search, FileText, Palette, Leaf, Shield, Lock, Server, Wrench, Bot } from 'lucide-react';
 
 const iconMap: Record<string, React.ComponentType<{ className?: string }>> = {
   functional: Settings,
@@ -6,6 +6,7 @@ const iconMap: Record<string, React.ComponentType<{ className?: string }>> = {
   accessibility: Eye,
   performance: Zap,
   seo: Search,
+  'ai-friendly': Bot,
   content: FileText,
   'ux-ui': Palette,
   'eco-index': Leaf,

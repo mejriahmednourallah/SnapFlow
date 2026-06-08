@@ -1,13 +1,12 @@
 import { Page, View, Text } from '@react-pdf/renderer';
-import type { AuditDocumentData, AuditAxisItem } from '../types';
+import type { AuditDocumentData, AuditAxisItem, AuditFindingItem } from '../types';
 import type { PdfTheme } from '../theme';
-import { makePageStyles } from '../theme';
+import { makePageStyles, getStatusColor } from '../theme';
 import { PageHeader } from '../shared/PageHeader';
 import { PageFooter } from '../shared/PageFooter';
 import { SectionTitle } from '../shared/SectionTitle';
-import { ScoreGauge } from '../shared/ScoreGauge';
 import { StatusBadge } from '../shared/StatusBadge';
-import { estimateLines, packFindingsWithRebalance } from '../shared/pagination';
+import { estimateLines, packFindingsWithRebalance, rebalanceShortTailPages } from '../shared/pagination';
 
 interface AxisPageProps {
   report: AuditDocumentData;
@@ -17,44 +16,151 @@ interface AxisPageProps {
   clientLogoSrc?: string;
 }
 
-function findingStatus(status: string) {
-  if (status === 'pass') return 'success' as const;
-  if (status === 'not_measured' || status === 'not_evaluated' || status === 'not_available') return 'warning' as const;
-  return 'danger' as const;
+function findingStatus(finding: AuditFindingItem) {
+  if (finding.status === 'pass') return 'success' as const;
+  if (finding.type === 'bug' || finding.criticality === 'critical' || finding.criticality === 'high') return 'danger' as const;
+  return 'warning' as const;
 }
 
-function findingBadgeLabel(finding: AuditAxisItem['findings'][number]) {
+function findingBadgeLabel(finding: AuditFindingItem) {
   if (finding.status === 'pass') return 'OK';
-  if (finding.status === 'not_available' || finding.status === 'not_measured' || finding.status === 'not_evaluated') return 'NON TESTÉ';
   return finding.type === 'bug' ? 'ANOMALIE' : 'RECO';
+}
+
+function ConformingControlsTable({
+  findings,
+  theme,
+}: {
+  findings: AuditFindingItem[];
+  theme?: PdfTheme;
+}) {
+  if (findings.length === 0) return null;
+
+  const t = theme ?? undefined;
+  const rows: AuditFindingItem[][] = [];
+  for (let i = 0; i < findings.length; i += 2) {
+    rows.push(findings.slice(i, i + 2));
+  }
+
+  return (
+    <View style={{ marginBottom: 8 }}>
+      <Text style={{ fontSize: 11.2, fontFamily: 'DMSans', fontWeight: 700, color: t?.text ?? '#111827', marginBottom: 5 }}>
+        Contrôles conformes
+      </Text>
+      <View
+        style={{
+          borderWidth: 0.7,
+          borderColor: t?.border ?? '#D7E0EA',
+          borderRadius: 8,
+          overflow: 'hidden',
+        }}
+      >
+        {rows.map((row, rowIndex) => (
+          <View
+            key={`ok-row-${rowIndex}`}
+            style={{
+              flexDirection: 'row',
+              backgroundColor: rowIndex % 2 === 0 ? '#FFFFFF' : (t?.bg ?? '#F8FAFC'),
+              borderBottomWidth: rowIndex === rows.length - 1 ? 0 : 0.5,
+              borderBottomColor: t?.border ?? '#D7E0EA',
+            }}
+          >
+            {row.map((finding) => (
+              <View
+                key={`ok-${finding.id}`}
+                style={{
+                  width: '50%',
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 5,
+                  paddingVertical: 5,
+                  paddingHorizontal: 7,
+                  borderRightWidth: row.length === 2 && row[0].id === finding.id ? 0.5 : 0,
+                  borderRightColor: t?.border ?? '#D7E0EA',
+                }}
+              >
+                <Text style={{ fontSize: 8.4, color: '#16A34A', fontFamily: 'DMSans', fontWeight: 700 }}>
+                  OK
+                </Text>
+                <Text style={{ flex: 1, fontSize: 8.8, color: t?.text ?? '#111827', lineHeight: 1.22 }}>
+                  {finding.title}
+                </Text>
+              </View>
+            ))}
+            {row.length === 1 ? <View style={{ width: '50%' }} /> : null}
+          </View>
+        ))}
+      </View>
+    </View>
+  );
+}
+
+function EvidenceTable({ finding, theme }: { finding: AuditFindingItem; theme?: PdfTheme }) {
+  const t = theme ?? undefined;
+  const evidenceRows = finding.pdfEvidenceRows.slice(0, 3);
+  if (evidenceRows.length === 0) return null;
+
+  return (
+    <View style={{ marginTop: 5, padding: 6, backgroundColor: t?.bg ?? '#F8FAFC', borderRadius: 5 }}>
+      <Text style={{ fontSize: 8.8, fontFamily: 'DMSans', fontWeight: 700, marginBottom: 3 }}>
+        Données observées
+      </Text>
+      {evidenceRows.map((row, evidenceIndex) => (
+          <View
+            key={`${finding.id}-evidence-${evidenceIndex}`}
+            style={{
+              flexDirection: 'row',
+              borderTopWidth: evidenceIndex === 0 ? 0 : 0.4,
+              borderTopColor: t?.border ?? '#D7E0EA',
+              paddingTop: evidenceIndex === 0 ? 0 : 3,
+              marginTop: evidenceIndex === 0 ? 0 : 3,
+            }}
+          >
+            <Text style={{ width: '34%', fontSize: 8.7, color: t?.text ?? '#111827', fontFamily: 'DMSans', fontWeight: 700 }}>
+              {row.label}
+            </Text>
+            <Text style={{ width: '66%', fontSize: 8.7, color: t?.textMuted ?? '#64748B', lineHeight: 1.28 }}>
+              {row.value}
+            </Text>
+          </View>
+      ))}
+    </View>
+  );
 }
 
 export function AxisPage({ report, axis, index, theme, clientLogoSrc }: AxisPageProps) {
   const s = makePageStyles(theme);
   const t = theme ?? undefined;
-  const subKpis = axis.findings;
-  const PAGE_CAP = 460;
+  const actionFindings = axis.findings.filter((finding) => finding.status !== 'pass');
+  const okFindings = axis.findings.filter((finding) => finding.status === 'pass');
 
-  const estimateSummaryHeight = () => {
-    const descLines = estimateLines(axis.description, 80);
-    const subKpiLines = subKpis.reduce((sum, finding) => sum + estimateLines(finding.title, 60), 0);
-    const subKpiRows = subKpis.length;
-    return 170 + descLines * 10 + subKpiRows * 18 + Math.max(0, subKpiLines - subKpiRows) * 7;
+  const okTableHeight = okFindings.length > 0 ? 30 + Math.ceil(okFindings.length / 2) * 18 : 0;
+  const summaryHeight = 84 + okTableHeight;
+  const PAGE_CAP = 704;
+  const FIRST_PAGE_CAP = Math.max(170, PAGE_CAP - summaryHeight);
+
+  const estimateFindingHeight = (finding: AuditFindingItem) => {
+    const titleLines = estimateLines(finding.title, 58);
+    const descLines = estimateLines(finding.pdfConstat, 76);
+    const recLines = estimateLines(finding.pdfAction, 78);
+    const impactLines = estimateLines(finding.pdfImpact, 78);
+    const evidenceLines = finding.pdfEvidenceRows.slice(0, 3).reduce((sum, row) => sum + estimateLines(`${row.label}: ${row.value}`, 82), 0);
+    return 58 + (titleLines + descLines + recLines + impactLines + evidenceLines) * 11.2;
   };
 
-  const FIRST_PAGE_CAP = Math.max(140, PAGE_CAP - estimateSummaryHeight());
+  const findingPages = actionFindings.length > 0
+    ? rebalanceShortTailPages(
+      packFindingsWithRebalance(actionFindings, estimateFindingHeight, FIRST_PAGE_CAP, PAGE_CAP, 0.58),
+      {
+        minItemsOnLastPage: 2,
+        minItemsOnPreviousPage: 1,
+        heightFor: estimateFindingHeight,
+        maxPageHeight: PAGE_CAP,
+      },
+    )
+    : [[]];
 
-  const estimateFindingHeight = (finding: AuditAxisItem['findings'][number]) => {
-    const titleLines = estimateLines(finding.title, 46);
-    const descLines = estimateLines(finding.description, 62);
-    const recLines = finding.status !== 'pass' ? estimateLines(finding.recommendation, 62) : 0;
-    const impactLines = finding.status !== 'pass' ? estimateLines(finding.impact, 62) : 0;
-    return 68 + (titleLines + descLines + recLines + impactLines) * 13.5;
-  };
-
-  const findingPages = packFindingsWithRebalance(axis.findings, estimateFindingHeight, FIRST_PAGE_CAP, PAGE_CAP, 0.7);
-
-  const pages = (findingPages.length ? findingPages : [[]]).map((findings, pageIndex) => ({
+  const pages = findingPages.map((findings, pageIndex) => ({
     findings,
     showSummary: pageIndex === 0,
   }));
@@ -74,99 +180,75 @@ export function AxisPage({ report, axis, index, theme, clientLogoSrc }: AxisPage
           <View style={s.body}>
             {page.showSummary ? (
               <>
-                <View style={{ flexDirection: 'row', gap: 12, marginBottom: 10 }}>
-                  <View style={{ ...s.card, flex: 1, paddingVertical: 10 }}>
-                    <SectionTitle title={axis.name} theme={theme} />
-                    <Text style={s.bodyText}>{axis.description}</Text>
-                    <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
-                      <StatusBadge label={`Conformes ${axis.score.passed}`} status="success" />
-                      <StatusBadge label={`Échecs ${axis.score.failed}`} status="danger" />
-                      <StatusBadge label={`Non testé ${axis.score.notMeasured + axis.score.notAvailable}`} status="warning" />
+                <View style={{ ...s.card, marginBottom: 8 }}>
+                  <View style={{ flexDirection: 'row', gap: 10 }}>
+                    <View style={{ flex: 1 }}>
+                      <SectionTitle title={axis.name} theme={theme} />
+                      <Text style={{ ...s.bodyText, marginBottom: 6 }}>{axis.description}</Text>
+                      <View style={{ flexDirection: 'row', gap: 6, flexWrap: 'wrap' }}>
+                        <StatusBadge label={`OK ${axis.score.passed}`} status="success" />
+                        <StatusBadge label={`À traiter ${axis.score.failed}`} status={axis.score.failed > 0 ? 'danger' : 'success'} />
+                        <StatusBadge label={`${axis.score.measuredKpis} contrôles mesurés`} status={axis.score.status} />
+                      </View>
                     </View>
-                  </View>
-                  <View style={{ ...s.card, width: 172, alignItems: 'center', paddingVertical: 10 }}>
-                    <ScoreGauge
-                      score={axis.score.value}
-                      status={axis.score.status}
-                      caption={`${axis.score.x}/${axis.score.y}`}
-                      size={124}
-                      theme={theme}
-                    />
+                    <View
+                      style={{
+                        width: 116,
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        borderRadius: 9,
+                        backgroundColor: t?.bg ?? '#F8FAFC',
+                        paddingVertical: 8,
+                      }}
+                    >
+                      <Text style={{ fontSize: 26, color: getStatusColor(axis.score.status), fontFamily: 'DMSans', fontWeight: 700 }}>
+                        {axis.score.scoreMeasured === null ? 'N/C' : axis.score.scoreMeasured}
+                      </Text>
+                      <Text style={{ fontSize: 9, color: t?.textMuted ?? '#64748B', marginTop: 1 }}>
+                        {axis.score.scoreMeasured === null ? 'Score non calculable' : 'score mesuré'}
+                      </Text>
+                    </View>
                   </View>
                 </View>
 
-                <View style={{ ...s.card, marginBottom: 8, paddingVertical: 10 }}>
-                  <Text style={s.h3}>Sous-controles</Text>
-                  {(() => {
-                    const rows: AuditAxisItem['findings'][][] = [];
-                    for (let i = 0; i < subKpis.length; i += 2) {
-                      rows.push(subKpis.slice(i, i + 2));
-                    }
-                    return rows.map((row, idx) => (
-                      <View key={`kpi-row-${idx}`} style={{ flexDirection: 'row', gap: 8, marginBottom: 4 }}>
-                        {row.map((finding) => (
-                          <View
-                            key={`kpi-${finding.id}`}
-                            style={{
-                              flex: 1,
-                              flexDirection: 'row',
-                              justifyContent: 'space-between',
-                              alignItems: 'center',
-                              paddingVertical: 5,
-                              borderBottomWidth: 0.5,
-                              borderBottomColor: t?.border ?? '#D7E0EA',
-                            }}
-                            wrap={false}
-                          >
-                            <Text style={{ fontSize: 9.2, color: t?.text ?? '#111827', width: '70%', lineHeight: 1.28 }}>
-                              {finding.title}
-                            </Text>
-                            <StatusBadge label={findingBadgeLabel(finding)} status={findingStatus(finding.status)} />
-                          </View>
-                        ))}
-                        {row.length === 1 ? <View style={{ flex: 1 }} /> : null}
-                      </View>
-                    ));
-                  })()}
-                </View>
+                <ConformingControlsTable findings={okFindings} theme={theme} />
               </>
             ) : null}
 
-            <View style={{ ...s.card, paddingVertical: 10 }}>
-              <Text style={{ ...s.h3, fontSize: 14 }}>Constats et impacts</Text>
-              {page.findings.map((finding) => (
-                <View
-                  key={`finding-${finding.id}`}
-                  style={{
-                    borderBottomWidth: 0.5,
-                    borderBottomColor: t?.border ?? '#D7E0EA',
-                    paddingBottom: 8,
-                    marginBottom: 8,
-                  }}
-                  wrap={false}
-                >
-                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 5 }}>
-                    <Text style={{ fontSize: 10.8, fontFamily: 'DMSans', fontWeight: 700, width: '72%', lineHeight: 1.24 }}>
-                      {finding.title}
+            {page.findings.length > 0 ? (
+              <View style={{ ...s.card, paddingVertical: 9 }}>
+                <Text style={{ ...s.h3, fontSize: 13.2 }}>Constats prioritaires</Text>
+                {page.findings.map((finding, findingIndex) => (
+                  <View
+                    key={`finding-${finding.id}`}
+                    wrap={false}
+                    style={{
+                      borderBottomWidth: findingIndex === page.findings.length - 1 ? 0 : 0.5,
+                      borderBottomColor: t?.border ?? '#D7E0EA',
+                      paddingBottom: findingIndex === page.findings.length - 1 ? 0 : 7,
+                      marginBottom: findingIndex === page.findings.length - 1 ? 0 : 7,
+                    }}
+                  >
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 8, marginBottom: 5 }}>
+                      <Text style={{ fontSize: 11.2, fontFamily: 'DMSans', fontWeight: 700, width: '72%', lineHeight: 1.24 }}>
+                        {finding.title}
+                      </Text>
+                      <StatusBadge label={findingBadgeLabel(finding)} status={findingStatus(finding)} />
+                    </View>
+                    <Text style={{ fontSize: 9.7, color: t?.textMuted ?? '#64748B', marginBottom: 5, lineHeight: 1.38 }}>
+                      {finding.pdfConstat}
                     </Text>
-                    <StatusBadge label={findingBadgeLabel(finding)} status={findingStatus(finding.status)} />
+                    <Text style={{ fontSize: 9.4, color: t?.text ?? '#111827', lineHeight: 1.36 }}>
+                      Action: {finding.pdfAction}
+                    </Text>
+                    <Text style={{ fontSize: 9.2, color: t?.textMuted ?? '#64748B', lineHeight: 1.34, marginTop: 2 }}>
+                      Impact: {finding.pdfImpact}
+                    </Text>
+                    <EvidenceTable finding={finding} theme={theme} />
                   </View>
-                  <Text style={{ fontSize: 9.4, color: t?.textMuted ?? '#64748B', marginBottom: 5, lineHeight: 1.42 }}>
-                    {finding.description}
-                  </Text>
-                  {finding.status !== 'pass' ? (
-                    <Text style={{ fontSize: 9.2, color: t?.text ?? '#111827', lineHeight: 1.42 }}>
-                      Recommandation: {finding.recommendation}
-                    </Text>
-                  ) : null}
-                  {finding.status !== 'pass' ? (
-                    <Text style={{ fontSize: 9.2, color: t?.textMuted ?? '#64748B', lineHeight: 1.42, marginTop: 2 }}>
-                      Impact: {finding.impact}
-                    </Text>
-                  ) : null}
-                </View>
-              ))}
-            </View>
+                ))}
+              </View>
+            ) : null}
           </View>
 
           <PageFooter preparedBy={report.preparedBy} theme={theme} />

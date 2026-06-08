@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 	"time"
+	"unicode/utf8"
 
 	_ "github.com/lib/pq"
 )
@@ -26,6 +28,18 @@ type FormFuzzResultRecord struct {
 	AnomalyReason string
 	DurationMS    int64
 	Error         string
+}
+
+func sanitizeDBText(value string) string {
+	if value == "" {
+		return ""
+	}
+
+	cleaned := strings.ReplaceAll(value, "\x00", "")
+	if utf8.ValidString(cleaned) {
+		return cleaned
+	}
+	return strings.ToValidUTF8(cleaned, "\uFFFD")
 }
 
 // Connect establishes a connection to PostgreSQL, retrying until available.
@@ -147,6 +161,7 @@ func InsertPage(scanID, domain, pageURL, html string, metrics interface{}) error
 		return nil // DB not configured, skip silently
 	}
 
+	safeHTML := sanitizeDBText(html)
 	metricsJSON, err := json.Marshal(metrics)
 	if err != nil {
 		return fmt.Errorf("failed to marshal metrics: %v", err)
@@ -160,7 +175,7 @@ func InsertPage(scanID, domain, pageURL, html string, metrics interface{}) error
 			html = EXCLUDED.html,
 			raw_html = EXCLUDED.raw_html,
 			metrics = EXCLUDED.metrics
-	`, scanID, domain, pageURL, html, html, string(metricsJSON))
+	`, scanID, domain, pageURL, safeHTML, safeHTML, string(metricsJSON))
 
 	return err
 }
@@ -386,11 +401,12 @@ func UpdatePageHTML(scanID, pageURL, html string) error {
 	if conn == nil {
 		return nil
 	}
+	safeHTML := sanitizeDBText(html)
 	_, err := conn.Exec(`
 		UPDATE scan_pages
 		SET rendered_html = $1, html = $1
 		WHERE scan_id = $2 AND url = $3
-	`, html, scanID, pageURL)
+	`, safeHTML, scanID, pageURL)
 	return err
 }
 

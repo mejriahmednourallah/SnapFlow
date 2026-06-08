@@ -639,6 +639,32 @@ def extract_heading_text(soup: BeautifulSoup) -> str:
     return " ".join(h.get_text(" ", strip=True) for h in soup.find_all(["h1", "h2", "h3"]))
 
 
+def detect_ai_heading_questions(soup: BeautifulSoup) -> dict:
+    question_prefixes = re.compile(
+        r"^(qui|que|quoi|qu['’]?est|comment|pourquoi|où|ou|quand|combien|quel|quelle|"
+        r"what|how|why|where|when|which|who)\b",
+        re.I,
+    )
+    rows = []
+    total = 0
+    for heading in soup.find_all(["h1", "h2", "h3"]):
+        text = heading.get_text(" ", strip=True)
+        if not text:
+            continue
+        total += 1
+        is_question = "?" in text or bool(question_prefixes.search(text))
+        if is_question and len(rows) < 20:
+            rows.append({
+                "tag": heading.name,
+                "text": text[:220],
+            })
+    return {
+        "heading_count": total,
+        "question_heading_count": len(rows),
+        "rows": rows,
+    }
+
+
 def check_h1_quality(soup: BeautifulSoup, title_text: str) -> dict:
     h1s = soup.find_all("h1")
     h1_text = h1s[0].get_text(" ", strip=True) if h1s else ""
@@ -746,33 +772,46 @@ def analyze_links(soup: BeautifulSoup, page_url: str) -> dict:
 def detect_schema_org(soup: BeautifulSoup) -> dict:
     scripts = soup.find_all("script", type="application/ld+json")
     types_found = []
+    parse_errors = 0
+
+    def collect_types(node):
+        if isinstance(node, list):
+            for item in node:
+                collect_types(item)
+            return
+        if not isinstance(node, dict):
+            return
+        t = node.get("@type", "")
+        if isinstance(t, list):
+            types_found.extend([str(x).strip() for x in t if str(x or "").strip()])
+        elif t:
+            types_found.append(str(t).strip())
+        graph = node.get("@graph")
+        if graph:
+            collect_types(graph)
+
     for script in scripts:
         try:
             data = json.loads(script.string or script.get_text() or "")
-            if isinstance(data, list):
-                for item in data:
-                    if isinstance(item, dict):
-                        t = item.get("@type", "")
-                        if isinstance(t, list):
-                            types_found.extend([x for x in t if x])
-                        elif t:
-                            types_found.append(t)
-            elif isinstance(data, dict):
-                t = data.get("@type", "")
-                if isinstance(t, list):
-                    types_found.extend([x for x in t if x])
-                elif t:
-                    types_found.append(t)
+            collect_types(data)
         except Exception:
+            parse_errors += 1
             continue
+    unique_types = list(dict.fromkeys(types_found))
+    json_ld_valid = len(unique_types) > 0
     return {
-        "schema_org_present": len(types_found) > 0,
-        "schema_org_types": types_found,
-        "schema_faq_present": "FAQPage" in types_found,
-        "schema_article_present": "Article" in types_found,
-        "schema_news_present": "NewsArticle" in types_found,
-        "schema_product_present": "Product" in types_found,
-        "schema_breadcrumb_present": "BreadcrumbList" in types_found,
+        "schema_org_present": json_ld_valid,
+        "schema_org_types": unique_types,
+        "json_ld_present": len(scripts) > 0,
+        "json_ld_valid": json_ld_valid,
+        "json_ld_types": unique_types,
+        "json_ld_count": len(scripts),
+        "json_ld_parse_errors": parse_errors,
+        "schema_faq_present": "FAQPage" in unique_types,
+        "schema_article_present": "Article" in unique_types,
+        "schema_news_present": "NewsArticle" in unique_types,
+        "schema_product_present": "Product" in unique_types,
+        "schema_breadcrumb_present": "BreadcrumbList" in unique_types,
     }
 
 
@@ -2054,7 +2093,8 @@ def process_pending_pages():
             if rendered_text:
                 safe_rendered_text = rendered_text.replace("<", " ").replace(">", " ")
                 html = f"{html or ''}\n<main data-snapflow-rendered-discovery='true'>{safe_rendered_text}</main>"
-        html_for_legacy = row.get("html") or raw_html or html
+        raw_base_html = row.get("html") or raw_html or ""
+        html_for_legacy = raw_base_html or html
         # [N-1] Per-row try/except + commit so one bad page cannot roll back
         # the entire batch and trap other pages in a retry loop.
         # [N-7] HTTP HEAD call is done BEFORE opening the DB transaction to
@@ -2064,6 +2104,12 @@ def process_pending_pages():
 
             legacy_text = extract_text(html_for_legacy)
             text, extraction_source, extraction_meta = extract_text_main_content_first(html)
+            raw_content_text, raw_content_source, _raw_content_meta = (
+                extract_text_main_content_first(raw_base_html)
+                if raw_base_html
+                else ("", "missing_raw_html", {})
+            )
+            raw_content_word_count = len(raw_content_text.split())
             
             # Check if this is a non-hydrated SPA shell
             spa_shell = len(text.split()) < 50 and not rendered_html and any(
@@ -2085,6 +2131,9 @@ def process_pending_pages():
                                 "selected_source": "spa_shell_not_hydrated",
                                 "legacy_word_count": len(legacy_text.split()),
                                 "main_word_count": len(text.split()),
+                                "raw_content_visible": raw_content_word_count >= 50,
+                                "raw_content_word_count": raw_content_word_count,
+                                "raw_content_source": raw_content_source,
                             },
                         }),
                         page_id,
@@ -2105,9 +2154,14 @@ def process_pending_pages():
                 "legacy_word_count": len(legacy_text.split()),
                 "main_word_count": len(text.split()),
                 "runtime_html_available": bool(rendered_html),
+                "raw_content_visible": raw_content_word_count >= 50,
+                "raw_content_word_count": raw_content_word_count,
+                "raw_content_source": raw_content_source,
+                "rendered_content_used": bool(rendered_html) and len(text.split()) > raw_content_word_count + 30,
             }
             soup = BeautifulSoup(html, "html.parser")
             schema_kpis = detect_schema_org(soup)
+            ai_heading_questions = detect_ai_heading_questions(soup)
 
             # Phase L: date extraction + page classification
             # [N-7] Pass the pre-fetched HTTP date so extract_dates_and_classify
@@ -2171,6 +2225,14 @@ def process_pending_pages():
                 "canonical_robots": check_canonical_robots(soup),
                 "og_hreflang": check_og_hreflang(soup),
                 "llms_txt": check_llms_txt(f"https://{base_domain}"),
+                "ai_heading_questions": ai_heading_questions,
+                "ai_raw_content": {
+                    "raw_content_visible": raw_content_word_count >= 50,
+                    "raw_content_word_count": raw_content_word_count,
+                    "raw_content_source": raw_content_source,
+                    "rendered_content_used": bool(rendered_html) and len(text.split()) > raw_content_word_count + 30,
+                    "main_word_count": len(text.split()),
+                },
                 "thin_content_by_type": check_thin_content_by_type(nlp_result.get("word_count", 0), nlp_result.get("page_type", "other")),
             }
 

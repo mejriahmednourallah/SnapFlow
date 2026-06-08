@@ -15,8 +15,9 @@ interface ConclusionPageProps {
 export function ConclusionPage({ report, theme, clientLogoSrc }: ConclusionPageProps) {
   const s = makePageStyles(theme);
   const t = theme ?? undefined;
-  const topAxes = [...report.axes].sort((a, b) => b.score.value - a.score.value).slice(0, 3);
-  const weakAxes = [...report.axes].sort((a, b) => a.score.value - b.score.value).slice(0, 3);
+  const measuredAxes = report.axes.filter((axis) => axis.score.scoreMeasured !== null);
+  const topAxes = [...measuredAxes].sort((a, b) => (b.score.scoreMeasured ?? 0) - (a.score.scoreMeasured ?? 0)).slice(0, 3);
+  const weakAxes = [...measuredAxes].sort((a, b) => (a.score.scoreMeasured ?? 0) - (b.score.scoreMeasured ?? 0)).slice(0, 3);
 
   return (
     <Page size="A4" style={s.page}>
@@ -32,7 +33,9 @@ export function ConclusionPage({ report, theme, clientLogoSrc }: ConclusionPageP
         <SectionTitle title="Message final" theme={theme} />
         <View style={{ ...s.card, marginBottom: 12 }}>
           <Text style={s.bodyText}>
-            Cet audit confirme un niveau global de {report.globalScore.value}/100 avec un potentiel de progression rapide
+            Cet audit confirme {report.globalScore.scoreMeasured === null
+              ? 'que le score global ne peut pas encore etre calcule'
+              : `un niveau global mesure de ${report.globalScore.scoreMeasured}/100`} avec un potentiel de progression rapide
             sur les priorités identifiées. La feuille de route proposée permet d'améliorer la fiabilité, la performance
             et la confiance utilisateur de façon mesurable.
           </Text>
@@ -46,7 +49,7 @@ export function ConclusionPage({ report, theme, clientLogoSrc }: ConclusionPageP
                 <Text style={{ fontSize: 9, fontFamily: 'DMSans', fontWeight: 700, color: t?.text ?? '#111827' }}>
                   {axis.name}
                 </Text>
-                <Text style={{ fontSize: 8, color: getStatusColor(axis.score.status) }}>{axis.score.value}/100</Text>
+                <Text style={{ fontSize: 8, color: getStatusColor(axis.score.status) }}>{axis.score.scoreMeasured}/100</Text>
               </View>
             ))}
           </View>
@@ -57,7 +60,7 @@ export function ConclusionPage({ report, theme, clientLogoSrc }: ConclusionPageP
                 <Text style={{ fontSize: 9, fontFamily: 'DMSans', fontWeight: 700, color: t?.text ?? '#111827' }}>
                   {axis.name}
                 </Text>
-                <Text style={{ fontSize: 8, color: getStatusColor(axis.score.status) }}>{axis.score.value}/100</Text>
+                <Text style={{ fontSize: 8, color: getStatusColor(axis.score.status) }}>{axis.score.scoreMeasured}/100</Text>
               </View>
             ))}
           </View>

@@ -784,6 +784,24 @@ def _load_form_fuzzer_table_stats(cur, scan_id: str) -> dict:
                     )
                 ) AS forms_tested,
                 COUNT(*) FILTER (WHERE anomaly = TRUE) AS anomalies_count,
+                COUNT(*) FILTER (
+                    WHERE status_code > 0
+                      AND COALESCE(NULLIF(error, ''), '') = ''
+                ) AS responses_received,
+                COUNT(*) FILTER (
+                    WHERE status_code > 0
+                      AND COALESCE(NULLIF(error, ''), '') = ''
+                      AND COALESCE(response_type, '') <> 'request_error'
+                ) AS valid_responses,
+                COUNT(*) FILTER (
+                    WHERE status_code = 0
+                       OR COALESCE(NULLIF(error, ''), '') <> ''
+                       OR response_type = 'request_error'
+                ) AS transport_errors,
+                COUNT(*) FILTER (
+                    WHERE LOWER(COALESCE(error, '')) LIKE '%timeout%'
+                       OR LOWER(COALESCE(error, '')) LIKE '%deadline exceeded%'
+                ) AS timeouts,
                 COUNT(DISTINCT page_url) FILTER (WHERE anomaly = TRUE) AS affected_pages
             FROM form_fuzz_results
             WHERE scan_id = %s
@@ -853,12 +871,16 @@ def _load_form_fuzzer_table_stats(cur, scan_id: str) -> dict:
                 error
             FROM form_fuzz_results
             WHERE scan_id = %s
-              AND anomaly = TRUE
-            ORDER BY created_at DESC, id DESC
+            ORDER BY
+                CASE WHEN anomaly = TRUE THEN 0 ELSE 1 END,
+                CASE WHEN status_code = 0 OR COALESCE(NULLIF(error, ''), '') <> '' THEN 0 ELSE 1 END,
+                created_at DESC,
+                id DESC
+            LIMIT 100
             """,
             (scan_id,),
         )
-        anomalous_test_rows = cur.fetchall() or []
+        test_result_rows = cur.fetchall() or []
     except Exception:
         return {}
 
@@ -888,8 +910,8 @@ def _load_form_fuzzer_table_stats(cur, scan_id: str) -> dict:
         for r in affected_page_rows
         if isinstance(r, dict) and str(r.get("page_url") or "").strip()
     ]
-    anomalous_tests_all = []
-    for row in anomalous_test_rows:
+    test_results_sample = []
+    for row in test_result_rows:
         if not isinstance(row, dict):
             continue
         payload = row.get("payload")
@@ -900,7 +922,7 @@ def _load_form_fuzzer_table_stats(cur, scan_id: str) -> dict:
                 payload = {"raw": payload}
         elif payload is None:
             payload = {}
-        anomalous_tests_all.append({
+        test_results_sample.append({
             "page_url": str(row.get("page_url") or ""),
             "action_url": str(row.get("action_url") or ""),
             "form_id": str(row.get("form_id") or ""),
@@ -914,13 +936,20 @@ def _load_form_fuzzer_table_stats(cur, scan_id: str) -> dict:
             "error": str(row.get("error") or ""),
         })
 
+    anomalous_tests_all = [row for row in test_results_sample if row.get("anomaly")]
+
     return {
         "forms_tested": int(totals.get("forms_tested", 0) or 0),
         "tests_run": int(totals.get("tests_run", 0) or 0),
         "anomalies_count": int(totals.get("anomalies_count", 0) or 0),
+        "responses_received": int(totals.get("responses_received", 0) or 0),
+        "valid_responses": int(totals.get("valid_responses", 0) or 0),
+        "transport_errors": int(totals.get("transport_errors", 0) or 0),
+        "timeouts": int(totals.get("timeouts", 0) or 0),
         "affected_pages": int(totals.get("affected_pages", 0) or 0),
         "affected_page_urls": affected_page_urls,
         "anomalous_tests_all": anomalous_tests_all,
+        "test_results_sample": test_results_sample,
         "anomalies_by_type": anomalies_by_type,
         "top_findings": top_findings,
         "top_affected": top_affected,
@@ -940,8 +969,11 @@ def _build_functional_fuzzer_kpi(summary_row: dict | None, table_stats: dict | N
     unique_transactional_forms_tested = int(raw.get("unique_transactional_forms_tested", 0) or 0)
     non_transactional_forms_tested = int(raw.get("non_transactional_forms_tested", 0) or 0)
     suppressed_low_confidence_anomalies = int(raw.get("suppressed_low_confidence_anomalies", 0) or 0)
-    explicit_signal_count = "signal_count" in raw or "signals" in raw
     signal_count = int(raw.get("signal_count", raw.get("signals", 0)) or 0)
+    responses_received = int(raw.get("responses_received", 0) or 0)
+    valid_responses = int(raw.get("valid_responses", 0) or 0)
+    transport_errors = int(raw.get("transport_errors", 0) or 0)
+    timeouts = int(raw.get("timeouts", 0) or 0)
     anomalies_count = int(raw.get("anomalies_found", 0) or 0)
     affected_pages = int(raw.get("affected_pages", 0) or 0)
     affected_page_urls = [
@@ -953,9 +985,7 @@ def _build_functional_fuzzer_kpi(summary_row: dict | None, table_stats: dict | N
     if not has_summary or (tests_run == 0 and int(table_stats.get("tests_run", 0) or 0) > 0):
         tests_run = int(table_stats.get("tests_run", 0) or 0)
         forms_tested = int(table_stats.get("forms_tested", 0) or 0)
-        if "signal_count" in table_stats or "signals" in table_stats:
-            explicit_signal_count = True
-            signal_count = int(table_stats.get("signal_count", table_stats.get("signals", 0)) or 0)
+        signal_count = int(table_stats.get("signal_count", table_stats.get("signals", signal_count)) or 0)
         if forms_discovered == 0:
             forms_discovered = forms_tested
         anomalies_count = int(table_stats.get("anomalies_count", 0) or 0)
@@ -965,6 +995,22 @@ def _build_functional_fuzzer_kpi(summary_row: dict | None, table_stats: dict | N
             for u in (table_stats.get("affected_page_urls", []) if isinstance(table_stats, dict) else [])
             if str(u or "").strip()
         ]
+    responses_received = max(responses_received, int(table_stats.get("responses_received", 0) or 0))
+    valid_responses = max(valid_responses, int(table_stats.get("valid_responses", 0) or 0))
+    transport_errors = max(transport_errors, int(table_stats.get("transport_errors", 0) or 0))
+    timeouts = max(timeouts, int(table_stats.get("timeouts", 0) or 0))
+    response_counters_reported = any(
+        key in raw for key in ("responses_received", "valid_responses", "transport_errors", "timeouts")
+    ) or any(
+        key in table_stats for key in ("responses_received", "valid_responses", "transport_errors", "timeouts")
+    )
+    explicit_no_usable_result = str(raw.get("skipped_reason") or raw.get("failure_reason") or "").strip() in {
+        "form_fuzzer_no_usable_signals",
+        "form_fuzzer_no_usable_responses",
+    }
+    if tests_run > 0 and not response_counters_reported and not explicit_no_usable_result:
+        responses_received = max(tests_run - transport_errors - timeouts, 0)
+        valid_responses = responses_received
     # Reconcile: if summary reports zero anomalies but table (source of truth) shows
     # anomalies, trust the table count. The summary's anomalies_found can be stale
     # or incorrectly computed by the scanner.
@@ -985,6 +1031,9 @@ def _build_functional_fuzzer_kpi(summary_row: dict | None, table_stats: dict | N
     anomalous_tests_all = raw.get("anomalous_tests_all", []) if isinstance(raw, dict) else []
     if (not isinstance(anomalous_tests_all, list) or not anomalous_tests_all) and isinstance(table_stats, dict):
         anomalous_tests_all = table_stats.get("anomalous_tests_all", []) or []
+    test_results_sample = raw.get("test_results_sample", []) if isinstance(raw, dict) else []
+    if (not isinstance(test_results_sample, list) or not test_results_sample) and isinstance(table_stats, dict):
+        test_results_sample = table_stats.get("test_results_sample", []) or []
     affected_pages_estimated = False
     if affected_pages == 0 and anomalies_count > 0:
         # Last-resort fallback for legacy payloads that do not include explicit affected pages.
@@ -1010,11 +1059,11 @@ def _build_functional_fuzzer_kpi(summary_row: dict | None, table_stats: dict | N
     if unique_transactional_forms_tested == 0 and forms_tested > 0:
         unique_transactional_forms_tested = forms_tested
 
-    no_usable_signals = tests_run > 0 and explicit_signal_count and signal_count == 0
-    if no_usable_signals:
+    no_usable_results = tests_run > 0 and valid_responses == 0
+    if no_usable_results:
         passed = None
         fuzzer_status = "non_evalue"
-        skipped_reason = skipped_reason or "form_fuzzer_no_usable_signals"
+        skipped_reason = skipped_reason or "form_fuzzer_no_usable_responses"
     elif unique_transactional_forms_tested == 0:
         passed = None
         fuzzer_status = "non_evalue"
@@ -1034,14 +1083,21 @@ def _build_functional_fuzzer_kpi(summary_row: dict | None, table_stats: dict | N
         "anomalies_count": anomalies_count,
         "suppressed_low_confidence_anomalies": suppressed_low_confidence_anomalies,
         "signal_count": signal_count,
+        "responses_received": responses_received,
+        "valid_responses": valid_responses,
+        "transport_errors": transport_errors,
+        "timeouts": timeouts,
+        "response_counters_reported": response_counters_reported,
+        "anomaly_count": anomalies_count,
         "response_type": raw.get("response_type"),
         "submitted": raw.get("submitted"),
         "failure_reason": skipped_reason if fuzzer_status == "non_evalue" else None,
-        "execution_status": "failed" if skipped_reason == "form_fuzzer_no_usable_signals" else ("completed" if tests_run > 0 else "not_started"),
-        "data_quality": "MISSING" if skipped_reason == "form_fuzzer_no_usable_signals" else ("VALID" if tests_run > 0 else "MISSING"),
+        "execution_status": "failed" if skipped_reason == "form_fuzzer_no_usable_responses" else ("completed" if tests_run > 0 else "not_started"),
+        "data_quality": "MISSING" if skipped_reason == "form_fuzzer_no_usable_responses" else ("PARTIAL" if tests_run > 0 and forms_tested < forms_discovered else "VALID" if tests_run > 0 else "MISSING"),
         "affected_pages": affected_pages,
         "affected_page_urls": affected_page_urls,
         "anomalous_tests_all": anomalous_tests_all if isinstance(anomalous_tests_all, list) else [],
+        "test_results_sample": test_results_sample if isinstance(test_results_sample, list) else [],
         "anomalies_by_type": anomalies_by_type,
         "top_findings": top_findings,
         "top_affected": top_affected,
@@ -2402,7 +2458,8 @@ def build_report(scan_id: str, enrichment_artifacts: Optional[dict] = None) -> d
         # ── CMS KPI: pass/fail based on EOL version detection ─────────────────
         cms_name    = raw_tech.get("cms", "")
         cms_version = raw_tech.get("cms_version", "")
-        cms_eol     = raw_tech.get("cms_version_eol", False)
+        cms_version_evaluated = bool(raw_tech.get("cms_version_evaluated", bool(cms_version)))
+        cms_eol     = raw_tech.get("cms_version_eol") if cms_version_evaluated else None
         cms_passed  = raw_tech.get("passed", True)
         cms_issues  = raw_tech.get("issues", [])
 
@@ -2411,6 +2468,7 @@ def build_report(scan_id: str, enrichment_artifacts: Optional[dict] = None) -> d
             "cms_version":      cms_version or None,
             "cms_version_range": raw_tech.get("cms_version_range", ""),
             "cms_version_eol":  cms_eol,
+            "cms_version_evaluated": cms_version_evaluated,
             "cms_support_status": raw_tech.get("cms_support_status", ""),
             "inference_sources": raw_tech.get("inference_sources", []),
             "passed":           cms_passed,
@@ -2628,6 +2686,11 @@ def build_report(scan_id: str, enrichment_artifacts: Optional[dict] = None) -> d
     nlp_seo_no_internal_links_pages = 0
     nlp_seo_schema_faq_pages = 0
     nlp_seo_llms_present_pages = 0
+    nlp_ai_schema_org_pages = 0
+    nlp_ai_json_ld_parse_errors = 0
+    nlp_ai_raw_content_visible_pages = 0
+    nlp_ai_rendered_content_used_pages = 0
+    nlp_ai_question_heading_pages = 0
     nlp_content_transactional_no_cta_pages = 0
     nlp_content_high_broken_structure_pages = 0
     nlp_content_low_lexical_diversity_pages = 0
@@ -2651,6 +2714,10 @@ def build_report(scan_id: str, enrichment_artifacts: Optional[dict] = None) -> d
     seo_h1_quality_rows = []
     seo_meta_nlp_rows = []
     seo_llms_rows_by_url = {}
+    ai_schema_rows = []
+    ai_faq_rows = []
+    ai_raw_content_rows = []
+    ai_heading_question_rows = []
     perf_console_error_rows = []
     content_freshness_rows = []
     content_thin_rows = []
@@ -2690,6 +2757,7 @@ def build_report(scan_id: str, enrichment_artifacts: Optional[dict] = None) -> d
     }
     ux_content_zone_detected_pages = 0
     ux_contextual_reliable_pages = 0
+    ux_contextual_measurement_rows = []
     
     # ─── Tier 3: Issues Aggregation Dictionary ──────────────────────────────
     # Structure: {"seo": {"Missing H1": {"count": 1, "urls": ["url1"]}}}
@@ -2791,6 +2859,16 @@ def build_report(scan_id: str, enrichment_artifacts: Optional[dict] = None) -> d
             ux_content_zone_detected_pages += 1
         if bool(ux.get("contextual_measurement_reliable")):
             ux_contextual_reliable_pages += 1
+        if len(ux_contextual_measurement_rows) < 200:
+            ux_contextual_measurement_rows.append({
+                "page_url": page_url,
+                "content_zone_detected": bool(ux.get("content_zone_detected")),
+                "content_zone_selector": ux.get("content_zone_selector"),
+                "confidence": ux.get("content_zone_confidence"),
+                "failure_reason": ux.get("content_zone_failure_reason"),
+                "internal_links": int(links.get("internal_links", 0) or 0),
+                "contextual_links": int(ux.get("contextual_internal_links", 0) or 0),
+            })
         if ux.get("simulator_count", 0) > 0:
             ux_simulators += 1
         if ux.get("is_funnel_step"):
@@ -3077,6 +3155,13 @@ def build_report(scan_id: str, enrichment_artifacts: Optional[dict] = None) -> d
                 content_partenariat_page_count += 1
             if nlp.get("page_type") == "faq":  # Gap #9
                 nlp_faq_pages += 1
+                if len(ai_faq_rows) < 200:
+                    ai_faq_rows.append({
+                        "page_url": page_url,
+                        "page_type": "faq",
+                        "schema_faq_present": False,
+                        "title": nlp.get("title") or nlp.get("h1") or "",
+                    })
             if nlp.get("page_type") == "landing":
                 nlp_landing_pages += 1
             if nlp.get("page_type") == "product":
@@ -3178,6 +3263,8 @@ def build_report(scan_id: str, enrichment_artifacts: Optional[dict] = None) -> d
                 links_kpi = _j(seo_kpis.get("links"))
                 schema_kpi = _j(seo_kpis.get("schema_org"))
                 llms_kpi = _j(seo_kpis.get("llms_txt"))
+                ai_raw_content = _j(seo_kpis.get("ai_raw_content"))
+                ai_heading_questions = _j(seo_kpis.get("ai_heading_questions"))
                 if h1_quality.get("h1_missing"):
                     nlp_seo_h1_missing_pages += 1
                     seo_h1_quality_rows.append({
@@ -3223,8 +3310,62 @@ def build_report(scan_id: str, enrichment_artifacts: Optional[dict] = None) -> d
                     nlp_seo_meta_missing_pages += 1
                 if links_kpi.get("has_no_internal_links"):
                     nlp_seo_no_internal_links_pages += 1
+                schema_types = _safe_list(
+                    schema_kpi.get("json_ld_types")
+                    or schema_kpi.get("schema_org_types")
+                    or schema_kpi.get("schema_types")
+                )
+                json_ld_valid = bool(schema_kpi.get("json_ld_valid", schema_kpi.get("schema_org_present"))) and bool(schema_types)
+                json_ld_parse_errors = int(schema_kpi.get("json_ld_parse_errors", 0) or 0)
+                nlp_ai_json_ld_parse_errors += json_ld_parse_errors
+                if json_ld_valid:
+                    nlp_ai_schema_org_pages += 1
+                if json_ld_valid or schema_kpi.get("json_ld_present") or json_ld_parse_errors > 0:
+                    if len(ai_schema_rows) < 200:
+                        ai_schema_rows.append({
+                            "page_url": page_url,
+                            "json_ld_valid": json_ld_valid,
+                            "json_ld_types": ", ".join(schema_types[:6]),
+                            "schema_types": ", ".join(schema_types[:6]),
+                            "json_ld_count": schema_kpi.get("json_ld_count"),
+                            "json_ld_parse_errors": json_ld_parse_errors,
+                            "schema_faq_present": schema_kpi.get("schema_faq_present"),
+                        })
                 if schema_kpi.get("schema_faq_present"):
                     nlp_seo_schema_faq_pages += 1
+                    if len(ai_faq_rows) < 200:
+                        ai_faq_rows.append({
+                            "page_url": page_url,
+                            "page_type": nlp.get("page_type"),
+                            "schema_faq_present": True,
+                            "schema_types": ", ".join(schema_types[:6]),
+                            "json_ld_types": ", ".join(schema_types[:6]),
+                        })
+                if ai_raw_content:
+                    if ai_raw_content.get("raw_content_visible"):
+                        nlp_ai_raw_content_visible_pages += 1
+                    if ai_raw_content.get("rendered_content_used"):
+                        nlp_ai_rendered_content_used_pages += 1
+                    if len(ai_raw_content_rows) < 200:
+                        ai_raw_content_rows.append({
+                            "page_url": page_url,
+                            "raw_content_visible": bool(ai_raw_content.get("raw_content_visible")),
+                            "raw_content_word_count": ai_raw_content.get("raw_content_word_count"),
+                            "main_word_count": ai_raw_content.get("main_word_count"),
+                            "rendered_content_used": bool(ai_raw_content.get("rendered_content_used")),
+                            "raw_content_source": ai_raw_content.get("raw_content_source"),
+                        })
+                question_heading_count = int(ai_heading_questions.get("question_heading_count", 0) or 0)
+                if question_heading_count > 0:
+                    nlp_ai_question_heading_pages += 1
+                    for row in _safe_list(ai_heading_questions.get("rows"))[:5]:
+                        if len(ai_heading_question_rows) >= 200:
+                            break
+                        ai_heading_question_rows.append({
+                            "page_url": page_url,
+                            "tag": row.get("tag") if isinstance(row, dict) else None,
+                            "text": row.get("text") if isinstance(row, dict) else str(row),
+                        })
                 if llms_kpi.get("llms_txt_present"):
                     nlp_seo_llms_present_pages += 1
                 llms_url = llms_kpi.get("llms_url") or f"https://{base_domain}/llms.txt"
@@ -3438,6 +3579,16 @@ def build_report(scan_id: str, enrichment_artifacts: Optional[dict] = None) -> d
             "pages_attempted": mobile_attempted,
             "pages_measured": mobile_measured,
             "rows": mobile_rows[:200],
+            "attempt_errors": [
+                {
+                    "url": row.get("url"),
+                    "measurement_status": row.get("measurement_status"),
+                    "error": row.get("error"),
+                    "render_engine": row.get("render_engine"),
+                }
+                for row in mobile_rows
+                if row.get("error") or row.get("measurement_status") not in {None, "", "measured"}
+            ],
             "measurement_status": "measurement_failed" if mobile_measurement_failed else ("measured" if mobile_measured > 0 else "not_started"),
             "failure_reason": "mobile_cwv_measurement_failed" if mobile_measurement_failed else None,
             "data_quality": "MISSING" if mobile_measurement_failed else ("VALID" if mobile_measured > 0 else "MISSING"),
@@ -3565,6 +3716,7 @@ def build_report(scan_id: str, enrichment_artifacts: Optional[dict] = None) -> d
             "external_link_rows": seo_external_link_rows[:200],
             "robots_url": raw_seo_kpi.get("robots_url"),
             "robots_detected_via": raw_seo_kpi.get("robots_detected_via"),
+            "ai_robots_policy": raw_seo_kpi.get("ai_robots_policy"),
             "sitemap_url": raw_seo_kpi.get("sitemap_url"),
             "sitemap_detected_via": raw_seo_kpi.get("sitemap_detected_via"),
             "multi_browser_compatibility": multi_browser_compat,
@@ -3581,6 +3733,9 @@ def build_report(scan_id: str, enrichment_artifacts: Optional[dict] = None) -> d
                 "no_internal_links_pages": nlp_seo_no_internal_links_pages,
                 "schema_faq_pages": nlp_seo_schema_faq_pages,
                 "llms_txt_present_pages": nlp_seo_llms_present_pages,
+                "schema_org_pages": nlp_ai_schema_org_pages,
+                "raw_content_visible_pages": nlp_ai_raw_content_visible_pages,
+                "question_heading_pages": nlp_ai_question_heading_pages,
             },
             "nlp_seo_h1_kpi": {
                 "h1_missing_pages": nlp_seo_h1_missing_pages,
@@ -3602,12 +3757,30 @@ def build_report(scan_id: str, enrichment_artifacts: Optional[dict] = None) -> d
                 "llms_txt_present_pages": nlp_seo_llms_present_pages,
                 "rows": list(seo_llms_rows_by_url.values())[:20],
             },
+            "ai_friendly_kpis": {
+                "llms_txt_present_pages": nlp_seo_llms_present_pages,
+                "llms_rows": list(seo_llms_rows_by_url.values())[:20],
+                "schema_org_pages": nlp_ai_schema_org_pages,
+                "json_ld_valid_pages": nlp_ai_schema_org_pages,
+                "json_ld_parse_errors": nlp_ai_json_ld_parse_errors,
+                "schema_rows": ai_schema_rows[:50],
+                "faq_pages": nlp_faq_pages,
+                "schema_faq_pages": nlp_seo_schema_faq_pages,
+                "faq_rows": ai_faq_rows[:50],
+                "raw_content_visible_pages": nlp_ai_raw_content_visible_pages,
+                "rendered_content_used_pages": nlp_ai_rendered_content_used_pages,
+                "raw_content_rows": ai_raw_content_rows[:50],
+                "question_heading_pages": nlp_ai_question_heading_pages,
+                "question_heading_rows": ai_heading_question_rows[:50],
+            },
             "contextual_link_measurement": {
                 "pages_checked": total_pages,
                 "content_zone_detected_pages": ux_content_zone_detected_pages,
                 "reliable_pages": ux_contextual_reliable_pages,
                 "reliable_coverage_pct": contextual_reliable_coverage_pct,
                 "passed": ux_contextual_reliable_pages == total_pages if total_pages else False,
+                "rows": ux_contextual_measurement_rows,
+                "failure_reason": "main_content_zone_not_identified" if total_pages > 0 and ux_contextual_reliable_pages == 0 else None,
             },
             "evidence_provenance": {
                 "static_pages": evidence_provenance_counts["static"],

@@ -6,6 +6,7 @@ import { getStatusColor } from '../theme';
 interface ScoreGaugeProps {
   score: number;
   status: SeverityStatus;
+  valueText?: string;
   size?: number;
   stroke?: number;
   caption?: string;
@@ -15,6 +16,7 @@ interface ScoreGaugeProps {
 export function ScoreGauge({
   score,
   status,
+  valueText,
   size = 120,
   stroke = 10,
   caption,
@@ -69,8 +71,10 @@ export function ScoreGauge({
         ) : null}
       </Svg>
       <View style={{ marginTop: -size / 2 - 8, alignItems: 'center' }}>
-        <Text style={{ fontSize: 28, color: text, fontFamily: 'DMSans', fontWeight: 700 }}>{bounded}</Text>
-        <Text style={{ fontSize: 8, color: muted }}>/100</Text>
+        <Text style={{ fontSize: valueText ? 14 : 28, color: text, fontFamily: 'DMSans', fontWeight: 700 }}>
+          {valueText ?? bounded}
+        </Text>
+        {!valueText ? <Text style={{ fontSize: 8, color: muted }}>/100</Text> : null}
       </View>
       <View style={{ height: size / 2 - 16 }} />
       {caption ? <Text style={{ fontSize: 8, color: muted }}>{caption}</Text> : null}

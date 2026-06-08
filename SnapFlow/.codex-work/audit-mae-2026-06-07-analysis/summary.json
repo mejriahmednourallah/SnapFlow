@@ -1,0 +1,892 @@
+{
+  "pdf": "C:\\Users\\DELL\\Downloads\\audit-mae-2026-06-07.pdf",
+  "pages": 40,
+  "weak_pages": [
+    {
+      "page": 3,
+      "type": "executive_summary",
+      "words": 93,
+      "chars": 597,
+      "bottom_blank": 316.7,
+      "weak_reasons": [
+        "large_bottom_whitespace"
+      ],
+      "preview": "Résumé exécutif | MAE | MAE | Vue globale | 65",
+      "screenshot": "C:\\Users\\DELL\\OneDrive - Ministere de l'Enseignement Superieur et de la Recherche Scientifique\\Desktop\\New folder (8)\\SnapFlow\\.codex-work\\audit-mae-2026-06-07-analysis\\page_003.png"
+    },
+    {
+      "page": 4,
+      "type": "kpi_grid",
+      "words": 162,
+      "chars": 1034,
+      "bottom_blank": 290.1,
+      "weak_reasons": [
+        "large_bottom_whitespace"
+      ],
+      "preview": "Grille des contrôles | MAE | MAE | Tableau de score par axe | Technique",
+      "screenshot": "C:\\Users\\DELL\\OneDrive - Ministere de l'Enseignement Superieur et de la Recherche Scientifique\\Desktop\\New folder (8)\\SnapFlow\\.codex-work\\audit-mae-2026-06-07-analysis\\page_004.png"
+    },
+    {
+      "page": 5,
+      "type": "kpi_grid",
+      "words": 36,
+      "chars": 218,
+      "bottom_blank": 582.1,
+      "weak_reasons": [
+        "low_word_count",
+        "large_bottom_whitespace"
+      ],
+      "preview": "Grille des contrôles | MAE | MAE | Tableau de score par axe | Protection des don-",
+      "screenshot": "C:\\Users\\DELL\\OneDrive - Ministere de l'Enseignement Superieur et de la Recherche Scientifique\\Desktop\\New folder (8)\\SnapFlow\\.codex-work\\audit-mae-2026-06-07-analysis\\page_005.png"
+    },
+    {
+      "page": 6,
+      "type": "content",
+      "words": 104,
+      "chars": 697,
+      "bottom_blank": 384.5,
+      "weak_reasons": [
+        "large_bottom_whitespace"
+      ],
+      "preview": "01 Technique | Analyse détaillée par axe | MAE | Technique | Versions serveur, technologies du site et erreurs de scripts.",
+      "screenshot": "C:\\Users\\DELL\\OneDrive - Ministere de l'Enseignement Superieur et de la Recherche Scientifique\\Desktop\\New folder (8)\\SnapFlow\\.codex-work\\audit-mae-2026-06-07-analysis\\page_006.png"
+    },
+    {
+      "page": 7,
+      "type": "content",
+      "words": 151,
+      "chars": 1093,
+      "bottom_blank": 277.3,
+      "weak_reasons": [
+        "large_bottom_whitespace"
+      ],
+      "preview": "02 Sécurité | Analyse détaillée par axe | MAE | Sécurité | Certificat de securite, protections du navigateur, cookies et cache.",
+      "screenshot": "C:\\Users\\DELL\\OneDrive - Ministere de l'Enseignement Superieur et de la Recherche Scientifique\\Desktop\\New folder (8)\\SnapFlow\\.codex-work\\audit-mae-2026-06-07-analysis\\page_007.png"
+    },
+    {
+      "page": 8,
+      "type": "content",
+      "words": 104,
+      "chars": 730,
+      "bottom_blank": 371.7,
+      "weak_reasons": [
+        "large_bottom_whitespace"
+      ],
+      "preview": "03 Fonctionnel | Analyse détaillée par axe | MAE | Fonctionnel | Formulaires, liens cassés, boutons, adresses email protégées.",
+      "screenshot": "C:\\Users\\DELL\\OneDrive - Ministere de l'Enseignement Superieur et de la Recherche Scientifique\\Desktop\\New folder (8)\\SnapFlow\\.codex-work\\audit-mae-2026-06-07-analysis\\page_008.png"
+    },
+    {
+      "page": 9,
+      "type": "content",
+      "words": 175,
+      "chars": 1165,
+      "bottom_blank": 244.6,
+      "weak_reasons": [
+        "large_bottom_whitespace"
+      ],
+      "preview": "04 Performance | Analyse détaillée par axe | MAE | Performance | Temps d affichage, stabilite visuelle, poids des ressources et images.",
+      "screenshot": "C:\\Users\\DELL\\OneDrive - Ministere de l'Enseignement Superieur et de la Recherche Scientifique\\Desktop\\New folder (8)\\SnapFlow\\.codex-work\\audit-mae-2026-06-07-analysis\\page_009.png"
+    },
+    {
+      "page": 13,
+      "type": "content",
+      "words": 123,
+      "chars": 831,
+      "bottom_blank": 348.9,
+      "weak_reasons": [
+        "large_bottom_whitespace"
+      ],
+      "preview": "06 AI Friendly | Analyse détaillée par axe | MAE | AI Friendly | Compatibilite avec les moteurs generatifs: llms.txt, robots IA, schema.org et contenu",
+      "screenshot": "C:\\Users\\DELL\\OneDrive - Ministere de l'Enseignement Superieur et de la Recherche Scientifique\\Desktop\\New folder (8)\\SnapFlow\\.codex-work\\audit-mae-2026-06-07-analysis\\page_013.png"
+    },
+    {
+      "page": 15,
+      "type": "content",
+      "words": 106,
+      "chars": 806,
+      "bottom_blank": 401.2,
+      "weak_reasons": [
+        "large_bottom_whitespace"
+      ],
+      "preview": "07 Contenu | Analyse détaillée par axe | MAE | Constats prioritaires | CTA Transactionnels Manquants",
+      "screenshot": "C:\\Users\\DELL\\OneDrive - Ministere de l'Enseignement Superieur et de la Recherche Scientifique\\Desktop\\New folder (8)\\SnapFlow\\.codex-work\\audit-mae-2026-06-07-analysis\\page_015.png"
+    },
+    {
+      "page": 17,
+      "type": "content",
+      "words": 96,
+      "chars": 654,
+      "bottom_blank": 455.9,
+      "weak_reasons": [
+        "large_bottom_whitespace"
+      ],
+      "preview": "09 Impact ecologique | Analyse détaillée par axe | MAE | Impact ecologique | Impact environnemental global du site web.",
+      "screenshot": "C:\\Users\\DELL\\OneDrive - Ministere de l'Enseignement Superieur et de la Recherche Scientifique\\Desktop\\New folder (8)\\SnapFlow\\.codex-work\\audit-mae-2026-06-07-analysis\\page_017.png"
+    },
+    {
+      "page": 19,
+      "type": "content",
+      "words": 24,
+      "chars": 138,
+      "bottom_blank": 723.6,
+      "weak_reasons": [
+        "low_word_count",
+        "large_bottom_whitespace"
+      ],
+      "preview": "10 Protection des données | Analyse détaillée par axe | MAE | Pages avec droits faibles | 1",
+      "screenshot": "C:\\Users\\DELL\\OneDrive - Ministere de l'Enseignement Superieur et de la Recherche Scientifique\\Desktop\\New folder (8)\\SnapFlow\\.codex-work\\audit-mae-2026-06-07-analysis\\page_019.png"
+    },
+    {
+      "page": 20,
+      "type": "recommendations",
+      "words": 149,
+      "chars": 1012,
+      "bottom_blank": 449.3,
+      "weak_reasons": [
+        "large_bottom_whitespace"
+      ],
+      "preview": "Plan d'action | Priorités majeures | MAE | Actions à traiter en premier | Droits des personnes",
+      "screenshot": "C:\\Users\\DELL\\OneDrive - Ministere de l'Enseignement Superieur et de la Recherche Scientifique\\Desktop\\New folder (8)\\SnapFlow\\.codex-work\\audit-mae-2026-06-07-analysis\\page_020.png"
+    },
+    {
+      "page": 22,
+      "type": "recommendations",
+      "words": 40,
+      "chars": 262,
+      "bottom_blank": 677.7,
+      "weak_reasons": [
+        "low_word_count",
+        "large_bottom_whitespace"
+      ],
+      "preview": "Plan d'action | Tableau priorisé | MAE | Rationaliser les pages ciblant les mêmes | mots-clés",
+      "screenshot": "C:\\Users\\DELL\\OneDrive - Ministere de l'Enseignement Superieur et de la Recherche Scientifique\\Desktop\\New folder (8)\\SnapFlow\\.codex-work\\audit-mae-2026-06-07-analysis\\page_022.png"
+    },
+    {
+      "page": 23,
+      "type": "recommendations",
+      "words": 89,
+      "chars": 607,
+      "bottom_blank": 534.9,
+      "weak_reasons": [
+        "low_word_count",
+        "large_bottom_whitespace"
+      ],
+      "preview": "Plan d'action | Tableau priorisé | MAE | Tableau synthétique - suite | Priorité",
+      "screenshot": "C:\\Users\\DELL\\OneDrive - Ministere de l'Enseignement Superieur et de la Recherche Scientifique\\Desktop\\New folder (8)\\SnapFlow\\.codex-work\\audit-mae-2026-06-07-analysis\\page_023.png"
+    },
+    {
+      "page": 24,
+      "type": "roadmap",
+      "words": 174,
+      "chars": 1153,
+      "bottom_blank": 313.1,
+      "weak_reasons": [
+        "large_bottom_whitespace"
+      ],
+      "preview": "Priorités d'action | Planification par horizon | MAE | Exécution par horizon | Immédiat",
+      "screenshot": "C:\\Users\\DELL\\OneDrive - Ministere de l'Enseignement Superieur et de la Recherche Scientifique\\Desktop\\New folder (8)\\SnapFlow\\.codex-work\\audit-mae-2026-06-07-analysis\\page_024.png"
+    },
+    {
+      "page": 26,
+      "type": "annexe",
+      "words": 89,
+      "chars": 605,
+      "bottom_blank": 461.0,
+      "weak_reasons": [
+        "low_word_count",
+        "large_bottom_whitespace"
+      ],
+      "preview": "Annexes - preuves des contrôles | MAE | MAE | Preuves utiles et localisation | Technique",
+      "screenshot": "C:\\Users\\DELL\\OneDrive - Ministere de l'Enseignement Superieur et de la Recherche Scientifique\\Desktop\\New folder (8)\\SnapFlow\\.codex-work\\audit-mae-2026-06-07-analysis\\page_026.png"
+    },
+    {
+      "page": 29,
+      "type": "annexe",
+      "words": 137,
+      "chars": 1100,
+      "bottom_blank": 272.2,
+      "weak_reasons": [
+        "large_bottom_whitespace"
+      ],
+      "preview": "Annexes - preuves des contrôles | MAE | MAE | Performance | Optimisation des Images",
+      "screenshot": "C:\\Users\\DELL\\OneDrive - Ministere de l'Enseignement Superieur et de la Recherche Scientifique\\Desktop\\New folder (8)\\SnapFlow\\.codex-work\\audit-mae-2026-06-07-analysis\\page_029.png"
+    },
+    {
+      "page": 30,
+      "type": "annexe",
+      "words": 91,
+      "chars": 682,
+      "bottom_blank": 490.7,
+      "weak_reasons": [
+        "large_bottom_whitespace"
+      ],
+      "preview": "Annexes - preuves des contrôles | MAE | MAE | Performance | Erreurs Console JavaScript",
+      "screenshot": "C:\\Users\\DELL\\OneDrive - Ministere de l'Enseignement Superieur et de la Recherche Scientifique\\Desktop\\New folder (8)\\SnapFlow\\.codex-work\\audit-mae-2026-06-07-analysis\\page_030.png"
+    },
+    {
+      "page": 31,
+      "type": "annexe",
+      "words": 148,
+      "chars": 1202,
+      "bottom_blank": 272.2,
+      "weak_reasons": [
+        "large_bottom_whitespace"
+      ],
+      "preview": "Annexes - preuves des contrôles | MAE | MAE | SEO | Descriptions de pages pour le referencement",
+      "screenshot": "C:\\Users\\DELL\\OneDrive - Ministere de l'Enseignement Superieur et de la Recherche Scientifique\\Desktop\\New folder (8)\\SnapFlow\\.codex-work\\audit-mae-2026-06-07-analysis\\page_031.png"
+    },
+    {
+      "page": 32,
+      "type": "annexe",
+      "words": 143,
+      "chars": 1091,
+      "bottom_blank": 261.3,
+      "weak_reasons": [
+        "large_bottom_whitespace"
+      ],
+      "preview": "Annexes - preuves des contrôles | MAE | MAE | SEO | Linking Interne",
+      "screenshot": "C:\\Users\\DELL\\OneDrive - Ministere de l'Enseignement Superieur et de la Recherche Scientifique\\Desktop\\New folder (8)\\SnapFlow\\.codex-work\\audit-mae-2026-06-07-analysis\\page_032.png"
+    },
+    {
+      "page": 34,
+      "type": "annexe",
+      "words": 146,
+      "chars": 1111,
+      "bottom_blank": 261.3,
+      "weak_reasons": [
+        "large_bottom_whitespace"
+      ],
+      "preview": "Annexes - preuves des contrôles | MAE | MAE | Contenu | Contenu Fin et Qualité",
+      "screenshot": "C:\\Users\\DELL\\OneDrive - Ministere de l'Enseignement Superieur et de la Recherche Scientifique\\Desktop\\New folder (8)\\SnapFlow\\.codex-work\\audit-mae-2026-06-07-analysis\\page_034.png"
+    },
+    {
+      "page": 35,
+      "type": "annexe",
+      "words": 143,
+      "chars": 1115,
+      "bottom_blank": 272.2,
+      "weak_reasons": [
+        "large_bottom_whitespace"
+      ],
+      "preview": "Annexes - preuves des contrôles | MAE | MAE | Contenu | CTA Transactionnels Manquants",
+      "screenshot": "C:\\Users\\DELL\\OneDrive - Ministere de l'Enseignement Superieur et de la Recherche Scientifique\\Desktop\\New folder (8)\\SnapFlow\\.codex-work\\audit-mae-2026-06-07-analysis\\page_035.png"
+    },
+    {
+      "page": 36,
+      "type": "annexe",
+      "words": 152,
+      "chars": 1085,
+      "bottom_blank": 267.1,
+      "weak_reasons": [
+        "large_bottom_whitespace"
+      ],
+      "preview": "Annexes - preuves des contrôles | MAE | MAE | Experience utilisateur | Partage Social",
+      "screenshot": "C:\\Users\\DELL\\OneDrive - Ministere de l'Enseignement Superieur et de la Recherche Scientifique\\Desktop\\New folder (8)\\SnapFlow\\.codex-work\\audit-mae-2026-06-07-analysis\\page_036.png"
+    },
+    {
+      "page": 37,
+      "type": "annexe",
+      "words": 97,
+      "chars": 681,
+      "bottom_blank": 479.9,
+      "weak_reasons": [
+        "large_bottom_whitespace"
+      ],
+      "preview": "Annexes - preuves des contrôles | MAE | MAE | Impact ecologique | Impact ecologique",
+      "screenshot": "C:\\Users\\DELL\\OneDrive - Ministere de l'Enseignement Superieur et de la Recherche Scientifique\\Desktop\\New folder (8)\\SnapFlow\\.codex-work\\audit-mae-2026-06-07-analysis\\page_037.png"
+    },
+    {
+      "page": 39,
+      "type": "annexe",
+      "words": 97,
+      "chars": 708,
+      "bottom_blank": 479.9,
+      "weak_reasons": [
+        "large_bottom_whitespace"
+      ],
+      "preview": "Annexes - preuves des contrôles | MAE | MAE | Protection des données | Traceurs avant consentement",
+      "screenshot": "C:\\Users\\DELL\\OneDrive - Ministere de l'Enseignement Superieur et de la Recherche Scientifique\\Desktop\\New folder (8)\\SnapFlow\\.codex-work\\audit-mae-2026-06-07-analysis\\page_039.png"
+    }
+  ],
+  "weak_page_numbers": [
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    13,
+    15,
+    17,
+    19,
+    20,
+    22,
+    23,
+    24,
+    26,
+    29,
+    30,
+    31,
+    32,
+    34,
+    35,
+    36,
+    37,
+    39
+  ],
+  "small_font_ratio_pct": 18.5,
+  "small_spans": 299,
+  "total_text_spans": 1615,
+  "font_size_counts": [
+    [
+      8.6,
+      449
+    ],
+    [
+      8.7,
+      229
+    ],
+    [
+      8.8,
+      147
+    ],
+    [
+      8.5,
+      146
+    ],
+    [
+      8.1,
+      91
+    ],
+    [
+      7.2,
+      76
+    ],
+    [
+      8.4,
+      52
+    ],
+    [
+      9.2,
+      51
+    ],
+    [
+      11.5,
+      38
+    ],
+    [
+      8.0,
+      36
+    ],
+    [
+      11.2,
+      33
+    ],
+    [
+      9.4,
+      28
+    ],
+    [
+      9.7,
+      24
+    ],
+    [
+      9.8,
+      24
+    ],
+    [
+      10.0,
+      22
+    ],
+    [
+      7.4,
+      21
+    ],
+    [
+      20.0,
+      20
+    ],
+    [
+      9.0,
+      17
+    ],
+    [
+      11.4,
+      16
+    ],
+    [
+      8.2,
+      15
+    ]
+  ],
+  "screenshots_dir": "C:\\Users\\DELL\\OneDrive - Ministere de l'Enseignement Superieur et de la Recherche Scientifique\\Desktop\\New folder (8)\\SnapFlow\\.codex-work\\audit-mae-2026-06-07-analysis",
+  "contact_sheets": [
+    "C:\\Users\\DELL\\OneDrive - Ministere de l'Enseignement Superieur et de la Recherche Scientifique\\Desktop\\New folder (8)\\SnapFlow\\.codex-work\\audit-mae-2026-06-07-analysis\\contact_01.png",
+    "C:\\Users\\DELL\\OneDrive - Ministere de l'Enseignement Superieur et de la Recherche Scientifique\\Desktop\\New folder (8)\\SnapFlow\\.codex-work\\audit-mae-2026-06-07-analysis\\contact_02.png",
+    "C:\\Users\\DELL\\OneDrive - Ministere de l'Enseignement Superieur et de la Recherche Scientifique\\Desktop\\New folder (8)\\SnapFlow\\.codex-work\\audit-mae-2026-06-07-analysis\\contact_03.png",
+    "C:\\Users\\DELL\\OneDrive - Ministere de l'Enseignement Superieur et de la Recherche Scientifique\\Desktop\\New folder (8)\\SnapFlow\\.codex-work\\audit-mae-2026-06-07-analysis\\contact_04.png"
+  ],
+  "thresholds": {
+    "min_content_words": 90,
+    "max_bottom_whitespace": 240.0,
+    "min_font_size": 8.5
+  },
+  "pages_detail": [
+    {
+      "page": 1,
+      "type": "cover",
+      "words": 59,
+      "chars": 211,
+      "bottom_blank": 448.2,
+      "weak_reasons": [],
+      "preview": "A U D I T  D E  M A I N T E N A N C E  P R É V E N T I V E | MAE | https://mae.tn | S C OR E  GLO BA L | 65",
+      "screenshot": "C:\\Users\\DELL\\OneDrive - Ministere de l'Enseignement Superieur et de la Recherche Scientifique\\Desktop\\New folder (8)\\SnapFlow\\.codex-work\\audit-mae-2026-06-07-analysis\\page_001.png"
+    },
+    {
+      "page": 2,
+      "type": "toc",
+      "words": 89,
+      "chars": 480,
+      "bottom_blank": 152.8,
+      "weak_reasons": [],
+      "preview": "Table des matières | MAE | MAE | Structure du rapport | 01 Couverture",
+      "screenshot": "C:\\Users\\DELL\\OneDrive - Ministere de l'Enseignement Superieur et de la Recherche Scientifique\\Desktop\\New folder (8)\\SnapFlow\\.codex-work\\audit-mae-2026-06-07-analysis\\page_002.png"
+    },
+    {
+      "page": 3,
+      "type": "executive_summary",
+      "words": 93,
+      "chars": 597,
+      "bottom_blank": 316.7,
+      "weak_reasons": [
+        "large_bottom_whitespace"
+      ],
+      "preview": "Résumé exécutif | MAE | MAE | Vue globale | 65",
+      "screenshot": "C:\\Users\\DELL\\OneDrive - Ministere de l'Enseignement Superieur et de la Recherche Scientifique\\Desktop\\New folder (8)\\SnapFlow\\.codex-work\\audit-mae-2026-06-07-analysis\\page_003.png"
+    },
+    {
+      "page": 4,
+      "type": "kpi_grid",
+      "words": 162,
+      "chars": 1034,
+      "bottom_blank": 290.1,
+      "weak_reasons": [
+        "large_bottom_whitespace"
+      ],
+      "preview": "Grille des contrôles | MAE | MAE | Tableau de score par axe | Technique",
+      "screenshot": "C:\\Users\\DELL\\OneDrive - Ministere de l'Enseignement Superieur et de la Recherche Scientifique\\Desktop\\New folder (8)\\SnapFlow\\.codex-work\\audit-mae-2026-06-07-analysis\\page_004.png"
+    },
+    {
+      "page": 5,
+      "type": "kpi_grid",
+      "words": 36,
+      "chars": 218,
+      "bottom_blank": 582.1,
+      "weak_reasons": [
+        "low_word_count",
+        "large_bottom_whitespace"
+      ],
+      "preview": "Grille des contrôles | MAE | MAE | Tableau de score par axe | Protection des don-",
+      "screenshot": "C:\\Users\\DELL\\OneDrive - Ministere de l'Enseignement Superieur et de la Recherche Scientifique\\Desktop\\New folder (8)\\SnapFlow\\.codex-work\\audit-mae-2026-06-07-analysis\\page_005.png"
+    },
+    {
+      "page": 6,
+      "type": "content",
+      "words": 104,
+      "chars": 697,
+      "bottom_blank": 384.5,
+      "weak_reasons": [
+        "large_bottom_whitespace"
+      ],
+      "preview": "01 Technique | Analyse détaillée par axe | MAE | Technique | Versions serveur, technologies du site et erreurs de scripts.",
+      "screenshot": "C:\\Users\\DELL\\OneDrive - Ministere de l'Enseignement Superieur et de la Recherche Scientifique\\Desktop\\New folder (8)\\SnapFlow\\.codex-work\\audit-mae-2026-06-07-analysis\\page_006.png"
+    },
+    {
+      "page": 7,
+      "type": "content",
+      "words": 151,
+      "chars": 1093,
+      "bottom_blank": 277.3,
+      "weak_reasons": [
+        "large_bottom_whitespace"
+      ],
+      "preview": "02 Sécurité | Analyse détaillée par axe | MAE | Sécurité | Certificat de securite, protections du navigateur, cookies et cache.",
+      "screenshot": "C:\\Users\\DELL\\OneDrive - Ministere de l'Enseignement Superieur et de la Recherche Scientifique\\Desktop\\New folder (8)\\SnapFlow\\.codex-work\\audit-mae-2026-06-07-analysis\\page_007.png"
+    },
+    {
+      "page": 8,
+      "type": "content",
+      "words": 104,
+      "chars": 730,
+      "bottom_blank": 371.7,
+      "weak_reasons": [
+        "large_bottom_whitespace"
+      ],
+      "preview": "03 Fonctionnel | Analyse détaillée par axe | MAE | Fonctionnel | Formulaires, liens cassés, boutons, adresses email protégées.",
+      "screenshot": "C:\\Users\\DELL\\OneDrive - Ministere de l'Enseignement Superieur et de la Recherche Scientifique\\Desktop\\New folder (8)\\SnapFlow\\.codex-work\\audit-mae-2026-06-07-analysis\\page_008.png"
+    },
+    {
+      "page": 9,
+      "type": "content",
+      "words": 175,
+      "chars": 1165,
+      "bottom_blank": 244.6,
+      "weak_reasons": [
+        "large_bottom_whitespace"
+      ],
+      "preview": "04 Performance | Analyse détaillée par axe | MAE | Performance | Temps d affichage, stabilite visuelle, poids des ressources et images.",
+      "screenshot": "C:\\Users\\DELL\\OneDrive - Ministere de l'Enseignement Superieur et de la Recherche Scientifique\\Desktop\\New folder (8)\\SnapFlow\\.codex-work\\audit-mae-2026-06-07-analysis\\page_009.png"
+    },
+    {
+      "page": 10,
+      "type": "content",
+      "words": 154,
+      "chars": 1224,
+      "bottom_blank": 239.8,
+      "weak_reasons": [],
+      "preview": "04 Performance | Analyse détaillée par axe | MAE | Constats prioritaires | Optimisation des Images",
+      "screenshot": "C:\\Users\\DELL\\OneDrive - Ministere de l'Enseignement Superieur et de la Recherche Scientifique\\Desktop\\New folder (8)\\SnapFlow\\.codex-work\\audit-mae-2026-06-07-analysis\\page_010.png"
+    },
+    {
+      "page": 11,
+      "type": "content",
+      "words": 158,
+      "chars": 1143,
+      "bottom_blank": 201.7,
+      "weak_reasons": [],
+      "preview": "05 SEO | Analyse détaillée par axe | MAE | SEO | Descriptions de pages, liens internes, plan du site et contenu duplique.",
+      "screenshot": "C:\\Users\\DELL\\OneDrive - Ministere de l'Enseignement Superieur et de la Recherche Scientifique\\Desktop\\New folder (8)\\SnapFlow\\.codex-work\\audit-mae-2026-06-07-analysis\\page_011.png"
+    },
+    {
+      "page": 12,
+      "type": "content",
+      "words": 155,
+      "chars": 1148,
+      "bottom_blank": 239.8,
+      "weak_reasons": [],
+      "preview": "05 SEO | Analyse détaillée par axe | MAE | Constats prioritaires | Linking Interne",
+      "screenshot": "C:\\Users\\DELL\\OneDrive - Ministere de l'Enseignement Superieur et de la Recherche Scientifique\\Desktop\\New folder (8)\\SnapFlow\\.codex-work\\audit-mae-2026-06-07-analysis\\page_012.png"
+    },
+    {
+      "page": 13,
+      "type": "content",
+      "words": 123,
+      "chars": 831,
+      "bottom_blank": 348.9,
+      "weak_reasons": [
+        "large_bottom_whitespace"
+      ],
+      "preview": "06 AI Friendly | Analyse détaillée par axe | MAE | AI Friendly | Compatibilite avec les moteurs generatifs: llms.txt, robots IA, schema.org et contenu",
+      "screenshot": "C:\\Users\\DELL\\OneDrive - Ministere de l'Enseignement Superieur et de la Recherche Scientifique\\Desktop\\New folder (8)\\SnapFlow\\.codex-work\\audit-mae-2026-06-07-analysis\\page_013.png"
+    },
+    {
+      "page": 14,
+      "type": "content",
+      "words": 140,
+      "chars": 1021,
+      "bottom_blank": 223.1,
+      "weak_reasons": [],
+      "preview": "07 Contenu | Analyse détaillée par axe | MAE | Contenu | Qualité temporelle (fraîcheur), taux de remplissage texte, orthographe.",
+      "screenshot": "C:\\Users\\DELL\\OneDrive - Ministere de l'Enseignement Superieur et de la Recherche Scientifique\\Desktop\\New folder (8)\\SnapFlow\\.codex-work\\audit-mae-2026-06-07-analysis\\page_014.png"
+    },
+    {
+      "page": 15,
+      "type": "content",
+      "words": 106,
+      "chars": 806,
+      "bottom_blank": 401.2,
+      "weak_reasons": [
+        "large_bottom_whitespace"
+      ],
+      "preview": "07 Contenu | Analyse détaillée par axe | MAE | Constats prioritaires | CTA Transactionnels Manquants",
+      "screenshot": "C:\\Users\\DELL\\OneDrive - Ministere de l'Enseignement Superieur et de la Recherche Scientifique\\Desktop\\New folder (8)\\SnapFlow\\.codex-work\\audit-mae-2026-06-07-analysis\\page_015.png"
+    },
+    {
+      "page": 16,
+      "type": "content",
+      "words": 157,
+      "chars": 1092,
+      "bottom_blank": 223.1,
+      "weak_reasons": [],
+      "preview": "08 Experience utilisateur | Analyse détaillée par axe | MAE | Experience utilisateur | Menu structuré, liens invisibles, ratios de densité de texte.",
+      "screenshot": "C:\\Users\\DELL\\OneDrive - Ministere de l'Enseignement Superieur et de la Recherche Scientifique\\Desktop\\New folder (8)\\SnapFlow\\.codex-work\\audit-mae-2026-06-07-analysis\\page_016.png"
+    },
+    {
+      "page": 17,
+      "type": "content",
+      "words": 96,
+      "chars": 654,
+      "bottom_blank": 455.9,
+      "weak_reasons": [
+        "large_bottom_whitespace"
+      ],
+      "preview": "09 Impact ecologique | Analyse détaillée par axe | MAE | Impact ecologique | Impact environnemental global du site web.",
+      "screenshot": "C:\\Users\\DELL\\OneDrive - Ministere de l'Enseignement Superieur et de la Recherche Scientifique\\Desktop\\New folder (8)\\SnapFlow\\.codex-work\\audit-mae-2026-06-07-analysis\\page_017.png"
+    },
+    {
+      "page": 18,
+      "type": "content",
+      "words": 244,
+      "chars": 1812,
+      "bottom_blank": 0,
+      "weak_reasons": [],
+      "preview": "10 Protection des données | Analyse détaillée par axe | MAE | Protection des données | Bannière de consentement, politique de confidentialité visée.",
+      "screenshot": "C:\\Users\\DELL\\OneDrive - Ministere de l'Enseignement Superieur et de la Recherche Scientifique\\Desktop\\New folder (8)\\SnapFlow\\.codex-work\\audit-mae-2026-06-07-analysis\\page_018.png"
+    },
+    {
+      "page": 19,
+      "type": "content",
+      "words": 24,
+      "chars": 138,
+      "bottom_blank": 723.6,
+      "weak_reasons": [
+        "low_word_count",
+        "large_bottom_whitespace"
+      ],
+      "preview": "10 Protection des données | Analyse détaillée par axe | MAE | Pages avec droits faibles | 1",
+      "screenshot": "C:\\Users\\DELL\\OneDrive - Ministere de l'Enseignement Superieur et de la Recherche Scientifique\\Desktop\\New folder (8)\\SnapFlow\\.codex-work\\audit-mae-2026-06-07-analysis\\page_019.png"
+    },
+    {
+      "page": 20,
+      "type": "recommendations",
+      "words": 149,
+      "chars": 1012,
+      "bottom_blank": 449.3,
+      "weak_reasons": [
+        "large_bottom_whitespace"
+      ],
+      "preview": "Plan d'action | Priorités majeures | MAE | Actions à traiter en premier | Droits des personnes",
+      "screenshot": "C:\\Users\\DELL\\OneDrive - Ministere de l'Enseignement Superieur et de la Recherche Scientifique\\Desktop\\New folder (8)\\SnapFlow\\.codex-work\\audit-mae-2026-06-07-analysis\\page_020.png"
+    },
+    {
+      "page": 21,
+      "type": "recommendations",
+      "words": 342,
+      "chars": 2354,
+      "bottom_blank": 11.4,
+      "weak_reasons": [],
+      "preview": "Plan d'action | Tableau priorisé | MAE | Tableau synthétique des actions | Priorité",
+      "screenshot": "C:\\Users\\DELL\\OneDrive - Ministere de l'Enseignement Superieur et de la Recherche Scientifique\\Desktop\\New folder (8)\\SnapFlow\\.codex-work\\audit-mae-2026-06-07-analysis\\page_021.png"
+    },
+    {
+      "page": 22,
+      "type": "recommendations",
+      "words": 40,
+      "chars": 262,
+      "bottom_blank": 677.7,
+      "weak_reasons": [
+        "low_word_count",
+        "large_bottom_whitespace"
+      ],
+      "preview": "Plan d'action | Tableau priorisé | MAE | Rationaliser les pages ciblant les mêmes | mots-clés",
+      "screenshot": "C:\\Users\\DELL\\OneDrive - Ministere de l'Enseignement Superieur et de la Recherche Scientifique\\Desktop\\New folder (8)\\SnapFlow\\.codex-work\\audit-mae-2026-06-07-analysis\\page_022.png"
+    },
+    {
+      "page": 23,
+      "type": "recommendations",
+      "words": 89,
+      "chars": 607,
+      "bottom_blank": 534.9,
+      "weak_reasons": [
+        "low_word_count",
+        "large_bottom_whitespace"
+      ],
+      "preview": "Plan d'action | Tableau priorisé | MAE | Tableau synthétique - suite | Priorité",
+      "screenshot": "C:\\Users\\DELL\\OneDrive - Ministere de l'Enseignement Superieur et de la Recherche Scientifique\\Desktop\\New folder (8)\\SnapFlow\\.codex-work\\audit-mae-2026-06-07-analysis\\page_023.png"
+    },
+    {
+      "page": 24,
+      "type": "roadmap",
+      "words": 174,
+      "chars": 1153,
+      "bottom_blank": 313.1,
+      "weak_reasons": [
+        "large_bottom_whitespace"
+      ],
+      "preview": "Priorités d'action | Planification par horizon | MAE | Exécution par horizon | Immédiat",
+      "screenshot": "C:\\Users\\DELL\\OneDrive - Ministere de l'Enseignement Superieur et de la Recherche Scientifique\\Desktop\\New folder (8)\\SnapFlow\\.codex-work\\audit-mae-2026-06-07-analysis\\page_024.png"
+    },
+    {
+      "page": 25,
+      "type": "conclusion",
+      "words": 92,
+      "chars": 627,
+      "bottom_blank": 393.8,
+      "weak_reasons": [],
+      "preview": "Conclusion | Synthèse finale | MAE | Message final | Cet audit confirme un niveau global mesure de 65/100 avec un potentiel de progression rapide sur les priorités",
+      "screenshot": "C:\\Users\\DELL\\OneDrive - Ministere de l'Enseignement Superieur et de la Recherche Scientifique\\Desktop\\New folder (8)\\SnapFlow\\.codex-work\\audit-mae-2026-06-07-analysis\\page_025.png"
+    },
+    {
+      "page": 26,
+      "type": "annexe",
+      "words": 89,
+      "chars": 605,
+      "bottom_blank": 461.0,
+      "weak_reasons": [
+        "low_word_count",
+        "large_bottom_whitespace"
+      ],
+      "preview": "Annexes - preuves des contrôles | MAE | MAE | Preuves utiles et localisation | Technique",
+      "screenshot": "C:\\Users\\DELL\\OneDrive - Ministere de l'Enseignement Superieur et de la Recherche Scientifique\\Desktop\\New folder (8)\\SnapFlow\\.codex-work\\audit-mae-2026-06-07-analysis\\page_026.png"
+    },
+    {
+      "page": 27,
+      "type": "annexe",
+      "words": 157,
+      "chars": 1213,
+      "bottom_blank": 232.5,
+      "weak_reasons": [],
+      "preview": "Annexes - preuves des contrôles | MAE | MAE | Sécurité | Exposition de chemins via robots.txt",
+      "screenshot": "C:\\Users\\DELL\\OneDrive - Ministere de l'Enseignement Superieur et de la Recherche Scientifique\\Desktop\\New folder (8)\\SnapFlow\\.codex-work\\audit-mae-2026-06-07-analysis\\page_027.png"
+    },
+    {
+      "page": 28,
+      "type": "annexe",
+      "words": 186,
+      "chars": 1304,
+      "bottom_blank": 228.9,
+      "weak_reasons": [],
+      "preview": "Annexes - preuves des contrôles | MAE | MAE | Performance | Temps de chargement desktop",
+      "screenshot": "C:\\Users\\DELL\\OneDrive - Ministere de l'Enseignement Superieur et de la Recherche Scientifique\\Desktop\\New folder (8)\\SnapFlow\\.codex-work\\audit-mae-2026-06-07-analysis\\page_028.png"
+    },
+    {
+      "page": 29,
+      "type": "annexe",
+      "words": 137,
+      "chars": 1100,
+      "bottom_blank": 272.2,
+      "weak_reasons": [
+        "large_bottom_whitespace"
+      ],
+      "preview": "Annexes - preuves des contrôles | MAE | MAE | Performance | Optimisation des Images",
+      "screenshot": "C:\\Users\\DELL\\OneDrive - Ministere de l'Enseignement Superieur et de la Recherche Scientifique\\Desktop\\New folder (8)\\SnapFlow\\.codex-work\\audit-mae-2026-06-07-analysis\\page_029.png"
+    },
+    {
+      "page": 30,
+      "type": "annexe",
+      "words": 91,
+      "chars": 682,
+      "bottom_blank": 490.7,
+      "weak_reasons": [
+        "large_bottom_whitespace"
+      ],
+      "preview": "Annexes - preuves des contrôles | MAE | MAE | Performance | Erreurs Console JavaScript",
+      "screenshot": "C:\\Users\\DELL\\OneDrive - Ministere de l'Enseignement Superieur et de la Recherche Scientifique\\Desktop\\New folder (8)\\SnapFlow\\.codex-work\\audit-mae-2026-06-07-analysis\\page_030.png"
+    },
+    {
+      "page": 31,
+      "type": "annexe",
+      "words": 148,
+      "chars": 1202,
+      "bottom_blank": 272.2,
+      "weak_reasons": [
+        "large_bottom_whitespace"
+      ],
+      "preview": "Annexes - preuves des contrôles | MAE | MAE | SEO | Descriptions de pages pour le referencement",
+      "screenshot": "C:\\Users\\DELL\\OneDrive - Ministere de l'Enseignement Superieur et de la Recherche Scientifique\\Desktop\\New folder (8)\\SnapFlow\\.codex-work\\audit-mae-2026-06-07-analysis\\page_031.png"
+    },
+    {
+      "page": 32,
+      "type": "annexe",
+      "words": 143,
+      "chars": 1091,
+      "bottom_blank": 261.3,
+      "weak_reasons": [
+        "large_bottom_whitespace"
+      ],
+      "preview": "Annexes - preuves des contrôles | MAE | MAE | SEO | Linking Interne",
+      "screenshot": "C:\\Users\\DELL\\OneDrive - Ministere de l'Enseignement Superieur et de la Recherche Scientifique\\Desktop\\New folder (8)\\SnapFlow\\.codex-work\\audit-mae-2026-06-07-analysis\\page_032.png"
+    },
+    {
+      "page": 33,
+      "type": "annexe",
+      "words": 152,
+      "chars": 1135,
+      "bottom_blank": 232.5,
+      "weak_reasons": [],
+      "preview": "Annexes - preuves des contrôles | MAE | MAE | SEO | Descriptions de pages pour le referencement",
+      "screenshot": "C:\\Users\\DELL\\OneDrive - Ministere de l'Enseignement Superieur et de la Recherche Scientifique\\Desktop\\New folder (8)\\SnapFlow\\.codex-work\\audit-mae-2026-06-07-analysis\\page_033.png"
+    },
+    {
+      "page": 34,
+      "type": "annexe",
+      "words": 146,
+      "chars": 1111,
+      "bottom_blank": 261.3,
+      "weak_reasons": [
+        "large_bottom_whitespace"
+      ],
+      "preview": "Annexes - preuves des contrôles | MAE | MAE | Contenu | Contenu Fin et Qualité",
+      "screenshot": "C:\\Users\\DELL\\OneDrive - Ministere de l'Enseignement Superieur et de la Recherche Scientifique\\Desktop\\New folder (8)\\SnapFlow\\.codex-work\\audit-mae-2026-06-07-analysis\\page_034.png"
+    },
+    {
+      "page": 35,
+      "type": "annexe",
+      "words": 143,
+      "chars": 1115,
+      "bottom_blank": 272.2,
+      "weak_reasons": [
+        "large_bottom_whitespace"
+      ],
+      "preview": "Annexes - preuves des contrôles | MAE | MAE | Contenu | CTA Transactionnels Manquants",
+      "screenshot": "C:\\Users\\DELL\\OneDrive - Ministere de l'Enseignement Superieur et de la Recherche Scientifique\\Desktop\\New folder (8)\\SnapFlow\\.codex-work\\audit-mae-2026-06-07-analysis\\page_035.png"
+    },
+    {
+      "page": 36,
+      "type": "annexe",
+      "words": 152,
+      "chars": 1085,
+      "bottom_blank": 267.1,
+      "weak_reasons": [
+        "large_bottom_whitespace"
+      ],
+      "preview": "Annexes - preuves des contrôles | MAE | MAE | Experience utilisateur | Partage Social",
+      "screenshot": "C:\\Users\\DELL\\OneDrive - Ministere de l'Enseignement Superieur et de la Recherche Scientifique\\Desktop\\New folder (8)\\SnapFlow\\.codex-work\\audit-mae-2026-06-07-analysis\\page_036.png"
+    },
+    {
+      "page": 37,
+      "type": "annexe",
+      "words": 97,
+      "chars": 681,
+      "bottom_blank": 479.9,
+      "weak_reasons": [
+        "large_bottom_whitespace"
+      ],
+      "preview": "Annexes - preuves des contrôles | MAE | MAE | Impact ecologique | Impact ecologique",
+      "screenshot": "C:\\Users\\DELL\\OneDrive - Ministere de l'Enseignement Superieur et de la Recherche Scientifique\\Desktop\\New folder (8)\\SnapFlow\\.codex-work\\audit-mae-2026-06-07-analysis\\page_037.png"
+    },
+    {
+      "page": 38,
+      "type": "annexe",
+      "words": 173,
+      "chars": 1337,
+      "bottom_blank": 228.9,
+      "weak_reasons": [],
+      "preview": "Annexes - preuves des contrôles | MAE | MAE | Protection des données | Droits des personnes",
+      "screenshot": "C:\\Users\\DELL\\OneDrive - Ministere de l'Enseignement Superieur et de la Recherche Scientifique\\Desktop\\New folder (8)\\SnapFlow\\.codex-work\\audit-mae-2026-06-07-analysis\\page_038.png"
+    },
+    {
+      "page": 39,
+      "type": "annexe",
+      "words": 97,
+      "chars": 708,
+      "bottom_blank": 479.9,
+      "weak_reasons": [
+        "large_bottom_whitespace"
+      ],
+      "preview": "Annexes - preuves des contrôles | MAE | MAE | Protection des données | Traceurs avant consentement",
+      "screenshot": "C:\\Users\\DELL\\OneDrive - Ministere de l'Enseignement Superieur et de la Recherche Scientifique\\Desktop\\New folder (8)\\SnapFlow\\.codex-work\\audit-mae-2026-06-07-analysis\\page_039.png"
+    },
+    {
+      "page": 40,
+      "type": "back_cover",
+      "words": 11,
+      "chars": 75,
+      "bottom_blank": 514.4,
+      "weak_reasons": [],
+      "preview": "Merci | Rapport d'audit de maintenance préventive | MAE | Medianet x Snapflow App",
+      "screenshot": "C:\\Users\\DELL\\OneDrive - Ministere de l'Enseignement Superieur et de la Recherche Scientifique\\Desktop\\New folder (8)\\SnapFlow\\.codex-work\\audit-mae-2026-06-07-analysis\\page_040.png"
+    }
+  ]
+}

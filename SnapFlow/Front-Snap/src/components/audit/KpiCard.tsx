@@ -26,12 +26,13 @@ export function KpiCard({ kpi }: KpiCardProps) {
     (kpi.exampleUrls?.length ?? 0) > 0;
   const proofLines = (kpi.evidenceSummary ?? kpi.evidence ?? kpi.annexes ?? []).slice(0, 3);
 
+  if (isNonTested) return null;
+
   const getBadge = () => {
     // Use the new KPI labels when available
     if (kpi.kpiLabels) {
       const { statut, typeLabel } = kpi.kpiLabels;
       const isConcluant = statut === 'Concluant';
-      const isNonTeste = statut === 'Non testé';
 
       if (isConcluant) {
         return (
@@ -57,23 +58,6 @@ export function KpiCard({ kpi }: KpiCardProps) {
           </span>
         );
       }
-      if (isNonTeste || typeLabel === 'Indéterminé') {
-        return (
-          <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border text-yellow-400 bg-yellow-500/10 border-yellow-500/20">
-            <AlertCircle className="w-3 h-3" />
-            <span>Non testé</span>
-          </span>
-        );
-      }
-    }
-
-    if (isNonTested) {
-      return (
-        <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border text-yellow-400 bg-yellow-500/10 border-yellow-500/20">
-          <AlertCircle className="w-3 h-3" />
-          <span>Non testé</span>
-        </span>
-      );
     }
 
     // Fallback to legacy logic
@@ -120,7 +104,7 @@ export function KpiCard({ kpi }: KpiCardProps) {
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
           <span>
             <span className="font-medium">Statut :</span>{' '}
-            <span className={kpi.kpiLabels.statut === 'Concluant' ? 'text-emerald-400' : kpi.kpiLabels.statut === 'Non testé' ? 'text-yellow-400' : 'text-red-400'}>
+            <span className={kpi.kpiLabels.statut === 'Concluant' ? 'text-emerald-400' : 'text-red-400'}>
               {kpi.kpiLabels.statut}
             </span>
           </span>

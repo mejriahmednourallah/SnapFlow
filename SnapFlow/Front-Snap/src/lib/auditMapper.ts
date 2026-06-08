@@ -1,4 +1,4 @@
-import { getAxisScoreBreakdown, getRiskLevelFromScore, isNonTestedStatus } from '@/data/mockAuditData';
+import { getAxisScoreBreakdown, getRiskLevelFromScore, isClientVisibleFinding, isNonTestedStatus } from '@/data/mockAuditData';
 import type {
   AuditActionItem,
   AuditCoverageItem,
@@ -51,8 +51,6 @@ export interface ApiResponse {
 /* Canonical triplet helpers */
 const OK_DEFAULT:  KpiLabels = { statut: 'Concluant',    typeLabel: 'Conforme',        priorite: 'Normale'  };
 const NT_DEFAULT:  KpiLabels = { statut: 'Non testé',    typeLabel: 'Indéterminé',     priorite: 'Normale'   };
-const REVIEW_DEFAULT: KpiLabels = { statut: 'Non concluant', typeLabel: 'Recommandation', priorite: 'Normale'   };
-
 const KO_BUG_MAJ:  KpiLabels = { statut: 'Non concluant', typeLabel: 'Bug',             priorite: 'Majeure'   };
 const KO_BUG_MIN:  KpiLabels = { statut: 'Non concluant', typeLabel: 'Bug',             priorite: 'Mineure'   };
 const KO_RECO_MAJ: KpiLabels = { statut: 'Non concluant', typeLabel: 'Recommandation',  priorite: 'Majeure'   };
@@ -78,52 +76,9 @@ function koBugSeverity(severity: string | null | undefined): KpiLabels {
   return KO_RECO_MIN;
 }
 
-function hasPositiveTechnicalEvidence(value: unknown, depth = 0): boolean {
-  if (depth > 4 || value == null) return false;
-  if (typeof value === 'string') {
-    const normalized = normalizeForComparison(value);
-    if (!normalized || normalized === 'false' || normalized === '0') return false;
-    if (
-      normalized.includes('non detecte') ||
-      normalized.includes('non disponible') ||
-      normalized.includes('aucun') ||
-      normalized.includes('missing')
-    ) {
-      return false;
-    }
-    return true;
-  }
-  if (typeof value === 'number') return Number.isFinite(value) && value > 0;
-  if (typeof value === 'boolean') return value === true;
-  if (Array.isArray(value)) return value.some((item) => hasPositiveTechnicalEvidence(item, depth + 1));
-  if (typeof value === 'object') {
-    const record = value as Record<string, unknown>;
-    const positiveKeys = [
-      'detected_product',
-      'detected_version',
-      'cms_name',
-      'cms_version',
-      'cms_detected',
-      'server',
-      'server_technology',
-      'language',
-      'runtime',
-      'module',
-      'modules',
-      'module_verification',
-      'module_count',
-      'technologies',
-      'technology',
-      'rows',
-      'csv_rows',
-    ];
-    return positiveKeys.some((key) => hasPositiveTechnicalEvidence(record[key], depth + 1));
-  }
-  return false;
-}
-
 function technicalUncertainLabel(data: any): KpiLabels {
-  return hasPositiveTechnicalEvidence(data) ? REVIEW_DEFAULT : NT_DEFAULT;
+  void data;
+  return NT_DEFAULT;
 }
 
 /**
@@ -370,6 +325,27 @@ const KPI_LABEL_RULES: Record<string, (status: string, severity: string | null |
     if (rawStatus === 'not_available') return NT_DEFAULT;
     return KO_RECO_MIN;
   },
+  ai_llms_txt(rawStatus) {
+    return KPI_LABEL_RULES.seo_ai_readiness(rawStatus, null, null);
+  },
+  ai_robots_access(rawStatus) {
+    return KPI_LABEL_RULES.seo_ai_readiness(rawStatus, null, null);
+  },
+  ai_https_ready(rawStatus) {
+    return KPI_LABEL_RULES.seo_ai_readiness(rawStatus, null, null);
+  },
+  ai_schema_org(rawStatus) {
+    return KPI_LABEL_RULES.seo_ai_readiness(rawStatus, null, null);
+  },
+  ai_faq_schema(rawStatus) {
+    return KPI_LABEL_RULES.seo_ai_readiness(rawStatus, null, null);
+  },
+  ai_raw_content_visible(rawStatus) {
+    return KPI_LABEL_RULES.seo_ai_readiness(rawStatus, null, null);
+  },
+  ai_heading_questions(rawStatus) {
+    return KPI_LABEL_RULES.seo_ai_readiness(rawStatus, null, null);
+  },
 
   // ── UX/UI ─────────────────────────────────────────────────────────────
   ux_audience_targeting(rawStatus) {
@@ -519,10 +495,8 @@ function resolveKpiLabels(
   const status = String(rawStatus ?? '').toLowerCase();
   const normalizedKpiId = kpiId.replace(/[^a-z0-9_]/g, '').toLowerCase();
 
-  // For non-tested statuses, let the per-KPI rule decide first.
-  // Rules call technicalUncertainLabel(data) which returns "Non concluant" when
-  // positive evidence is present, and "Non testé" only when nothing was detected.
-  // KPIs without a rule fall back to NT_DEFAULT unconditionally.
+  // Keep one public label for all inconclusive executions. Collected fingerprints
+  // remain visible in evidence without turning an unmeasured KPI into a failure.
   if (isNonTestedStatus(status)) {
     const ruleForNT = KPI_LABEL_RULES[normalizedKpiId];
     if (ruleForNT) {
@@ -540,7 +514,7 @@ function resolveKpiLabels(
   // For failing/warning, look up per-KPI rule
   const rule = KPI_LABEL_RULES[normalizedKpiId];
   if (rule) {
-    const result = rule(normalizedKpiId, severity, data);
+    const result = rule(status, severity, data);
     if (result) return result;
   }
 
@@ -619,6 +593,16 @@ const AXIS_ALIAS_TABLE: Record<string, AxisBucketKey> = {
   SEO: 'SEO',
   SEARCH_ENGINE_OPTIMIZATION: 'SEO',
   REFERENCEMENT: 'SEO',
+
+  // AI Friendly / GEO aliases
+  AI_FRIENDLY: 'AI_FRIENDLY',
+  AI: 'AI_FRIENDLY',
+  GEO: 'AI_FRIENDLY',
+  GENERATIVE_ENGINE_OPTIMIZATION: 'AI_FRIENDLY',
+  OPTIMISATION_IA: 'AI_FRIENDLY',
+  AI_READINESS: 'AI_FRIENDLY',
+  LLM: 'AI_FRIENDLY',
+  LLMS: 'AI_FRIENDLY',
   
   // CONTENT aliases (most important for this fix!)
   CONTENT: 'CONTENT',
@@ -704,6 +688,11 @@ const AXIS_META: Record<string, { id: string; name: string; description: string 
     id: 'seo',
     name: 'SEO',
     description: 'Descriptions de pages, liens internes, plan du site et contenu duplique.',
+  },
+  AI_FRIENDLY: {
+    id: 'ai-friendly',
+    name: 'AI Friendly',
+    description: 'Compatibilite avec les moteurs generatifs: llms.txt, robots IA, schema.org et contenu extractible.',
   },
   CONTENT: {
     id: 'content',
@@ -878,6 +867,7 @@ function isGenericRecommendation(text: string | undefined): boolean {
     'prioriser la correction en s appuyant sur les preuves techniques',
     'corriger selon les details techniques remontes par ce indicateur',
     'corriger selon les details techniques remontes par cet indicateur',
+    'corriger :',
     'veuillez corriger ou ajuster ce point selon les regles metier',
     'resoudre les problemes detectes listes en annexe',
     'donnees insuffisantes pour conclure relancer le scan avec un contexte plus complet',
@@ -886,10 +876,11 @@ function isGenericRecommendation(text: string | undefined): boolean {
 
 function findingFamily(finding: AuditFinding): string {
   const source = `${finding.id} ${finding.sourceKpi ?? ''} ${finding.title}`.toLowerCase();
+  if (/^ai_|ai-friendly|ai friendly|geo|llms|llms\.txt|seo_ai_readiness/.test(source)) return 'ai';
   if (/tech|cms|server|serveur|language|langage|module|version|cve/.test(source)) return 'technique';
   if (/sec_|security|ssl|header|cookie|admin|sensitive|brute|upload|vulnerab|robots_disclosure/.test(source)) return 'security';
   if (/perf|lcp|fcp|cls|speed|cache|compression|image|console/.test(source)) return 'performance';
-  if (/seo|meta|sitemap|robots|heading|alt|linking|duplicate|ai_readiness/.test(source)) return 'seo';
+  if (/seo|meta|sitemap|robots|heading|alt|linking|duplicate/.test(source)) return 'seo';
   if (/rgpd|privacy|legal|consent|rights|tracker|cookie_policy/.test(source)) return 'rgpd';
   if (/content|thin|freshness|cta|lexical|cannibal|structure/.test(source)) return 'content';
   if (/ux|design|navigation|mobile|social|ergonom/.test(source)) return 'ux';
@@ -972,6 +963,13 @@ function cleanFindingTitle(finding: AuditFinding): string {
   if (/perf_desktop_speed|desktop|core vitals/.test(source)) return 'Temps de chargement desktop';
   if (/sec_ssl|certificat/.test(source)) return 'Certificat de sécurité';
   if (/sec_js_deps/.test(source)) return 'Fichiers JavaScript vulnérables';
+  if (/ai_llms_txt|seo_ai_readiness|llms/.test(source)) return 'AI Readiness (llms.txt)';
+  if (/ai_robots_access/.test(source)) return 'Accès des robots IA';
+  if (/ai_https_ready/.test(source)) return 'HTTPS pour moteurs IA';
+  if (/ai_schema_org/.test(source)) return 'Schema.org pour moteurs IA';
+  if (/ai_faq_schema/.test(source)) return 'FAQ lisible par les IA';
+  if (/ai_raw_content_visible/.test(source)) return 'Contenu HTML visible sans JavaScript';
+  if (/ai_heading_questions/.test(source)) return 'Titres et questions structurés';
   if (/seo_meta|meta/.test(source)) return 'Descriptions de pages pour le referencement';
   if (/seo_sitemap|sitemap/.test(source)) return 'Plan du site';
   if (/seo_robots|robots/.test(source)) return 'Instructions pour les moteurs de recherche';
@@ -994,6 +992,8 @@ function fallbackImpactByFamily(finding: AuditFinding): string {
       return 'Un chargement lent peut faire partir des visiteurs avant que le contenu principal soit visible.';
     case 'seo':
       return 'Le site peut etre moins bien compris par les moteurs de recherche et donc moins visible.';
+    case 'ai':
+      return 'Le contenu peut etre moins facilement compris, extrait ou cite par les moteurs generatifs.';
     case 'rgpd':
       return 'Les visiteurs peuvent manquer d informations claires sur l utilisation de leurs donnees.';
     case 'content':
@@ -1019,6 +1019,8 @@ function fallbackRiskByFamily(finding: AuditFinding): string {
       return 'Le risque est de perdre des visiteurs avant que la page soit totalement utilisable.';
     case 'seo':
       return 'Le risque est de rendre certaines pages moins visibles dans les resultats de recherche.';
+    case 'ai':
+      return 'Le risque est de limiter la presence du site dans les reponses generees par les assistants et moteurs IA.';
     case 'rgpd':
       return 'Le risque est de manquer de clarte sur l usage des donnees personnelles.';
     case 'content':
@@ -1053,6 +1055,8 @@ function fallbackRecommendationByFamily(finding: AuditFinding): string {
       return 'Alleger les ressources, reduire les fichiers bloquants et ameliorer l affichage initial.';
     case 'seo':
       return 'Clarifier les balises, les titres et la structure afin d aider le referencement.';
+    case 'ai':
+      return 'Rendre les contenus publics plus faciles a explorer et a comprendre par les moteurs generatifs.';
     case 'rgpd':
       return 'Rendre les informations de protection des donnees plus visibles et plus completes.';
     case 'content':
@@ -1114,6 +1118,36 @@ function fallbackIssueByFamily(finding: AuditFinding): string {
       return 'Une protection de securite attendue est absente ou incomplete.';
     case 'seo':
       return 'Un element de referencement manque ou n est pas assez clair pour les moteurs de recherche.';
+    case 'ai': {
+      const source = normalizeForComparison(`${finding.id} ${finding.sourceKpi ?? ''} ${finding.title}`);
+      const url = extractEvidenceValueByLabels(finding, ['URL testee', 'pages testee', 'page testee']);
+      const detected = extractEvidenceValueByLabels(finding, ['Presence detectee', 'Fichier llms.txt']);
+      const pagesDetected = extractEvidenceValueByLabels(finding, ['Pages detectees', 'Pages avec contenu brut visible']);
+      if (source.includes('ai_llms_txt') || source.includes('llms')) {
+        return detected && normalizeForComparison(detected).includes('present')
+          ? `Le fichier llms.txt est present et donne un point d entree aux moteurs generatifs${url ? ` (${url})` : ''}.`
+          : `Le fichier llms.txt n est pas exploitable${url ? ` a l adresse ${url}` : ''}. Le site ne fournit pas encore de guide dedie aux moteurs generatifs.`;
+      }
+      if (source.includes('ai_robots_access')) {
+        return 'La politique robots.txt a ete analysee pour les principaux agents IA. Aucun blocage explicite confirme signifie que l exploration generative reste possible.';
+      }
+      if (source.includes('ai_https_ready')) {
+        return 'La disponibilite HTTPS a ete verifiee pour confirmer que les crawlers IA peuvent acceder au site sans erreur TLS.';
+      }
+      if (source.includes('ai_schema_org')) {
+        return `Les donnees structurees Schema.org facilitent la comprehension du site par les moteurs IA${pagesDetected ? `; pages detectees : ${pagesDetected}.` : '.'}`;
+      }
+      if (source.includes('ai_faq_schema')) {
+        return `Les pages FAQ ou FAQPage donnent aux moteurs IA des reponses directement reutilisables${pagesDetected ? `; pages detectees : ${pagesDetected}.` : '.'}`;
+      }
+      if (source.includes('ai_raw_content_visible')) {
+        return `Le contenu principal visible dans le HTML initial facilite l extraction sans rendu JavaScript${pagesDetected ? `; ${pagesDetected} page(s) detectee(s).` : '.'}`;
+      }
+      if (source.includes('ai_heading_questions')) {
+        return `Les titres sous forme de questions structurent les reponses que les moteurs generatifs peuvent extraire${pagesDetected ? `; pages detectees : ${pagesDetected}.` : '.'}`;
+      }
+      return 'Un signal AI Friendly a ete mesure pour evaluer la facilite d exploration et de comprehension par les moteurs generatifs.';
+    }
     case 'rgpd':
       return 'Une information attendue sur la protection des donnees est absente ou incomplete.';
     case 'content':
@@ -1198,6 +1232,29 @@ function cleanEvidenceLines(lines: string[] | undefined, finding: AuditFinding):
           const value = String(line).split(':').slice(1).join(':').trim();
           return `Modules avec version detectee : ${value || '0'}`;
         }
+        return line;
+      })));
+    }
+    if (findingFamily(finding) === 'ai') {
+      return Array.from(new Set(base.map((line) => {
+        const splitIdx = line.indexOf(':');
+        if (splitIdx <= 0) return line;
+        const label = normalizeForComparison(line.slice(0, splitIdx));
+        const value = line.slice(splitIdx + 1).trim();
+        if (label === 'pages checked') return `Pages vérifiées: ${value}`;
+        if (label === 'affected pages') return `Pages concernées: ${value}`;
+        if (label === 'execution status') return `Statut d'exécution: ${value}`;
+        if (label === 'valid') return `HTTPS valide: ${value}`;
+        if (label === 'expiry') return `Expiration du certificat: ${value}`;
+        if (label === 'issuer') return `Émetteur du certificat: ${value}`;
+        if (label === 'parse status') return `Résultat de récupération: ${value}`;
+        if (label === 'json ld valid pages' || label === 'json ld valide') return `Pages avec JSON-LD valide: ${value}`;
+        if (label === 'json ld coverage pct' || label === 'couverture json ld') return `Couverture JSON-LD: ${value}`;
+        if (label === 'json ld parse errors') return `Erreurs de parsing JSON-LD: ${value}`;
+        if (label === 'json ld types' || label === 'schema types' || label === 'types detectes') return `Types detectes: ${value}`;
+        if (label === 'raw content coverage pct') return `Couverture contenu HTML brut: ${value}`;
+        if (label === 'question heading coverage pct') return `Couverture titres questions: ${value}`;
+        if (label === 'robots ai status') return `Politique robots IA: ${value}`;
         return line;
       })));
     }
@@ -1343,73 +1400,18 @@ function mobilePerformanceMeasurementFailed(finding: AuditFinding): boolean {
   ].some((needle) => combined.includes(needle));
 }
 
-function findingHasUncertainEvidence(finding: AuditFinding, evidenceLines: string[]): boolean {
-  const combined = normalizeForComparison([
-    finding.description,
-    finding.recommendation,
-    finding.risk,
-    finding.impact,
-    finding.evidenceMissingReason,
-    ...evidenceLines,
-  ].filter(Boolean).join(' '));
-
-  if (!combined) return false;
-  if (isModuleVersionFinding(finding)) {
-    const hasSafeModuleProof =
-      /modules verifies conformes\s+[1-9]/.test(combined) &&
-      /modules a verifier\s+0/.test(combined) &&
-      /modules a risque confirme\s+0/.test(combined);
-    if (!hasSafeModuleProof) return true;
-  }
-  return [
-    'a verifier',
-    'doivent etre verifie',
-    'reste a verifier',
-    'donnees insuffisantes',
-    'non detecte',
-    'non detectee',
-    'version non detectee',
-    'impossible sans',
-    'impossible de conclure',
-    'ne peut donc pas etre conclu',
-    'ne peut donc pas conclure',
-    'controle non teste',
-    'verification automatique partielle',
-  ].some((needle) => combined.includes(needle));
-}
-
-function findingHasPositiveTechnicalEvidence(finding: AuditFinding, evidenceLines: string[]): boolean {
-  if (findingFamily(finding) !== 'technique') return false;
-  if (hasPositiveTechnicalEvidence(finding.evidenceRows) || hasPositiveTechnicalEvidence(finding.evidenceCsvRows) || hasPositiveTechnicalEvidence(finding.evidenceRaw)) {
-    return true;
-  }
-  return evidenceLines.some((line) => {
-    const normalized = normalizeForComparison(line);
-    if (!normalized || normalized.includes('non detecte') || normalized.includes('non disponible')) return false;
-    return normalized.includes('detecte') ||
-      normalized.includes('version exploitable') ||
-      normalized.includes('module') ||
-      normalized.includes('serveur') ||
-      normalized.includes('runtime');
-  });
-}
-
 function polishAuditFinding(finding: AuditFinding): AuditFinding {
   const evidenceSummary = cleanEvidenceLines(finding.evidenceSummary ?? finding.evidence ?? finding.annexes, finding);
   const evidence = cleanEvidenceLines(finding.evidence ?? finding.annexes, finding);
   const annexes = cleanEvidenceLines(finding.annexes, finding);
   const title = cleanFindingTitle(finding);
-  const shouldDowngradePass =
-    (finding.status === 'pass' || finding.type === 'pass' || finding.origin === 'passing_kpi') &&
-    findingHasUncertainEvidence(finding, [...evidenceSummary, ...evidence, ...annexes]);
+  // The backend contract owns pass/fail resolution. Partial evidence lowers
+  // confidence and coverage, but must not turn a valid pass into "NON TESTE".
+  const shouldDowngradePass = false;
   const effectiveStatus: FindingStatus = shouldDowngradePass ? 'not_evaluated' : (finding.status ?? (finding.type === 'pass' ? 'pass' : finding.type === 'bug' ? 'fail' : 'not_measured'));
   const isPass = effectiveStatus === 'pass';
   const isNonTested = isNonTestedStatus(effectiveStatus);
   const scoreLine = scoreLineForFinding({ ...finding, title, evidenceSummary, evidence, annexes });
-  const hasPositiveTechEvidence = findingHasPositiveTechnicalEvidence(
-    { ...finding, title },
-    [...evidenceSummary, ...evidence, ...annexes],
-  );
   const displayEvidenceSummary = scoreLine && !evidenceSummary.some((line) => normalizeForComparison(line).includes(normalizeForComparison(scoreLine)))
     ? [scoreLine, ...evidenceSummary]
     : evidenceSummary;
@@ -1422,6 +1424,9 @@ function polishAuditFinding(finding: AuditFinding): AuditFinding {
       : fallbackIssueByFamily({ ...finding, evidenceSummary: displayEvidenceSummary, evidence, annexes, title });
   }
   const normalizedDescription = normalizeForComparison(description);
+  if (findingFamily({ ...finding, title }) === 'ai' && normalizedDescription.includes('point d amelioration')) {
+    description = fallbackIssueByFamily({ ...finding, evidenceSummary: displayEvidenceSummary, evidence, annexes, title });
+  }
   if (
     isServerVersionFinding({ ...finding, title }) &&
     (
@@ -1467,9 +1472,9 @@ function polishAuditFinding(finding: AuditFinding): AuditFinding {
   let recommendation = toPlainDisplayText(finding.recommendation);
   if (isPass) {
     recommendation = 'Controle conforme.';
-  } else if (isGenericRecommendation(recommendation)) {
+  } else if (isGenericRecommendation(recommendation) || (findingFamily({ ...finding, title }) === 'ai' && /^corriger\s*:/i.test(recommendation))) {
     recommendation = isNonTested
-      ? 'Relancer le scan avec un contexte plus complet pour obtenir une mesure exploitable.'
+      ? 'Traiter la cause technique indiquée dans les preuves, puis relancer uniquement ce contrôle.'
       : fallbackRecommendationByFamily({ ...finding, evidenceSummary: displayEvidenceSummary, evidence, annexes, title });
   }
 
@@ -1502,9 +1507,7 @@ function polishAuditFinding(finding: AuditFinding): AuditFinding {
     evidenceSummary: displayEvidenceSummary,
     evidence,
     annexes,
-    kpiLabels: shouldDowngradePass
-      ? (hasPositiveTechEvidence ? REVIEW_DEFAULT : NT_DEFAULT)
-      : (isNonTested && finding.kpiLabels?.statut === 'Non testé' && hasPositiveTechEvidence ? REVIEW_DEFAULT : finding.kpiLabels),
+    kpiLabels: shouldDowngradePass ? NT_DEFAULT : finding.kpiLabels,
   };
 }
 
@@ -2072,6 +2075,7 @@ function normalizeScannerOrigin(axisKey: AxisBucketKey, status: FindingStatus, k
 
 function buildFindingFromScannerKpi(axisKey: AxisBucketKey, kpiName: string, kpiNode: any): AuditFinding {
   let status = normalizeFindingStatus(kpiNode?.status);
+  const rawKpiId = typeof kpiNode?.kpi_id === 'string' ? kpiNode.kpi_id.trim() : '';
   const curatedDigest = hasCuratedDigest(kpiNode);
   const digestQuality = String(kpiNode?.evidence_digest?.quality ?? '').toUpperCase();
   const digestRows = extractDigestRows(kpiNode);
@@ -2087,8 +2091,20 @@ function buildFindingFromScannerKpi(axisKey: AxisBucketKey, kpiName: string, kpi
   ) {
     status = 'not_evaluated';
   }
-  if (status === 'pass' && (digestQuality === 'PARTIAL' || digestQuality === 'MISSING')) {
-    status = 'not_evaluated';
+  if (status === 'pass' && rawKpiId === 'tech_modules_versions') {
+    const verification = isRecord(kpiNode?.data?.module_verification)
+      ? kpiNode.data.module_verification
+      : {};
+    const verifiedCount = Number(verification.safe_count ?? 0) + Number(verification.risky_count ?? 0);
+    const verifiedRows = Array.isArray(verification.rows)
+      ? verification.rows.filter((row: any) => {
+        const result = String(row?.verification_result ?? '').toLowerCase();
+        return result === 'verifie_conforme' || result === 'risque_confirme';
+      }).length
+      : 0;
+    if (verifiedCount <= 0 && verifiedRows <= 0) {
+      status = 'not_evaluated';
+    }
   }
   const isNonTested = isNonTestedStatus(status);
   const origin = normalizeScannerOrigin(axisKey, status, kpiNode);
@@ -2116,8 +2132,8 @@ function buildFindingFromScannerKpi(axisKey: AxisBucketKey, kpiName: string, kpi
       ? 'bug'
       : 'recommendation';
 
-  const kpiId = (typeof kpiNode?.kpi_id === 'string' && kpiNode.kpi_id.trim().length > 0
-    ? kpiNode.kpi_id
+  const kpiId = (rawKpiId.length > 0
+    ? rawKpiId
     : `${axisKey.toLowerCase()}-${kpiName.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`
   ).replace(/-+/g, '-');
 
@@ -2202,6 +2218,7 @@ function buildScannerAxesReport(
     FUNCTIONAL: [],
     PERFORMANCE: [],
     SEO: [],
+    AI_FRIENDLY: [],
     CONTENT: [],
     UX_UI: [],
     ECO_INDEX: [],
@@ -2214,14 +2231,19 @@ function buildScannerAxesReport(
     const axisKey = resolveAxisMetaKey(apiAxisName);
     const section = (kpis ?? {}) as RawAxisSection;
     collectScannerKpiNodes(section).forEach(({ kpiName, kpiNode }) => {
-      axisBuckets[axisKey].push(buildFindingFromScannerKpi(axisKey, kpiName, kpiNode));
+      const nodeKpiId = String(kpiNode?.kpi_id ?? kpiNode?.id ?? '').toLowerCase();
+      const aiRouteText = `${kpiName} ${nodeKpiId} ${kpiNode?.name ?? ''}`.toLowerCase();
+      const targetAxisKey = /ai_|ai friendly|ai-friendly|llms|llms\.txt|seo_ai_readiness|generative|geo/.test(aiRouteText)
+        ? 'AI_FRIENDLY'
+        : axisKey;
+      axisBuckets[targetAxisKey].push(buildFindingFromScannerKpi(targetAxisKey, kpiName, kpiNode));
     });
   });
 
   const axes: AuditAxis[] = Object.keys(AXIS_META).map((metaKey) => {
     const key = metaKey as AxisBucketKey;
     const meta = AXIS_META[key];
-    const findings = axisBuckets[key];
+    const findings = axisBuckets[key].filter(isClientVisibleFinding);
     const breakdown = getAxisScoreBreakdown({
       id: meta.id,
       name: meta.name,
@@ -2237,6 +2259,11 @@ function buildScannerAxesReport(
       icon: meta.id,
       score: breakdown.x,
       maxScore: breakdown.y,
+      scoreMeasured: breakdown.scoreMeasured,
+      coveragePct: breakdown.coveragePct,
+      measuredKpis: breakdown.measuredKpis,
+      totalKpis: breakdown.totalKpis,
+      scoreBasis: breakdown.scoreBasis,
       description: meta.description,
       findings,
     };
@@ -2245,7 +2272,7 @@ function buildScannerAxesReport(
   const allFindings = axes.flatMap((axis) => axis.findings);
   const passFindings = allFindings.filter((f) => f.status === 'pass');
   const failFindings = allFindings.filter((f) => f.status === 'fail');
-  const coverageFindings = allFindings.filter((f) => isNonTestedStatus(f.status) || f.origin === 'coverage');
+  const coverageFindings: AuditFinding[] = [];
   const complianceFindings = failFindings.filter((f) => f.origin === 'RGPD');
   const recommendationFindings = failFindings.filter((f) => f.origin !== 'RGPD' && f.type !== 'bug');
   const bugFindings = failFindings.filter((f) => f.type === 'bug');
@@ -2264,16 +2291,13 @@ function buildScannerAxesReport(
     return undefined;
   };
 
-  const total = passFindings.length + failFindings.length + coverageFindings.length;
-  const backendTotal = readBackendInt('total_kpis');
-  const backendPassed = readBackendInt('passed_kpis');
+  const total = passFindings.length + failFindings.length;
   const backendCritical = readBackendInt('critical_kpis');
   const backendHigh = readBackendInt('high_kpis');
   const backendMedium = readBackendInt('medium_kpis');
   const backendLow = readBackendInt('low_kpis');
-  const scoreTotal = backendTotal ?? total;
-  const scorePassed = backendPassed ?? passFindings.length;
-  const globalScore = scoreTotal > 0 ? Math.round((scorePassed / scoreTotal) * 100) : 0;
+  const measuredTotal = passFindings.length + failFindings.length;
+  const globalScore = measuredTotal > 0 ? Math.round((passFindings.length / measuredTotal) * 100) : 0;
   const backendHeadline = typeof backendTopLevel.headline === 'string' && backendTopLevel.headline.trim()
     ? backendTopLevel.headline.trim()
     : typeof backendClient.headline === 'string' && backendClient.headline.trim()
@@ -2281,7 +2305,7 @@ function buildScannerAxesReport(
       : '';
 
   const summary: AuditSummary = {
-    total: backendTotal ?? total,
+    total,
     bugs: bugFindings.length,
     recommendations: recommendationFindings.length,
     compliance: complianceFindings.length,
@@ -2300,12 +2324,7 @@ function buildScannerAxesReport(
     evidence: f.evidence ?? f.annexes ?? [],
   }));
 
-  const auditCoverage: AuditCoverageItem[] = coverageFindings.map((f) => ({
-    id: f.id,
-    label: f.title,
-    status: f.status === 'not_available' ? 'not_available' : 'not_measured',
-    evidence: f.evidence ?? f.annexes ?? [],
-  }));
+  const auditCoverage: AuditCoverageItem[] = [];
 
   return {
     id: auditId,
@@ -2316,7 +2335,7 @@ function buildScannerAxesReport(
     maturityLevel: globalScore >= 75 ? 'Avancé' : globalScore >= 50 ? 'Intermédiaire' : 'En développement',
     riskLevel: getRiskLevelFromScore(globalScore),
     axes,
-    strategicSummary: backendHeadline || `Audit base sur ${allFindings.length} controles (${passFindings.length} conformes, ${failFindings.length} a corriger, ${coverageFindings.length} non mesures ou non disponibles).`,
+    strategicSummary: backendHeadline || `Audit base sur ${allFindings.length} controles affiches (${passFindings.length} conformes, ${failFindings.length} a corriger).`,
     positivePoints: passFindings.slice(0, 6).map((f) => f.title),
     negativePoints: failFindings
       .filter((f) => f.criticality !== 'critical' && f.criticality !== 'high')
@@ -2435,6 +2454,7 @@ function effortToPriority(effort?: string): Priority {
 function inferAxisMetaKey(input: { sourceKpi?: string; title?: string; label?: string; id?: string; scope?: string }): keyof typeof AXIS_META {
   // ── source_kpi prefix table (highest precision — always checked first) ─────
   const kpi = (input.sourceKpi ?? '').toLowerCase();
+  if (/^ai_|seo_ai_readiness|llms/.test(kpi)) return 'AI_FRIENDLY';
   if (/^domain_analysis\.(privacy_kpi|privacy)/.test(kpi)) return 'RGPD';
   if (/^domain_analysis\.(cookie_kpi|vulnerability_kpi|exposed_path_kpi|security)/.test(kpi)) return 'SECURITY';
   if (/^domain_analysis\.(cms_kpi|tech)/.test(kpi)) return 'TECHNIQUE';
@@ -2448,6 +2468,7 @@ function inferAxisMetaKey(input: { sourceKpi?: string; title?: string; label?: s
 
   // ── fallback: regex over title + label + id + scope only ──────────────────
   const text = `${input.title ?? ''} ${input.label ?? ''} ${input.id ?? ''} ${input.scope ?? ''}`.toLowerCase();
+  if (/ai_|ai friendly|ai-friendly|geo|generative|llms|llms\.txt|seo_ai_readiness|optimisation_ia/.test(text)) return 'AI_FRIENDLY';
   if (/privacy|rgpd|legal|consent|dpo|rights|security_policy|declared_purpose|cookie_policy|cookie_banner/.test(text)) return 'RGPD';
   if (/ssl|security_header|cache|sqli|ddos|session|cookie_flag|vulnerability|http_header/.test(text)) return 'SECURITY';
   if (/cms|framework|module|server|programming_language|code_review|console_error/.test(text)) return 'TECHNIQUE';
@@ -2735,13 +2756,11 @@ function buildStructuredReport(
   auditId: string,
   project: { url: string; site_name: string },
 ): AuditReport {
-  const summary = api.summary;
   const kpis = api.kpis ?? [];
   const bugs = api.bugs ?? [];
   const recommendations = api.recommendations ?? [];
   const compliance = api.compliance ?? [];
   const roadmap = api.roadmap;
-  const auditCoverage = api.audit_coverage ?? [];
   const passingKpis = normalizeStructuredPassingKpis(api);
 
   const axisBuckets: Record<keyof typeof AXIS_META, AuditFinding[]> = {
@@ -2750,6 +2769,7 @@ function buildStructuredReport(
     FUNCTIONAL: [],
     PERFORMANCE: [],
     SEO: [],
+    AI_FRIENDLY: [],
     CONTENT: [],
     UX_UI: [],
     ECO_INDEX: [],
@@ -2770,6 +2790,9 @@ function buildStructuredReport(
       console.log(`[auditMapper] Excluding quick-win finding: ${finding.title}`);
       return;
     }
+    if (!isClientVisibleFinding(finding)) {
+      return;
+    }
     const dedupeKeys = dedupeKeysForFinding(axisKey, finding);
     if (dedupeKeys.some((key) => seenFindingKeys.has(key))) {
       return;
@@ -2788,7 +2811,12 @@ function buildStructuredReport(
     
     // Special case: specific KPI names override axis field
     const kpiNameLower = kpi.kpi_name?.toLowerCase() ?? '';
-    if (kpiNameLower.includes('technology stack')) {
+    const kpiIdLower = String((kpi as any).kpi_id ?? (kpi as any).id ?? (kpi as any).source_kpi ?? '').toLowerCase();
+    const aiRouteText = `${kpiNameLower} ${kpiIdLower}`;
+    if (/ai_|ai friendly|ai-friendly|llms|llms\.txt|seo_ai_readiness|generative|geo/.test(aiRouteText)) {
+      axisKey = 'AI_FRIENDLY';
+      console.log(`[auditMapper] KPI "${kpi.kpi_name}" detected as AI_FRIENDLY`);
+    } else if (kpiNameLower.includes('technology stack')) {
       axisKey = 'TECHNIQUE';
       console.log(`[auditMapper] KPI "${kpi.kpi_name}" detected as TECHNIQUE (Technology Stack)`);
     } else if (kpiNameLower.includes('eco index')) {
@@ -2812,15 +2840,13 @@ function buildStructuredReport(
   recommendations.forEach(item => pushFinding(inferAxisMetaKey({ sourceKpi: item.source_kpi, title: item.title, id: item.id, scope: item.scope }), buildStructuredFindingFromAction(item, 'recommendation')));
   compliance.forEach(item => pushFinding(inferAxisMetaKey({ sourceKpi: item.source_kpi, title: item.title, id: item.id, scope: item.scope }), buildStructuredFindingFromAction(item, 'RGPD')));
   passingKpis.forEach(item => pushFinding(inferAxisMetaKey({ sourceKpi: item.source_kpi, label: item.label, id: item.id }), buildStructuredFindingFromPassing(item)));
-  auditCoverage.forEach(item => {
-    const finding = buildStructuredFindingFromCoverage(item);
-    if (finding) pushFinding(inferAxisMetaKey({ label: item.label, id: item.id }), finding);
-  });
+  // Coverage/non-tested controls stay available in the raw API payload but are
+  // intentionally not injected into the client report or exports.
 
   const axes: AuditAxis[] = Object.keys(AXIS_META).map((metaKey) => {
     const key = metaKey as keyof typeof AXIS_META;
     const meta = AXIS_META[key];
-    const findings = axisBuckets[key];
+    const findings = axisBuckets[key].filter(isClientVisibleFinding);
     const breakdown = getAxisScoreBreakdown({
       id: meta.id,
       name: meta.name,
@@ -2837,20 +2863,51 @@ function buildStructuredReport(
       icon: meta.id,
       score: breakdown.x,
       maxScore: breakdown.y,
+      scoreMeasured: breakdown.scoreMeasured,
+      coveragePct: breakdown.coveragePct,
+      measuredKpis: breakdown.measuredKpis,
+      totalKpis: breakdown.totalKpis,
+      scoreBasis: breakdown.scoreBasis,
       description: meta.description,
       findings,
     };
   });
 
-  const passCount = passingKpis.length;
-  const failCount = bugs.length + recommendations.length + compliance.length;
-  const notMeasuredCount = auditCoverage.filter(item => item.status === 'not_measured').length;
-  const globalScoreVal = passCount + failCount + notMeasuredCount > 0
-    ? Math.round((passCount / (passCount + failCount + notMeasuredCount)) * 100)
+  const visibleFindings = axes.flatMap((axis) => axis.findings);
+  const visiblePassFindings = visibleFindings.filter((finding) => finding.status === 'pass');
+  const visibleFailFindings = visibleFindings.filter((finding) => finding.status === 'fail');
+  const visibleComplianceFindings = visibleFailFindings.filter((finding) => finding.origin === 'RGPD');
+  const visibleBugFindings = visibleFailFindings.filter((finding) => finding.origin !== 'RGPD' && (finding.type === 'bug' || finding.origin === 'bug'));
+  const visibleRecommendationFindings = visibleFailFindings.filter((finding) => finding.origin !== 'RGPD' && finding.type !== 'bug' && finding.origin !== 'bug');
+  const visibleBugs = visibleBugFindings.map(buildActionItemFromFinding);
+  const visibleRecommendations = visibleRecommendationFindings.map(buildActionItemFromFinding);
+  const visibleCompliance = visibleComplianceFindings.map(buildActionItemFromFinding);
+  const visiblePassingKpis: AuditPassingKpi[] = visiblePassFindings.map((finding) => ({
+    id: finding.id,
+    label: finding.title,
+    source_kpi: finding.sourceKpi || finding.id,
+    observed_value: finding.description,
+    status: 'pass',
+    evidence: finding.evidence ?? finding.annexes ?? [],
+  }));
+  const passCount = visiblePassFindings.length;
+  const failCount = visibleFailFindings.length;
+  const globalScoreVal = passCount + failCount > 0
+    ? Math.round((passCount / (passCount + failCount)) * 100)
     : 0;
+  const visibleSummary: AuditSummary = {
+    total: passCount + failCount,
+    bugs: visibleBugs.length,
+    recommendations: visibleRecommendations.length,
+    compliance: visibleCompliance.length,
+    critical: visibleFailFindings.filter((finding) => finding.criticality === 'critical').length,
+    high: visibleFailFindings.filter((finding) => finding.criticality === 'high').length,
+    medium: visibleFailFindings.filter((finding) => finding.criticality === 'medium').length,
+    low: visibleFailFindings.filter((finding) => finding.criticality === 'low').length,
+  };
 
-  const criticalTitles = [...bugs, ...compliance]
-    .filter(item => /critical|high/i.test(item.severity))
+  const criticalTitles = visibleFailFindings
+    .filter(item => item.criticality === 'critical' || item.criticality === 'high')
     .slice(0, 6)
     .map(item => item.title);
 
@@ -2863,13 +2920,13 @@ function buildStructuredReport(
     maturityLevel: globalScoreVal >= 75 ? 'Avancé' : globalScoreVal >= 50 ? 'Intermédiaire' : 'En développement',
     riskLevel: getRiskLevelFromScore(globalScoreVal),
     axes,
-    strategicSummary: `L'audit a identifie ${summary?.total ?? failCount} element(s) d'action, dont ${summary?.critical ?? 0} critique(s), ${summary?.high ?? 0} eleve(s) et ${passCount} controle(s) conforme(s).`,
-    positivePoints: passingKpis.slice(0, 6).map(item => item.label),
-    negativePoints: bugs
+    strategicSummary: `L'audit a identifie ${failCount} element(s) d'action visibles, dont ${visibleSummary.critical} critique(s), ${visibleSummary.high} eleve(s) et ${passCount} controle(s) conforme(s).`,
+    positivePoints: visiblePassingKpis.slice(0, 6).map(item => item.label),
+    negativePoints: visibleBugs
       .filter(item => !/critical|high/i.test(item.severity))
       .slice(0, 6)
       .map(item => item.title),
-    opportunities: [...recommendations]
+    opportunities: [...visibleRecommendations]
       .filter(item => !/critical|high/i.test(item.severity))
       .slice(0, 6)
       .map(item => item.title),
@@ -2879,13 +2936,13 @@ function buildStructuredReport(
     sitemapUrl: '',
     sitemapFound: false,
     newsItems: [],
-    summary,
-    bugs,
-    recommendations,
-    compliance,
+    summary: visibleSummary,
+    bugs: visibleBugs,
+    recommendations: visibleRecommendations,
+    compliance: visibleCompliance,
     roadmap,
-    auditCoverage,
-    passingKpis,
+    auditCoverage: [],
+    passingKpis: visiblePassingKpis,
     kpis,
     scanId: api.scan_id,
     generatedAt: api.generated_at,
@@ -2913,6 +2970,7 @@ export function mapApiResponseToReport(
   const findingsFunc: AuditFinding[] = [];
   const findingsPerf: AuditFinding[] = [];
   const findingsSeo: AuditFinding[] = [];
+  const findingsAi: AuditFinding[] = [];
   const findingsCont: AuditFinding[] = [];
   const findingsUx: AuditFinding[] = [];
   const findingsEco: AuditFinding[] = [];
@@ -3108,6 +3166,11 @@ export function mapApiResponseToReport(
       icon: meta.id,
       score: breakdown.x,
       maxScore: breakdown.y,
+      scoreMeasured: breakdown.scoreMeasured,
+      coveragePct: breakdown.coveragePct,
+      measuredKpis: breakdown.measuredKpis,
+      totalKpis: breakdown.totalKpis,
+      scoreBasis: breakdown.scoreBasis,
       description: meta.description,
       findings: findingsList,
     };
@@ -3119,6 +3182,7 @@ export function mapApiResponseToReport(
     buildAxis('FUNCTIONAL', findingsFunc),
     buildAxis('PERFORMANCE', findingsPerf),
     buildAxis('SEO', findingsSeo),
+    buildAxis('AI_FRIENDLY', findingsAi),
     buildAxis('CONTENT', findingsCont),
     buildAxis('UX_UI', findingsUx),
     buildAxis('ECO_INDEX', findingsEco),

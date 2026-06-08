@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { getAxisScoreBreakdown, getScoreColor, isNonTestedFinding, type AuditAxis, type AuditReport } from '@/data/mockAuditData';
+import { getAxisScoreBreakdown, getScoreColor, isClientVisibleFinding, type AuditAxis, type AuditReport } from '@/data/mockAuditData';
 import { AxisIcon } from '@/components/audit/AxisIcon';
 import { AxisDetailSheet } from '@/components/audit/AxisDetailSheet';
 import { ScoreGauge } from '@/components/ScoreGauge';
@@ -22,11 +22,14 @@ export function TabSommaire({ audit, selectedAxisId, onSelectAxis }: TabSommaire
   const [viewMode, setViewMode] = useState<ViewMode>('list');
   const [selectedAxis, setSelectedAxis] = useState<AuditAxis | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
+  const visibleAxes = audit.axes
+    .map((axis) => ({ ...axis, findings: axis.findings.filter(isClientVisibleFinding) }))
+    .filter((axis) => axis.findings.length > 0);
 
   // Auto-open sheet when trigger axis changes (from Resume tab)
   useEffect(() => {
     if (!selectedAxisId) return;
-    const axis = audit.axes.find(ax => ax.id === selectedAxisId);
+    const axis = visibleAxes.find(ax => ax.id === selectedAxisId);
     if (axis) {
       setSelectedAxis(axis);
       setSheetOpen(true);
@@ -68,11 +71,10 @@ export function TabSommaire({ audit, selectedAxisId, onSelectAxis }: TabSommaire
       {/* ── List view ── */}
       {viewMode === 'list' && (
         <div className="space-y-2">
-          {audit.axes.map((ax, index) => {
+          {visibleAxes.map((ax, index) => {
             const breakdown = getAxisScoreBreakdown(ax);
             const criticalCount = ax.findings.filter(f => f.criticality === 'critical').length;
             const highCount     = ax.findings.filter(f => f.criticality === 'high').length;
-            const allNonTeste = ax.findings.length > 0 && ax.findings.every(isNonTestedFinding);
             return (
               <button
                 key={ax.id}
@@ -84,11 +86,9 @@ export function TabSommaire({ audit, selectedAxisId, onSelectAxis }: TabSommaire
                 <div className="flex-1 min-w-0">
                   <p className="font-semibold">{ax.name}</p>
                   <p className="text-xs text-muted-foreground mt-0.5 truncate">{ax.description}</p>
-                  {allNonTeste ? (
-                    <p className="text-xs text-yellow-400 mt-1">Statut axe : Non testé</p>
-                  ) : (
-                    <p className="text-xs text-muted-foreground mt-1">{breakdown.x}/{breakdown.y} réussis — {ax.findings.length} constat{ax.findings.length !== 1 ? 's' : ''}</p>
-                  )}
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {breakdown.x}/{breakdown.y} mesurés réussis - {ax.findings.length} constat{ax.findings.length !== 1 ? 's' : ''}
+                  </p>
                 </div>
                 <div className="flex items-center gap-3 flex-shrink-0">
                   {criticalCount > 0 && (
@@ -98,7 +98,7 @@ export function TabSommaire({ audit, selectedAxisId, onSelectAxis }: TabSommaire
                     <span className="text-xs criticality-high px-2 py-0.5 rounded-full border">{highCount} {highCount > 1 ? 'élevés' : 'élevé'}</span>
                   )}
                   <span className={`font-mono font-bold text-lg ${getScoreColor(breakdown.scorePct)}`}>
-                    {allNonTeste ? 'N/T' : `${breakdown.x}/${breakdown.y}`}
+                    {`${breakdown.x}/${breakdown.y}`}
                   </span>
                 </div>
               </button>
@@ -110,14 +110,13 @@ export function TabSommaire({ audit, selectedAxisId, onSelectAxis }: TabSommaire
       {/* ── Cards view ── */}
       {viewMode === 'cards' && (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {audit.axes.map(ax => {
+          {visibleAxes.map(ax => {
             const breakdown = getAxisScoreBreakdown(ax);
             const bugCount  = ax.findings.filter(f => f.status === 'fail' && f.type === 'bug').length;
             const recoCount = ax.findings.filter(f => f.status === 'fail' && f.type === 'recommendation').length;
             const passed    = breakdown.passed;
             const total     = breakdown.y;
-            const allNonTeste = ax.findings.length > 0 && ax.findings.every(isNonTestedFinding);
-            const gaugeScore = total > 0 && !allNonTeste ? breakdown.scorePct : 0;
+            const gaugeScore = breakdown.scoreMeasured ?? 0;
             return (
               <button
                 key={ax.id}
@@ -130,17 +129,13 @@ export function TabSommaire({ audit, selectedAxisId, onSelectAxis }: TabSommaire
                     score={gaugeScore}
                     size={82}
                     strokeWidth={5}
-                    valueText={allNonTeste ? 'N/T' : `${gaugeScore}%`}
+                    valueText={`${gaugeScore}%`}
                     centerScale={1.28}
                   />
                   <div className="flex-1 flex items-start justify-between gap-2">
                     <div className="flex flex-col items-end text-right leading-tight">
                       <p className="font-semibold text-base md:text-lg leading-tight">{ax.name}</p>
-                      {allNonTeste ? (
-                        <p className="text-sm text-yellow-400 font-mono">Non testé</p>
-                      ) : (
-                        <p className="text-sm text-muted-foreground font-mono">{passed}/{total}</p>
-                      )}
+                      <p className="text-sm text-muted-foreground font-mono">{passed}/{total} mesurés réussis</p>
                     </div>
                     <div className="p-1.5 rounded-lg bg-muted/40">
                       <AxisIcon id={ax.id} className="w-5 h-5 text-muted-foreground" />

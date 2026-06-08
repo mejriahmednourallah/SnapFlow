@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { getAxisScoreBreakdown, getScoreColor, getPagesWithoutMeta, getPagesWithLongMeta, getRecentNews, isNonTestedFinding, type AuditFinding, type AuditReport, type Criticality, type FindingStatus, type Priority } from '@/data/mockAuditData';
+import { getAxisScoreBreakdown, getScoreColor, getPagesWithoutMeta, getPagesWithLongMeta, getRecentNews, isClientVisibleFinding, type AuditFinding, type AuditReport, type Criticality, type FindingStatus, type Priority } from '@/data/mockAuditData';
 import { CriticalityBadge } from '@/components/CriticalityBadge';
 import { PriorityBadge } from '@/components/PriorityBadge';
 import { ScoreGauge } from '@/components/ScoreGauge';
@@ -40,7 +40,11 @@ function resolveFindingStatus(finding: AuditFinding): FindingStatus {
 }
 
 export function TabDetails({ audit, selectedAxisId, isEditMode = false, onUpdateFinding }: TabDetailsProps) {
-  const [expandedAxis, setExpandedAxis] = useState<string | null>(selectedAxisId || audit.axes[0]?.id || null);
+  const visibleAxes = audit.axes
+    .map((axis) => ({ ...axis, findings: axis.findings.filter(isClientVisibleFinding) }))
+    .filter((axis) => axis.findings.length > 0);
+
+  const [expandedAxis, setExpandedAxis] = useState<string | null>(selectedAxisId || visibleAxes[0]?.id || null);
   const [filterCriticality, setFilterCriticality] = useState<Criticality | 'all'>('all');
   const [filterState, setFilterState] = useState<FindingStatus | 'all'>('all');
   const [editorState, setEditorState] = useState<{ axisId: string; findingId: string } | null>(null);
@@ -55,7 +59,7 @@ export function TabDetails({ audit, selectedAxisId, isEditMode = false, onUpdate
   const canEditFindings = Boolean(isEditMode && onUpdateFinding);
 
   const critFilters: Array<Criticality | 'all'> = ['all', 'critical', 'high', 'medium', 'low'];
-  const stateFilters: Array<FindingStatus | 'all'> = ['all', 'pass', 'fail', 'not_measured'];
+  const stateFilters: Array<FindingStatus | 'all'> = ['all', 'pass', 'fail'];
 
   const pagesWithoutMeta = getPagesWithoutMeta(audit);
   const pagesWithLongMeta = getPagesWithLongMeta(audit);
@@ -155,15 +159,7 @@ export function TabDetails({ audit, selectedAxisId, isEditMode = false, onUpdate
               filterState === s ? 'bg-primary/20 border-primary/40 text-primary' : 'border-border text-muted-foreground hover:text-foreground'
             }`}
           >
-            {s === 'all'
-              ? 'Tous statuts'
-              : s === 'pass'
-                ? 'Pass'
-                : s === 'fail'
-                  ? 'Fail'
-                  : s === 'not_measured'
-                    ? 'Non testé'
-                    : 'Non disponible'}
+            {s === 'all' ? 'Tous statuts' : s === 'pass' ? 'Pass' : 'Fail'}
           </button>
         ))}
       </div>
@@ -175,16 +171,13 @@ export function TabDetails({ audit, selectedAxisId, isEditMode = false, onUpdate
       )}
 
       {/* Axes */}
-      {audit.axes.map(ax => {
+      {visibleAxes.map(ax => {
         const breakdown = getAxisScoreBreakdown(ax);
         const isExpanded = expandedAxis === ax.id;
         const findings = ax.findings.filter(f => {
           if (isRiskPassingFinding(f)) return false;
           if (filterCriticality !== 'all' && f.criticality !== filterCriticality) return false;
-          if (filterState !== 'all') {
-            if (filterState === 'not_measured' && !isNonTestedFinding(f)) return false;
-            if (filterState !== 'not_measured' && (f.status ?? (f.type === 'pass' ? 'pass' : f.type === 'bug' ? 'fail' : 'not_measured')) !== filterState) return false;
-          }
+          if (filterState !== 'all' && (f.status ?? (f.type === 'pass' ? 'pass' : 'fail')) !== filterState) return false;
           return true;
         });
         const isSeoAxis = ax.id === 'seo';
@@ -211,7 +204,7 @@ export function TabDetails({ audit, selectedAxisId, isEditMode = false, onUpdate
                   <ScoreGauge score={breakdown.scorePct} size={64} strokeWidth={5} valueText={`${breakdown.x}/${breakdown.y}`} />
                   <div>
                     <p className="text-sm text-muted-foreground">{findings.length} constat{findings.length > 1 ? 's' : ''}</p>
-                    <p className="text-xs text-muted-foreground">Pass {breakdown.passed} - Fail {breakdown.failed} - Non testé {breakdown.notMeasured + breakdown.notAvailable}</p>
+                    <p className="text-xs text-muted-foreground">Pass {breakdown.passed} - Fail {breakdown.failed}</p>
                   </div>
                 </div>
 
@@ -365,14 +358,6 @@ export function TabDetails({ audit, selectedAxisId, isEditMode = false, onUpdate
                                 <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border text-emerald-400 bg-emerald-500/10 border-emerald-500/20">
                                   <CheckCircle className="w-3 h-3" />
                                   <span>Validé</span>
-                                </span>
-                              );
-                            }
-                            if (isNonTestedFinding(f)) {
-                              return (
-                                <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border text-yellow-400 bg-yellow-500/10 border-yellow-500/20">
-                                  <FlaskConical className="w-3 h-3" />
-                                  <span>Non testé</span>
                                 </span>
                               );
                             }
@@ -530,9 +515,6 @@ export function TabDetails({ audit, selectedAxisId, isEditMode = false, onUpdate
                   >
                     <option value="pass">Pass</option>
                     <option value="fail">Fail</option>
-                    <option value="not_measured">Non testé</option>
-                    <option value="not_available">Non testé</option>
-                    <option value="not_evaluated">Non testé</option>
                   </select>
                 </div>
 

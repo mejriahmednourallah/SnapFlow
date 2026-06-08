@@ -81,7 +81,21 @@ type RenderResult struct {
 	Confidence        string                   `json:"confidence"`
 	WaitUntil         string                   `json:"wait_until"`
 	Attempts          []map[string]interface{} `json:"attempts"`
+	Profile           string                   `json:"profile"`
 	Error             string                   `json:"error"`
+}
+
+type SearchProbeResult struct {
+	Executed       bool   `json:"executed"`
+	Passed         bool   `json:"passed"`
+	Status         string `json:"status"`
+	Query          string `json:"query"`
+	SearchURL      string `json:"search_url"`
+	FinalURL       string `json:"final_url"`
+	Method         string `json:"method"`
+	QueryParam     string `json:"query_param"`
+	ResultBehavior string `json:"result_behavior"`
+	Details        string `json:"details"`
 }
 
 // ScreenshotResult mirrors the /screenshot response body.
@@ -260,6 +274,7 @@ type RenderOptions struct {
 	Engine               string
 	AllowObscuraFallback bool
 	SettleMS             int
+	Profile              string
 }
 
 type DiscoverRenderedOptions struct {
@@ -299,12 +314,32 @@ func RenderWithOptions(ctx context.Context, url string, opts RenderOptions) (*Re
 	if opts.SettleMS > 0 {
 		payload["settle_ms"] = opts.SettleMS
 	}
+	if opts.Profile != "" {
+		payload["profile"] = opts.Profile
+	}
 	data, err := postWithTimeout(ctx, "/render", payload, renderHTTPTimeout(timeoutMS, opts.AllowObscuraFallback, engine))
 	if err != nil {
 		return nil, err
 	}
 	var r RenderResult
 	return &r, json.Unmarshal(data, &r)
+}
+
+func TestSearch(ctx context.Context, url string, timeoutMS int) (*SearchProbeResult, error) {
+	if timeoutMS <= 0 {
+		timeoutMS = 30000
+	}
+	payload := map[string]interface{}{
+		"url":        url,
+		"query":      "snapflow-test",
+		"timeout_ms": timeoutMS,
+	}
+	data, err := postWithTimeout(ctx, "/test-search", payload, renderHTTPTimeout(timeoutMS, false, "chromium"))
+	if err != nil {
+		return nil, err
+	}
+	var result SearchProbeResult
+	return &result, json.Unmarshal(data, &result)
 }
 
 // Screenshot captures a screenshot of url and returns the result.

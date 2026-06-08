@@ -54,6 +54,73 @@ export function paginateByHeightWithInitial<T>(
   return pages;
 }
 
+interface RebalanceShortTailOptions<T> {
+  minItemsOnLastPage: number;
+  minItemsOnPreviousPage?: number;
+  maxItemsPerPage?: number;
+  heightFor?: (item: T) => number;
+  maxPageHeight?: number;
+}
+
+export function rebalanceShortTailPages<T>(
+  pages: T[][],
+  options: RebalanceShortTailOptions<T>,
+) {
+  const cleaned = pages.map((page) => [...page]).filter((page) => page.length > 0);
+  if (cleaned.length <= 1) return cleaned;
+
+  const minItemsOnLastPage = Math.max(1, options.minItemsOnLastPage);
+  const minItemsOnPreviousPage = Math.max(1, options.minItemsOnPreviousPage ?? minItemsOnLastPage);
+  const pageHeight = (page: T[]) => page.reduce((sum, item) => sum + (options.heightFor ? options.heightFor(item) : 0), 0);
+  const canMoveInto = (page: T[], item: T) => {
+    if (options.maxItemsPerPage && page.length >= options.maxItemsPerPage) return false;
+    if (options.heightFor && options.maxPageHeight && pageHeight(page) + options.heightFor(item) > options.maxPageHeight) return false;
+    return true;
+  };
+
+  for (let idx = 0; idx < cleaned.length - 1; idx += 1) {
+    const current = cleaned[idx];
+    const next = cleaned[idx + 1];
+
+    while (
+      current.length < minItemsOnLastPage &&
+      next.length > minItemsOnPreviousPage
+    ) {
+      const movable = next[0];
+      if (!movable || !canMoveInto(current, movable)) break;
+      next.shift();
+      current.push(movable);
+    }
+
+    if (next.length === 0) {
+      cleaned.splice(idx + 1, 1);
+      idx -= 1;
+    }
+  }
+
+  for (let idx = cleaned.length - 1; idx > 0; idx -= 1) {
+    const current = cleaned[idx];
+    const previous = cleaned[idx - 1];
+
+    while (
+      current.length < minItemsOnLastPage &&
+      previous.length > minItemsOnPreviousPage
+    ) {
+      const movable = previous[previous.length - 1];
+      if (!movable || !canMoveInto(current, movable)) break;
+      previous.pop();
+      current.unshift(movable);
+    }
+
+    if (previous.length === 0) {
+      cleaned.splice(idx - 1, 1);
+      idx = Math.min(idx, cleaned.length);
+    }
+  }
+
+  return cleaned.filter((page) => page.length > 0);
+}
+
 export function packFindingsWithRebalance<T>(
   items: T[],
   heightFor: (item: T) => number,

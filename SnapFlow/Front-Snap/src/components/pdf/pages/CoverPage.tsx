@@ -41,10 +41,13 @@ export function CoverPage({ report, theme, clientLogoSrc }: CoverPageProps) {
           </Text>
           <View style={{ alignItems: 'center', justifyContent: 'center', paddingVertical: 6 }}>
             <ScoreGauge
-              score={report.globalScore.value}
+              score={report.globalScore.scoreMeasured ?? 0}
               status={report.globalScore.status}
+              valueText={report.globalScore.scoreMeasured === null ? 'N/C' : undefined}
               size={128}
-              caption={`${report.globalScore.x}/${report.globalScore.y}`}
+              caption={report.globalScore.scoreMeasured === null
+                ? 'Score non calculable'
+                : 'Score sur contrôles mesurés'}
               theme={theme}
             />
           </View>

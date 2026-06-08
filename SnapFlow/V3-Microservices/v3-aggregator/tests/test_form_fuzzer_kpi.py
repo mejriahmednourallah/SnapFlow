@@ -197,6 +197,51 @@ class TestFormFuzzerKPIInBuildReport(unittest.TestCase):
         self.assertEqual(normalized["evidence"]["detail"]["source"], "table")
         self.assertEqual(normalized["evidence"]["detail"]["top_affected"][0]["page_url"], "https://example.com/contact")
 
+    def test_valid_responses_without_anomalies_are_exploitable(self):
+        summary = {
+            "enabled": True,
+            "forms_discovered": 5,
+            "forms_tested": 2,
+            "unique_transactional_forms_detected": 5,
+            "unique_transactional_forms_tested": 2,
+            "tests_run": 4,
+            "responses_received": 4,
+            "valid_responses": 4,
+            "transport_errors": 0,
+            "timeouts": 0,
+            "anomalies_found": 0,
+        }
+
+        kpi = main._build_functional_fuzzer_kpi({"form_fuzzer_summary": summary}, {})
+
+        self.assertTrue(kpi["passed"])
+        self.assertEqual(kpi["status"], "passing")
+        self.assertEqual(kpi["valid_responses"], 4)
+        self.assertEqual(kpi["data_quality"], "PARTIAL")
+
+    def test_transport_errors_only_are_not_evaluated_with_breakdown(self):
+        summary = {
+            "enabled": True,
+            "forms_discovered": 5,
+            "forms_tested": 2,
+            "unique_transactional_forms_detected": 5,
+            "unique_transactional_forms_tested": 2,
+            "tests_run": 4,
+            "responses_received": 0,
+            "valid_responses": 0,
+            "transport_errors": 4,
+            "timeouts": 2,
+            "anomalies_found": 0,
+        }
+
+        kpi = main._build_functional_fuzzer_kpi({"form_fuzzer_summary": summary}, {})
+
+        self.assertIsNone(kpi["passed"])
+        self.assertEqual(kpi["status"], "non_evalue")
+        self.assertEqual(kpi["failure_reason"], "form_fuzzer_no_usable_responses")
+        self.assertEqual(kpi["transport_errors"], 4)
+        self.assertEqual(kpi["timeouts"], 2)
+
     def test_handles_none_headings_without_crash(self):
         row = self._minimal_page_row()
         row["metrics"]["seo"]["headings"] = None

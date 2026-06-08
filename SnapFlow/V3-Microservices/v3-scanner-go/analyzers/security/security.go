@@ -6,6 +6,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/cookiejar"
 	"net/url"
 	"os"
 	"regexp"
@@ -1663,12 +1664,29 @@ func looksLikeNonLoginForm(text string) bool {
 	return false
 }
 
-func findLoginForm(htmlBody, baseURL string) (string, []string) {
-	htmlLower := strings.ToLower(htmlBody)
+type loginTarget struct {
+	PageURL       string
+	ActionURL     string
+	UsernameField string
+	PasswordField string
+	HiddenFields  map[string]string
+}
+
+func inputAttribute(input, name string) string {
+	pattern := regexp.MustCompile(`(?i)\b` + regexp.QuoteMeta(name) + `\s*=\s*["']([^"']*)["']`)
+	match := pattern.FindStringSubmatch(input)
+	if len(match) > 1 {
+		return strings.TrimSpace(match[1])
+	}
+	return ""
+}
+
+func findLoginFormTarget(htmlBody, baseURL string) (loginTarget, []string) {
 	rejected := []string{}
 
 	formPattern := regexp.MustCompile(`(?is)<form\b([^>]*)>(.*?)</form>`)
 	actionPattern := regexp.MustCompile(`(?i)\baction=["']([^"']*)["']`)
+	inputPattern := regexp.MustCompile(`(?is)<input\b[^>]*>`)
 	matches := formPattern.FindAllStringSubmatch(htmlBody, -1)
 
 	for _, match := range matches {
@@ -1692,7 +1710,34 @@ func findLoginForm(htmlBody, baseURL string) (string, []string) {
 			}
 			continue
 		}
-		hasPassword := strings.Contains(formText, `type="password"`) || strings.Contains(formText, `type='password'`)
+
+		usernameField := ""
+		passwordField := ""
+		hiddenFields := map[string]string{}
+		for _, input := range inputPattern.FindAllString(body, -1) {
+			fieldType := strings.ToLower(inputAttribute(input, "type"))
+			fieldName := inputAttribute(input, "name")
+			if fieldName == "" {
+				continue
+			}
+			switch fieldType {
+			case "password":
+				if passwordField == "" {
+					passwordField = fieldName
+				}
+			case "hidden":
+				hiddenFields[fieldName] = inputAttribute(input, "value")
+			case "email", "text", "":
+				lowerName := strings.ToLower(fieldName)
+				if usernameField == "" && (strings.Contains(lowerName, "user") ||
+					strings.Contains(lowerName, "login") ||
+					strings.Contains(lowerName, "email") ||
+					strings.Contains(lowerName, "mail")) {
+					usernameField = fieldName
+				}
+			}
+		}
+
 		hasLoginSignal := false
 		for _, keyword := range loginFormKeywords {
 			if strings.Contains(formText, keyword) || strings.Contains(strings.ToLower(candidate), keyword) {
@@ -1700,55 +1745,137 @@ func findLoginForm(htmlBody, baseURL string) (string, []string) {
 				break
 			}
 		}
-		if hasPassword && hasLoginSignal {
+		if passwordField != "" && usernameField != "" && hasLoginSignal {
 			if candidate == "" {
 				candidate = baseURL
 			}
-			return candidate, rejected
+			return loginTarget{
+				PageURL:       baseURL,
+				ActionURL:     candidate,
+				UsernameField: usernameField,
+				PasswordField: passwordField,
+				HiddenFields:  hiddenFields,
+			}, rejected
 		}
 		if candidate != "" {
 			rejected = append(rejected, candidate)
 		}
 	}
 
-	potentialLoginPaths := []string{"/login", "/signin", "/auth", "/user/login", "/account/login"}
-	for _, path := range potentialLoginPaths {
-		if strings.Contains(htmlLower, path) {
-			return absoluteURL(baseURL, path), rejected
-		}
-	}
+	return loginTarget{}, rejected
+}
 
-	return "", rejected
+func findLoginForm(htmlBody, baseURL string) (string, []string) {
+	target, rejected := findLoginFormTarget(htmlBody, baseURL)
+	return target.ActionURL, rejected
+}
+
+func sameHostURL(left, right string) bool {
+	l, errLeft := url.Parse(left)
+	r, errRight := url.Parse(right)
+	if errLeft != nil || errRight != nil {
+		return false
+	}
+	return strings.EqualFold(l.Hostname(), r.Hostname())
+}
+
+func normalizedPageURL(raw string) string {
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return strings.TrimRight(raw, "/")
+	}
+	parsed.RawQuery = ""
+	parsed.Fragment = ""
+	return strings.TrimRight(parsed.String(), "/")
+}
+
+func confirmLoginTarget(candidate, rootURL string) (loginTarget, string) {
+	if !sameHostURL(candidate, rootURL) {
+		return loginTarget{}, "cross_origin_login_candidate"
+	}
+	client := &http.Client{Timeout: 8 * time.Second}
+	resp, err := client.Get(candidate)
+	if err != nil {
+		return loginTarget{}, "login_candidate_fetch_failed"
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return loginTarget{}, fmt.Sprintf("login_candidate_http_%d", resp.StatusCode)
+	}
+	if !sameHostURL(resp.Request.URL.String(), rootURL) {
+		return loginTarget{}, "login_candidate_redirected_cross_origin"
+	}
+	if normalizedPageURL(resp.Request.URL.String()) == normalizedPageURL(rootURL) {
+		return loginTarget{}, "login_candidate_redirected_to_homepage"
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 512*1024))
+	if err != nil {
+		return loginTarget{}, "login_candidate_body_unreadable"
+	}
+	target, _ := findLoginFormTarget(string(body), resp.Request.URL.String())
+	if target.ActionURL == "" {
+		return loginTarget{}, "password_login_form_not_confirmed"
+	}
+	if !sameHostURL(target.ActionURL, rootURL) {
+		return loginTarget{}, "login_action_cross_origin"
+	}
+	target.PageURL = resp.Request.URL.String()
+	return target, ""
 }
 
 // testBruteForceProtection sends rapid requests to test for brute force protection.
 // Checks for 429 (Too Many Requests), rate limit headers, or CAPTCHA challenges.
-func testBruteForceProtection(loginURL string) (protected bool, details string) {
+func testBruteForceProtection(target loginTarget) (protected bool, conclusive bool, details string) {
+	jar, _ := cookiejar.New(nil)
 	client := &http.Client{
 		Timeout: 5 * time.Second,
+		Jar:     jar,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			return http.ErrUseLastResponse
 		},
 	}
 
-	// Send 6 rapid POST requests with dummy credentials
+	// Prime session cookies and refresh hidden CSRF values when possible.
+	if resp, err := client.Get(target.PageURL); err == nil {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512*1024))
+		resp.Body.Close()
+		if refreshed, _ := findLoginFormTarget(string(body), target.PageURL); refreshed.ActionURL != "" {
+			target = refreshed
+		}
+	}
+
+	// Send five bounded attempts with inert credentials.
 	rateLimitDetected := false
 	captchaDetected := false
+	lockoutDetected := false
+	responsesReceived := 0
 
-	for i := 0; i < 6; i++ {
-		req, err := http.NewRequest("POST", loginURL, nil)
+	for i := 0; i < 5; i++ {
+		values := url.Values{}
+		for name, value := range target.HiddenFields {
+			values.Set(name, value)
+		}
+		values.Set(target.UsernameField, fmt.Sprintf("snapflow-invalid-%d@example.invalid", i+1))
+		values.Set(target.PasswordField, fmt.Sprintf("SnapFlowInvalid-%d!", i+1))
+
+		req, err := http.NewRequest("POST", target.ActionURL, strings.NewReader(values.Encode()))
 		if err != nil {
 			continue
 		}
 
-		// Add basic form data
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.Header.Set("User-Agent", "SnapFlow-Security-Probe/1.0")
 		resp, err := client.Do(req)
 		if err != nil {
 			continue
 		}
+		responsesReceived++
 		bodyBytes, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
+
+		if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusMethodNotAllowed {
+			return false, false, fmt.Sprintf("login endpoint returned HTTP %d", resp.StatusCode)
+		}
 
 		// Check for 429 Too Many Requests
 		if resp.StatusCode == 429 {
@@ -1772,17 +1899,26 @@ func testBruteForceProtection(loginURL string) (protected bool, details string) 
 			captchaDetected = true
 			break
 		}
+		if strings.Contains(bodyStr, "account locked") ||
+			strings.Contains(bodyStr, "compte bloque") ||
+			strings.Contains(bodyStr, "trop de tentatives") ||
+			strings.Contains(bodyStr, "temporarily locked") {
+			lockoutDetected = true
+			break
+		}
 	}
 
 	if rateLimitDetected {
-		protected = true
-		details = "Rate limiting detected (429 or rate-limit headers)"
+		return true, true, "Rate limiting detected (429 or rate-limit headers)"
 	} else if captchaDetected {
-		protected = true
-		details = "CAPTCHA challenge detected"
+		return true, true, "CAPTCHA challenge detected"
+	} else if lockoutDetected {
+		return true, true, "Account lockout response detected"
 	}
-
-	return protected, details
+	if responsesReceived == 0 {
+		return false, false, "No login response was received"
+	}
+	return false, true, fmt.Sprintf("No rate limit, CAPTCHA, or lockout signal after %d bounded attempts", responsesReceived)
 }
 
 // checkBruteForcedProtectionLogin checks login forms for brute force protection.
@@ -1792,31 +1928,37 @@ func checkBruteForcedProtectionLogin(targetURL, htmlBody string, adminExposure A
 	severity := "high"
 	details := ""
 
-	loginTargets := []string{}
+	loginTargets := []loginTarget{}
 	seen := map[string]bool{}
 
-	addTarget := func(candidate string) {
-		candidate = strings.TrimSpace(candidate)
-		if candidate == "" {
+	addTarget := func(candidate loginTarget) {
+		candidate.ActionURL = strings.TrimSpace(candidate.ActionURL)
+		if candidate.ActionURL == "" {
 			return
 		}
-		candidate = absoluteURL(targetURL, candidate)
-		if seen[candidate] {
+		candidate.ActionURL = absoluteURL(targetURL, candidate.ActionURL)
+		if seen[candidate.ActionURL] {
 			return
 		}
-		seen[candidate] = true
+		seen[candidate.ActionURL] = true
 		loginTargets = append(loginTargets, candidate)
 	}
 
 	// 1) Homepage-derived form login target.
-	formTarget, rejectedCandidates := findLoginForm(htmlBody, targetURL)
+	formTarget, rejectedCandidates := findLoginFormTarget(htmlBody, targetURL)
 	addTarget(formTarget)
 
 	// 2) Exposed admin/login endpoints discovered by wordlist probe.
 	for _, p := range adminExposure.Exposed {
 		pLower := strings.ToLower(strings.TrimSpace(p))
 		if strings.Contains(pLower, "login") || strings.Contains(pLower, "signin") || strings.Contains(pLower, "auth") {
-			addTarget(p)
+			candidateURL := absoluteURL(targetURL, p)
+			confirmed, reason := confirmLoginTarget(candidateURL, targetURL)
+			if reason != "" {
+				rejectedCandidates = append(rejectedCandidates, fmt.Sprintf("%s (%s)", candidateURL, reason))
+				continue
+			}
+			addTarget(confirmed)
 		}
 	}
 
@@ -1831,7 +1973,7 @@ func checkBruteForcedProtectionLogin(targetURL, htmlBody string, adminExposure A
 			Details:            "No login form or endpoint detected — brute-force protection not evaluated",
 			TargetType:         "none",
 			Confidence:         "none",
-			TestedTargets:      loginTargets,
+			TestedTargets:      []string{},
 			RejectedCandidates: rejectedCandidates,
 			FailureReason:      "login_target_not_confirmed",
 		}
@@ -1840,15 +1982,35 @@ func checkBruteForcedProtectionLogin(targetURL, htmlBody string, adminExposure A
 	allProtected := true
 	unprotectedTarget := ""
 	protectedDetail := ""
+	testedTargets := []string{}
 	for _, target := range loginTargets {
-		protected, protectionDetails := testBruteForceProtection(target)
+		protected, conclusive, protectionDetails := testBruteForceProtection(target)
+		if !conclusive {
+			rejectedCandidates = append(rejectedCandidates, fmt.Sprintf("%s (%s)", target.ActionURL, protectionDetails))
+			continue
+		}
+		testedTargets = append(testedTargets, target.ActionURL)
 		if !protected {
 			allProtected = false
-			unprotectedTarget = target
+			unprotectedTarget = target.ActionURL
 			break
 		}
 		if protectedDetail == "" {
 			protectedDetail = protectionDetails
+		}
+	}
+
+	if len(testedTargets) == 0 {
+		return BruteForceResult{
+			Protected:          false,
+			Status:             "non_evalue",
+			Severity:           "",
+			Details:            "Login candidates were found but no protection test produced a conclusive response",
+			TargetType:         "none",
+			Confidence:         "none",
+			TestedTargets:      testedTargets,
+			RejectedCandidates: rejectedCandidates,
+			FailureReason:      "login_protection_probe_inconclusive",
 		}
 	}
 
@@ -1862,8 +2024,8 @@ func checkBruteForcedProtectionLogin(targetURL, htmlBody string, adminExposure A
 	}
 
 	reportedTarget := unprotectedTarget
-	if reportedTarget == "" && len(loginTargets) > 0 {
-		reportedTarget = loginTargets[0]
+	if reportedTarget == "" && len(testedTargets) > 0 {
+		reportedTarget = testedTargets[0]
 	}
 
 	return BruteForceResult{
@@ -1875,7 +2037,7 @@ func checkBruteForcedProtectionLogin(targetURL, htmlBody string, adminExposure A
 		TargetURL:          reportedTarget,
 		TargetType:         "login",
 		Confidence:         "high",
-		TestedTargets:      loginTargets,
+		TestedTargets:      testedTargets,
 		RejectedCandidates: rejectedCandidates,
 	}
 }

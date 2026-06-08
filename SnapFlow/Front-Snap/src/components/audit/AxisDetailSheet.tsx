@@ -1,4 +1,4 @@
-import { getAxisScoreBreakdown, getScoreColor, isNonTestedFinding, type AuditAxis, type Criticality } from '@/data/mockAuditData';
+import { getAxisScoreBreakdown, getScoreColor, isClientVisibleFinding, type AuditAxis, type Criticality } from '@/data/mockAuditData';
 import { CriticalityBadge } from '@/components/CriticalityBadge';
 import { PriorityBadge } from '@/components/PriorityBadge';
 import { ScoreGauge } from '@/components/ScoreGauge';
@@ -6,7 +6,7 @@ import { AxisIcon } from '@/components/audit/AxisIcon';
 import { EvidenceDetailsDialog } from '@/components/audit/EvidenceDetailsDialog';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
-import { AlertTriangle, Bug, CheckCircle, FlaskConical, Lightbulb, ShieldAlert, XCircle } from 'lucide-react';
+import { AlertTriangle, Bug, CheckCircle, Lightbulb, ShieldAlert, XCircle } from 'lucide-react';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -31,16 +31,17 @@ const criticalityOrder: Record<Criticality, number> = { critical: 0, high: 1, me
 export function AxisDetailSheet({ axis, open, onClose }: AxisDetailSheetProps) {
   if (!axis) return null;
 
-  const sorted = [...axis.findings].sort(
+  const visibleFindings = axis.findings.filter(isClientVisibleFinding);
+  const visibleAxis = { ...axis, findings: visibleFindings };
+  const sorted = [...visibleFindings].sort(
     (a, b) => criticalityOrder[a.criticality] - criticalityOrder[b.criticality],
   );
 
-  const criticalCount = axis.findings.filter(f => f.criticality === 'critical').length;
-  const highCount     = axis.findings.filter(f => f.criticality === 'high').length;
-  const mediumCount   = axis.findings.filter(f => f.criticality === 'medium').length;
-  const lowCount      = axis.findings.filter(f => f.criticality === 'low').length;
-  const breakdown = getAxisScoreBreakdown(axis);
-  const nonTestedCount = breakdown.notMeasured + breakdown.notAvailable;
+  const criticalCount = visibleFindings.filter(f => f.criticality === 'critical').length;
+  const highCount     = visibleFindings.filter(f => f.criticality === 'high').length;
+  const mediumCount   = visibleFindings.filter(f => f.criticality === 'medium').length;
+  const lowCount      = visibleFindings.filter(f => f.criticality === 'low').length;
+  const breakdown = getAxisScoreBreakdown(visibleAxis);
 
   return (
     <Sheet open={open} onOpenChange={v => { if (!v) onClose(); }}>
@@ -59,23 +60,26 @@ export function AxisDetailSheet({ axis, open, onClose }: AxisDetailSheetProps) {
               <p className="text-sm text-muted-foreground mt-2 leading-relaxed">{axis.description}</p>
             </div>
             <div className="flex-shrink-0">
-              <ScoreGauge score={breakdown.scorePct} size={56} strokeWidth={5} />
+              <ScoreGauge
+                score={breakdown.scoreMeasured ?? 0}
+                size={56}
+                strokeWidth={5}
+                valueText={breakdown.scoreMeasured === null ? 'N/T' : `${breakdown.scoreMeasured}%`}
+              />
             </div>
           </div>
 
           {/* KPI summary chips */}
           <div className="flex flex-wrap gap-2 mt-4">
             <span className={`text-sm font-mono font-bold px-3 py-1.5 rounded-full border ${getScoreColor(breakdown.scorePct)} bg-muted/30`}>
-              {breakdown.x}/{breakdown.y}
+              {breakdown.scoreMeasured === null ? 'Score non calculable' : `${breakdown.scoreMeasured}%`}
             </span>
             <span className="text-sm px-3 py-1.5 rounded-full border border-border text-muted-foreground">
-              {breakdown.passed}/{breakdown.y} réussis - {axis.findings.length} constat{axis.findings.length !== 1 ? 's' : ''}
+              {breakdown.passed}/{breakdown.y} mesurés réussis - {visibleFindings.length} constat{visibleFindings.length !== 1 ? 's' : ''}
             </span>
-            {nonTestedCount > 0 && (
-              <span className="text-sm px-3 py-1.5 rounded-full border border-yellow-500/20 bg-yellow-500/10 text-yellow-400">
-                {nonTestedCount} Non testé{nonTestedCount > 1 ? 's' : ''}
-              </span>
-            )}
+            <span className="text-sm px-3 py-1.5 rounded-full border border-border text-muted-foreground">
+              Score sur contrôles mesurés
+            </span>
             {criticalCount > 0 && (
               <span className="text-sm criticality-critical px-3 py-1.5 rounded-full border">
                 {criticalCount} critique{criticalCount > 1 ? 's' : ''}
@@ -110,7 +114,6 @@ export function AxisDetailSheet({ axis, open, onClose }: AxisDetailSheetProps) {
             <Accordion type="multiple" className="space-y-3">
               {sorted.map(f => {
                 const isPassing = f.status === 'pass' || f.origin === 'passing_kpi';
-                const isNonTested = isNonTestedFinding(f);
                 return (
                 <AccordionItem
                   key={f.id}
@@ -127,14 +130,6 @@ export function AxisDetailSheet({ axis, open, onClose }: AxisDetailSheetProps) {
                             <span className="inline-flex items-center gap-1.5 text-sm px-2.5 py-1 rounded-md border flex-shrink-0 mt-0.5 text-emerald-300 bg-emerald-500/20 border-emerald-500/40 font-semibold">
                               <CheckCircle className="w-3 h-3" />
                               <span>Validé</span>
-                            </span>
-                          );
-                        }
-                        if (isNonTested) {
-                          return (
-                            <span className="inline-flex items-center gap-1.5 text-sm px-2.5 py-1 rounded-md border flex-shrink-0 mt-0.5 text-yellow-400 bg-yellow-500/10 border-yellow-500/20">
-                              <FlaskConical className="w-3 h-3" />
-                              <span>Non testé</span>
                             </span>
                           );
                         }

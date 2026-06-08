@@ -104,3 +104,38 @@ func TestRenderPagesViaBrowserPoolReturnsRenderedHTML(t *testing.T) {
 		t.Fatalf("expected primary chromium render metadata, got engine=%q estimated=%v", results[0].RenderEngine, results[0].Estimated)
 	}
 }
+
+func TestRunMobileTracesUsesBrowserPoolMobile3GProfile(t *testing.T) {
+	oldPoolURL := os.Getenv("BROWSER_POOL_URL")
+	defer os.Setenv("BROWSER_POOL_URL", oldPoolURL)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/render" {
+			http.NotFound(w, r)
+			return
+		}
+		var payload map[string]interface{}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode mobile render payload: %v", err)
+		}
+		if payload["profile"] != "mobile_3g" {
+			t.Fatalf("expected mobile_3g profile, got %v", payload["profile"])
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"status":"success","url":"https://example.com","final_url":"https://example.com","fcp_ms":900,"lcp_ms":1800,"cls":0.03,"render_engine":"chromium","profile":"mobile_3g"}`))
+	}))
+	defer server.Close()
+
+	os.Setenv("BROWSER_POOL_URL", server.URL)
+	results := RunMobileTraces([]string{"https://example.com"})
+
+	if len(results) != 1 || !results[0].Available {
+		t.Fatalf("expected one measured mobile result, got %#v", results)
+	}
+	if results[0].MeasurementStatus != "measured" || results[0].DataQuality != "VALID" {
+		t.Fatalf("unexpected mobile measurement metadata: %#v", results[0])
+	}
+	if results[0].FCPMS != 900 || results[0].LCPMS != 1800 {
+		t.Fatalf("unexpected mobile metrics: %#v", results[0])
+	}
+}

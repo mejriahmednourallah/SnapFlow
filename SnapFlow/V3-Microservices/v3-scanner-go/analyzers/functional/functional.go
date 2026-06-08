@@ -1,12 +1,15 @@
 package functional
 
 import (
+	"context"
 	"io"
 	"net/http"
 	"net/url"
 	"regexp"
 	"strings"
 	"time"
+
+	"snapflow/v3-scanner-go/browserpool"
 )
 
 type FormInfo struct {
@@ -18,11 +21,15 @@ type FormInfo struct {
 
 type SearchProbeResult struct {
 	SearchURL      string `json:"search_url"`
+	FinalURL       string `json:"final_url,omitempty"`
 	Query          string `json:"query"`
+	Method         string `json:"method,omitempty"`
+	QueryParam     string `json:"query_param,omitempty"`
 	Status         string `json:"status"`
 	StatusCode     int    `json:"status_code,omitempty"`
 	ResultBehavior string `json:"result_behavior,omitempty"`
 	Details        string `json:"details,omitempty"`
+	FailureReason  string `json:"failure_reason,omitempty"`
 	Executed       bool   `json:"executed"`
 }
 
@@ -207,18 +214,44 @@ func classifySearchResponse(statusCode int, body string) (bool, string) {
 func executeSearchProbe(client *http.Client, baseURL string, form FormInfo) SearchProbeResult {
 	const query = "snapflow-test"
 	result := SearchProbeResult{
-		Query:    query,
-		Executed: false,
+		Query:      query,
+		Method:     strings.ToUpper(form.Method),
+		QueryParam: form.QueryParam,
+		Executed:   false,
 	}
 
 	if form.Method != "" && !strings.EqualFold(form.Method, "GET") {
+		if browserpool.IsEnabled() {
+			probe, err := browserpool.TestSearch(context.Background(), baseURL, 30000)
+			if err != nil {
+				result.Status = "request_error"
+				result.Details = err.Error()
+				result.FailureReason = "browser_search_probe_failed"
+				return result
+			}
+			result.SearchURL = probe.SearchURL
+			result.FinalURL = probe.FinalURL
+			result.Query = probe.Query
+			result.Method = probe.Method
+			result.QueryParam = probe.QueryParam
+			result.Status = probe.Status
+			result.ResultBehavior = probe.ResultBehavior
+			result.Details = probe.Details
+			result.Executed = probe.Executed
+			if !probe.Executed {
+				result.FailureReason = "browser_search_probe_not_executed"
+			}
+			return result
+		}
 		result.Status = "not_executed"
-		result.Details = "Search form method is not GET; safe backend probe skipped"
+		result.Details = "Search form uses POST and the browser pool is unavailable"
+		result.FailureReason = "search_post_probe_requires_browser"
 		return result
 	}
 	if form.QueryParam == "" {
 		result.Status = "not_executed"
 		result.Details = "Search input name could not be identified"
+		result.FailureReason = "search_query_field_not_identified"
 		return result
 	}
 
@@ -227,11 +260,13 @@ func executeSearchProbe(client *http.Client, baseURL string, form FormInfo) Sear
 	if actionURL == "" {
 		result.Status = "not_executed"
 		result.Details = "Search action URL could not be resolved"
+		result.FailureReason = "search_action_unresolved"
 		return result
 	}
 	if !internal {
 		result.Status = "not_executed"
 		result.Details = "Search action points outside the audited host"
+		result.FailureReason = "search_action_cross_origin"
 		return result
 	}
 
@@ -239,6 +274,7 @@ func executeSearchProbe(client *http.Client, baseURL string, form FormInfo) Sear
 	if err != nil {
 		result.Status = "not_executed"
 		result.Details = "Search action URL is invalid"
+		result.FailureReason = "search_action_invalid"
 		return result
 	}
 	params := parsed.Query()
@@ -250,6 +286,7 @@ func executeSearchProbe(client *http.Client, baseURL string, form FormInfo) Sear
 	if err != nil {
 		result.Status = "request_error"
 		result.Details = err.Error()
+		result.FailureReason = "search_request_failed"
 		return result
 	}
 	defer resp.Body.Close()
@@ -258,6 +295,7 @@ func executeSearchProbe(client *http.Client, baseURL string, form FormInfo) Sear
 	passed, behavior := classifySearchResponse(resp.StatusCode, string(bodyBytes))
 	result.Executed = true
 	result.StatusCode = resp.StatusCode
+	result.FinalURL = resp.Request.URL.String()
 	result.ResultBehavior = behavior
 	result.Status = "passed"
 	if !passed {

@@ -12,7 +12,7 @@ export function SectionTitle({ title, theme }: SectionTitleProps) {
   const accent = theme?.accent ?? '#4E8CCF';
 
   return (
-    <View style={{ marginBottom: 10 }}>
+    <View style={{ marginBottom: 8 }}>
       <Text style={s.h2}>{title}</Text>
       <View style={{ width: 46, height: 2.6, borderRadius: 2, backgroundColor: accent }} />
     </View>

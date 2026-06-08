@@ -24,13 +24,11 @@ export function ExecutiveSummaryPage({ report, theme, clientLogoSrc }: Executive
 
   const validatedCount = report.globalScore.passed;
   const failedCount = report.globalScore.failed;
-  const notMeasuredOrUnavailableCount = report.globalScore.notMeasured + report.globalScore.notAvailable;
-  const totalKpiCount = validatedCount + failedCount + notMeasuredOrUnavailableCount;
+  const totalKpiCount = validatedCount + failedCount;
 
   const distributionRows = [
     { label: 'Validés', count: validatedCount, color: '#16A34A' },
     { label: 'En échec', count: failedCount, color: '#DC2626' },
-    { label: 'Non testés', count: notMeasuredOrUnavailableCount, color: '#F97316' },
   ];
 
   const toPercent = (count: number): string => {
@@ -47,9 +45,12 @@ export function ExecutiveSummaryPage({ report, theme, clientLogoSrc }: Executive
         <View style={{ flexDirection: 'row', gap: 12, marginBottom: 14 }}>
           <View style={{ ...s.card, width: 170, alignItems: 'center', justifyContent: 'center' }}>
             <ScoreGauge
-              score={report.globalScore.value}
+              score={report.globalScore.scoreMeasured ?? 0}
               status={report.globalScore.status}
-              caption={`${report.globalScore.x}/${report.globalScore.y}`}
+              valueText={report.globalScore.scoreMeasured === null ? 'N/C' : undefined}
+              caption={report.globalScore.scoreMeasured === null
+                ? 'Score non calculable'
+                : 'Score sur contrôles mesurés'}
               theme={theme}
             />
           </View>

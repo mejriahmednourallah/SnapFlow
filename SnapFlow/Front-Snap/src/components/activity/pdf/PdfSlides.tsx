@@ -103,7 +103,7 @@ function Callout({ value, color = '#1c1917' }: { value: number | string; color?:
 // ── SLIDE 1: Cover (full-bleed)
 function CoverSlide({ cfg, data }: { cfg: PdfConfig; data: PdfData }) {
   const { pdfColor, pdfBrandLeft, pdfBrandRight, coverKpis } = cfg;
-  const { project, totalCount, total, open, resolved, critical, blocked, avgClosureDays,
+  const { project, totalCount, total, open, resolved, critical, blocked,
     dateFrom, dateTo, dataMinDate, dataMaxDate, assignedTo } = data;
 
   const period = dateFrom && dateTo
@@ -120,7 +120,6 @@ function CoverSlide({ cfg, data }: { cfg: PdfConfig; data: PdfData }) {
     { key: 'resolved', label: 'R\u00e9solues', val: resolved,                                             alarm: false },
     { key: 'critical', label: 'Critiques',     val: critical,                                             alarm: critical > 0 },
     { key: 'blocked',  label: 'Bloqu\u00e9es', val: blocked,                                              alarm: blocked  > 0 },
-    { key: 'closure',  label: 'D\u00e9lai cl\u00f4ture', val: avgClosureDays !== null ? `${avgClosureDays}j` : '\u2014', alarm: false },
   ] as { key: string; label: string; val: number | string; alarm: boolean }[]).filter(k => coverKpis[k.key]);
 
   return (
@@ -402,7 +401,7 @@ function IndicateursSlide({ cfg, data }: { cfg: PdfConfig; data: PdfData }) {
 // ── SLIDE: Statuts (Donut + table)
 function StatutsSlide({ cfg, data }: { cfg: PdfConfig; data: PdfData }) {
   const { pdfColor } = cfg;
-  const { project, total, resolved, blocked, critical, avgResolutionDays, avgClosureDays, avgDaysOpen,
+  const { project, total, resolved, blocked, critical,
     statusData, filteredIssues, statusColorOf, countByFn } = data;
 
   return (
@@ -462,31 +461,6 @@ function StatutsSlide({ cfg, data }: { cfg: PdfConfig; data: PdfData }) {
               {resolved} demande{resolved !== 1 ? 's résolues' : ' résolue'} sur {total} au total.
             </div>
           </div>
-          {(avgResolutionDays !== null || avgClosureDays !== null || avgDaysOpen !== null) && (
-            <div style={{ background: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: 8, padding: '10px 12px' }}>
-              <div style={{ fontWeight: 700, fontSize: 12, color: '#0c4a6e', marginBottom: 6 }}>Délais de traitement</div>
-              <div style={{ display: 'flex', gap: 20 }}>
-                {avgResolutionDays !== null && (
-                  <div>
-                    <div style={{ fontSize: 22, fontWeight: 800, color: pdfColor }}>{avgResolutionDays}<span style={{ fontSize: 11, marginLeft: 2 }}>j</span></div>
-                    <div style={{ fontSize: 10, color: '#0369a1' }}>Résolution équipe</div>
-                  </div>
-                )}
-                {avgClosureDays !== null && (
-                  <div>
-                    <div style={{ fontSize: 22, fontWeight: 800, color: avgClosureDays <= 14 ? GREEN : RED }}>{avgClosureDays}<span style={{ fontSize: 11, marginLeft: 2 }}>j</span></div>
-                    <div style={{ fontSize: 10, color: '#0369a1' }}>Clôture client</div>
-                  </div>
-                )}
-                {avgDaysOpen !== null && (
-                  <div>
-                    <div style={{ fontSize: 22, fontWeight: 800, color: avgDaysOpen > 30 ? RED : AMBER }}>{avgDaysOpen}<span style={{ fontSize: 11, marginLeft: 2 }}>j</span></div>
-                    <div style={{ fontSize: 10, color: '#0369a1' }}>Ancienneté ouvertes</div>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
           {blocked > 0 && (
             <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, padding: '10px 12px' }}>
               <div style={{ fontWeight: 700, fontSize: 12, color: '#991b1b', marginBottom: 2 }}>{blocked} demande{blocked > 1 ? 's bloquées' : ' bloquée'}</div>

@@ -6,6 +6,7 @@ All output in French for easy client consumption
 from datetime import datetime
 import re
 from typing import Optional
+from urllib.parse import urlparse
 
 def _privacy_framework(scan_url: str = "") -> dict:
     """Return jurisdiction-specific legal framework strings based on the site's TLD."""
@@ -69,6 +70,43 @@ def _optional_float(val):
         return float(val)
     except (TypeError, ValueError):
         return None
+
+
+def _coverage_pct(count, total) -> float:
+    total_int = _safe_int(total)
+    if total_int <= 0:
+        return 0.0
+    return round((_safe_int(count) / total_int) * 100.0, 2)
+
+
+def _ai_row_types(row: dict) -> list[str]:
+    row_dict = _safe_dict(row)
+    raw = row_dict.get("json_ld_types") or row_dict.get("schema_types") or row_dict.get("schema_org_types")
+    if isinstance(raw, list):
+        return [str(item).strip() for item in raw if str(item or "").strip()]
+    return [part.strip() for part in str(raw or "").split(",") if part.strip()]
+
+
+def _ai_row_has_json_ld_type(row: dict) -> bool:
+    row_dict = _safe_dict(row)
+    if row_dict.get("json_ld_valid") is False:
+        return False
+    return bool(_ai_row_types(row_dict))
+
+
+def _ai_row_is_homepage(row: dict, domain_url: str) -> bool:
+    page_url = str(_safe_dict(row).get("page_url") or "").strip()
+    if not page_url or not domain_url:
+        return False
+    try:
+        page = urlparse(page_url)
+        domain = urlparse(domain_url)
+        page_host = (page.hostname or "").lower().removeprefix("www.")
+        domain_host = (domain.hostname or "").lower().removeprefix("www.")
+        page_path = (page.path or "/").rstrip("/") or "/"
+        return page_host == domain_host and page_path == "/"
+    except Exception:
+        return page_url.rstrip("/") == str(domain_url or "").rstrip("/")
 
 
 def _is_cache_friendly(cache_control: str, has_cache: bool) -> bool:
@@ -576,7 +614,14 @@ _KPI_META = {
     "Linking Externe":                    ("seo_external_linking",    "low",    "aggregate"),
     "Qualité H1 (NLP)":                   ("seo_h1_quality",          "medium", "aggregate"),
     "Méta Description (NLP)":             ("seo_meta_nlp",            "medium", "aggregate"),
-    "AI Readiness (llms.txt)":            ("seo_ai_readiness",        "low",    "heuristic"),
+    # — AI Friendly —
+    "AI Readiness (llms.txt)":            ("ai_llms_txt",             "low",    "heuristic"),
+    "Robots IA":                          ("ai_robots_access",        "low",    "heuristic"),
+    "HTTPS pour Moteurs IA":              ("ai_https_ready",          "low",    "concrete"),
+    "Schema.org pour IA":                 ("ai_schema_org",           "low",    "aggregate"),
+    "FAQ lisible IA":                     ("ai_faq_schema",           "low",    "aggregate"),
+    "Contenu HTML Brut IA":               ("ai_raw_content_visible",  "medium", "aggregate"),
+    "Titres Questions IA":                ("ai_heading_questions",    "low",    "aggregate"),
     # — Audit UX/UI —
     "Ciblage":                            ("ux_audience_targeting",   "low",    "aggregate"),
     "Partage Social":                     ("ux_social_sharing",       "medium", "aggregate"),
@@ -647,7 +692,13 @@ _KPI_BUSINESS_IMPACT = {
     "seo_external_linking":     "Les liens externes vers des sources de qualité renforcent l'autorité perçue du domaine.",
     "seo_h1_quality":           "Des H1 absents ou multiples affaiblissent le signal SEO principal de chaque page.",
     "seo_meta_nlp":             "Des meta descriptions générées par NLP manquantes diminuent la qualité des snippets dans les moteurs de recherche.",
-    "seo_ai_readiness":         "L'absence de llms.txt réduit la découvrabilité du site dans les moteurs génératifs comme Perplexity ou SearchGPT.",
+    "ai_llms_txt":              "L'absence de llms.txt réduit la découvrabilité du site dans les moteurs génératifs comme Perplexity ou SearchGPT.",
+    "ai_robots_access":         "Des règles robots bloquant les agents IA empêchent certains moteurs génératifs de découvrir ou citer les contenus publics.",
+    "ai_https_ready":           "Un accès HTTPS fiable est nécessaire pour que les moteurs IA explorent le site sans avertissement de sécurité.",
+    "ai_schema_org":            "Les données structurées Schema.org aident les moteurs IA à comprendre les entités, offres, questions et pages importantes.",
+    "ai_faq_schema":            "Les FAQ structurées améliorent la capacité des moteurs IA à extraire des réponses courtes et directement citables.",
+    "ai_raw_content_visible":   "Un contenu principal visible sans JavaScript facilite l'extraction fiable par les crawlers IA et les moteurs de recherche.",
+    "ai_heading_questions":     "Des titres formulés en questions ou bien structurés rendent les réponses du site plus faciles à repérer et à réutiliser.",
     "ux_audience_targeting":    "Un ciblage d'audience insuffisant peut entraîner un message inadapté aux visiteurs et une conversion diminuée.",
     "ux_social_sharing":        "L'absence de partage social limite l'acquisition organique et réduit la viralité du contenu.",
     "ux_design_ergonomics":     "Un design peu ergonomique ou un CLS élevé nuit à l'expérience utilisateur et pénalise les Core Web Vitals.",
@@ -688,7 +739,10 @@ _KPI_TICKET_TEAM = {
     "seo_alt_tags": "content", "seo_meta_tags": "content", "seo_sitemap": "backend",
     "seo_robots_txt": "backend", "seo_duplication": "content", "seo_url_structure": "backend",
     "seo_heading_structure": "content", "seo_internal_linking": "content",
-    "seo_h1_quality": "content", "seo_meta_nlp": "content", "seo_ai_readiness": "content",
+    "seo_h1_quality": "content", "seo_meta_nlp": "content",
+    "ai_llms_txt": "content", "ai_robots_access": "backend", "ai_https_ready": "infrastructure",
+    "ai_schema_org": "content", "ai_faq_schema": "content", "ai_raw_content_visible": "frontend",
+    "ai_heading_questions": "content",
     "content_freshness": "content", "content_thin": "content", "content_cannibalization": "content",
     "content_missing_cta": "content", "content_broken_structure": "content", "content_lexical_diversity": "content",
     "rgpd_cookie_consent": "legal", "rgpd_privacy_policy": "legal", "rgpd_data_retention": "legal",
@@ -849,8 +903,12 @@ def _build_evidence(kpi_id: str, evidence_quality: str, data: dict, domain_url: 
         sources = ["headless_console"]
     elif kpi_id in ("rgpd_cookie_consent",):
         sources = ["static_html", "nlp_cmp_detection"]
-    elif kpi_id in ("seo_sitemap", "seo_robots_txt"):
+    elif kpi_id in ("seo_sitemap", "seo_robots_txt", "ai_llms_txt", "ai_robots_access"):
         sources = ["http_probe"]
+    elif kpi_id in ("ai_schema_org", "ai_faq_schema", "ai_raw_content_visible", "ai_heading_questions"):
+        sources = ["nlp_worker", "static_html"]
+    elif kpi_id in ("ai_https_ready",):
+        sources = ["ssl_probe"]
     elif kpi_id in ("tech_cve_check", "sec_js_deps"):
         sources = ["cve_scanner", "js_dependency_audit"]
     elif kpi_id in ("sec_service_exposure",):
@@ -1423,10 +1481,39 @@ _EVIDENCE_COVERAGE_REGISTRY = {
         "csv_columns": ["page_url", "issue", "meta_description", "length"],
         "missing_reason": "Les preuves NLP de meta description sont absentes.",
     },
-    "seo_ai_readiness": {
+    "ai_llms_txt": {
         "proof_type": "rows",
         "csv_columns": ["llms_url", "status", "content_type", "length", "useful_line", "parse_status"],
         "missing_reason": "Le fichier llms.txt n'a pas ete verifie avec un GET et des lignes utiles.",
+    },
+    "ai_robots_access": {
+        "proof_type": "rows",
+        "csv_columns": ["bot", "status", "source", "reason"],
+        "missing_reason": "La politique robots IA n'a pas ete conservee.",
+    },
+    "ai_https_ready": {
+        "proof_type": "proof_lines",
+        "missing_reason": "La preuve HTTPS/SSL n'a pas ete conservee.",
+    },
+    "ai_schema_org": {
+        "proof_type": "rows",
+        "csv_columns": ["page_url", "json_ld_valid", "json_ld_types", "json_ld_count", "json_ld_parse_errors", "schema_faq_present"],
+        "missing_reason": "Les pages avec JSON-LD Schema.org valide ne sont pas enumerees.",
+    },
+    "ai_faq_schema": {
+        "proof_type": "rows",
+        "csv_columns": ["page_url", "page_type", "schema_faq_present", "title", "schema_types"],
+        "missing_reason": "Les pages FAQ ou FAQPage ne sont pas enumerees.",
+    },
+    "ai_raw_content_visible": {
+        "proof_type": "rows",
+        "csv_columns": ["page_url", "raw_content_visible", "raw_content_word_count", "main_word_count", "rendered_content_used"],
+        "missing_reason": "La comparaison contenu brut/rendu n'a pas ete conservee.",
+    },
+    "ai_heading_questions": {
+        "proof_type": "rows",
+        "csv_columns": ["page_url", "tag", "text"],
+        "missing_reason": "Les titres/questions detectes ne sont pas enumeres.",
     },
     "ux_mobile_friendly": {
         "proof_type": "rows",
@@ -1764,9 +1851,19 @@ def _build_curated_evidence_digest(kpi_id: str, kpi_name: str, status: str, evid
         _append_digest_line(lines, f"Ports ouverts risqués: {len(rows)}")
 
     elif kpi_id == "func_forms":
-        rows = _unique_digest_rows(_safe_list(evidence.get("anomalous_tests_all")))
+        rows = _unique_digest_rows(
+            _safe_list(evidence.get("test_results_sample"))
+            or _safe_list(evidence.get("anomalous_tests_all"))
+        )
         _append_digest_line(lines, f"Formulaires détectés/testés: {_safe_int(evidence.get('forms_detected'))}/{_safe_int(evidence.get('forms_tested'))}")
-        _append_digest_line(lines, f"Tests exécutés: {_safe_int(evidence.get('tests_run'))}, signaux exploitables: {_safe_int(evidence.get('signal_count'))}")
+        _append_digest_line(
+            lines,
+            f"Tests exécutés: {_safe_int(evidence.get('tests_run'))}, "
+            f"réponses valides: {_safe_int(evidence.get('valid_responses'))}, "
+            f"erreurs transport: {_safe_int(evidence.get('transport_errors'))}",
+        )
+        if _safe_int(evidence.get("timeouts")) > 0:
+            _append_digest_line(lines, f"Timeouts: {_safe_int(evidence.get('timeouts'))}")
         if _safe_int(evidence.get("anomalies_count")) > 0:
             _append_digest_line(lines, f"Anomalies confirmées: {_safe_int(evidence.get('anomalies_count'))}")
         if _digest_str(evidence.get("execution_status")):
@@ -1821,6 +1918,39 @@ def _build_curated_evidence_digest(kpi_id: str, kpi_name: str, status: str, evid
                 "bad_h1_urls_all", "pages_missing_contextual_links_all", "non_clean_urls_all",
                 "duplicate_clusters_all",
             ])
+        if not rows and kpi_id == "seo_meta_tags":
+            rows = _unique_digest_rows(
+                [
+                    {"page_url": url, "issue": "missing_meta_description"}
+                    for url in _unique_strings(evidence.get("meta_missing_urls_all"))
+                ]
+                + [
+                    {"page_url": url, "issue": "missing_title"}
+                    for url in _unique_strings(evidence.get("title_missing_urls_all"))
+                ]
+            )
+        elif not rows and kpi_id == "seo_heading_structure":
+            homepage_url = _clean_text(evidence.get("homepage_url"))
+            rows = _unique_digest_rows([
+                {
+                    "url": url,
+                    "issue": "missing_h1" if (
+                        bool(evidence.get("homepage_h1_missing"))
+                        and url == homepage_url
+                    ) else "invalid_heading_hierarchy",
+                }
+                for url in _unique_strings(evidence.get("bad_h1_urls_all"))
+            ])
+        elif not rows and kpi_id == "seo_internal_linking":
+            rows = _unique_digest_rows([
+                {
+                    "page_url": url,
+                    "internal_links": None,
+                    "contextual_links": 0,
+                    "issue": "missing_contextual_links",
+                }
+                for url in _unique_strings(evidence.get("pages_missing_contextual_links_all"))
+            ])
         if kpi_id == "seo_alt_tags":
             _append_digest_line(lines, f"Images sans ALT: {_safe_int(evidence.get('missing_alt_image_count'))}")
         elif kpi_id == "seo_meta_tags":
@@ -1833,15 +1963,21 @@ def _build_curated_evidence_digest(kpi_id: str, kpi_name: str, status: str, evid
             _append_digest_line(lines, f"Couverture fiable: {_safe_dict(evidence.get('contextual_link_measurement')).get('reliable_coverage_pct', 'N/A')}%")
             if not rows:
                 measurement = _safe_dict(evidence.get("contextual_link_measurement"))
+                rows = _unique_digest_rows(_safe_list(measurement.get("rows")))
                 if measurement:
-                    rows = _unique_digest_rows([{
+                    fallback_row = {
                         "page_url": "sitewide",
                         "internal_links": evidence.get("total_internal_links"),
                         "contextual_links": evidence.get("total_contextual_internal_links"),
                         "issue": evidence.get("note") or "contextual_link_measurement",
                         "pages_checked": measurement.get("pages_checked"),
                         "reliable_coverage_pct": measurement.get("reliable_coverage_pct"),
-                    }])
+                        "failure_reason": measurement.get("failure_reason"),
+                    }
+                    if not rows:
+                        rows = _unique_digest_rows([fallback_row])
+                if measurement.get("failure_reason"):
+                    _append_digest_line(lines, f"Cause technique: {measurement.get('failure_reason')}")
         elif kpi_id == "seo_url_structure":
             _append_digest_line(lines, f"URLs problématiques: {_safe_int(evidence.get('non_clean_url_count'))}")
         elif kpi_id == "seo_duplication":
@@ -1872,15 +2008,66 @@ def _build_curated_evidence_digest(kpi_id: str, kpi_name: str, status: str, evid
             if _safe_int(data.get("meta_missing_pages")) > 0:
                 _append_digest_line(lines, "Meta descriptions manquantes: suivies dans le KPI Balises META.")
 
-    elif kpi_id in {"seo_sitemap", "seo_robots_txt", "seo_ai_readiness"}:
+    elif kpi_id in {"seo_sitemap", "seo_robots_txt", "ai_llms_txt"}:
         url_key = "sitemap_url" if kpi_id == "seo_sitemap" else "robots_url" if kpi_id == "seo_robots_txt" else "llms_url"
         detected_key = "sitemap_detected" if kpi_id == "seo_sitemap" else "robots_detected" if kpi_id == "seo_robots_txt" else "llms_txt_present_pages"
         target_url = _digest_str(evidence.get(url_key) or data.get(url_key) or data.get("url"))
-        if not target_url and kpi_id == "seo_ai_readiness":
+        if not target_url and kpi_id == "ai_llms_txt":
             target_url = f"{domain_url.rstrip('/')}/llms.txt"
-        _append_digest_line(lines, f"URL testée: {target_url or domain_url}")
-        _append_digest_line(lines, f"Présence détectée: {_digest_str(evidence.get(detected_key) or data.get(detected_key)) or ('oui' if status == 'passing' else 'non')}")
         rows = _unique_digest_rows(_safe_list(data.get("rows") or data.get("items")))
+        if kpi_id == "ai_llms_txt":
+            parse_status = _digest_str(evidence.get("llms_parse_status") or (rows[0].get("parse_status") if rows else ""))
+            if evidence.get("fetch_failed") and quality == "VALID":
+                quality = "PARTIAL"
+            _append_digest_line(lines, f"URL testée: {target_url or domain_url}")
+            _append_digest_line(lines, f"Fichier llms.txt: {'présent' if status == 'passing' else 'non exploitable'}")
+            if parse_status:
+                _append_digest_line(lines, f"Résultat de récupération: {parse_status}")
+        else:
+            _append_digest_line(lines, f"URL testée: {target_url or domain_url}")
+            _append_digest_line(lines, f"Présence détectée: {_digest_str(evidence.get(detected_key) or data.get(detected_key)) or ('oui' if status == 'passing' else 'non')}")
+
+    elif kpi_id in {"ai_robots_access", "ai_schema_org", "ai_faq_schema", "ai_raw_content_visible", "ai_heading_questions"}:
+        rows = _unique_digest_rows(
+            _safe_list(evidence.get("robot_rows")) if kpi_id == "ai_robots_access" else
+            _safe_list(evidence.get("schema_rows")) if kpi_id in {"ai_schema_org", "ai_faq_schema"} else
+            _safe_list(evidence.get("raw_content_rows")) if kpi_id == "ai_raw_content_visible" else
+            _safe_list(evidence.get("question_heading_rows")) if kpi_id == "ai_heading_questions" else
+            _safe_list(data.get("rows") or data.get("items") or data.get("bots"))
+        )
+        if kpi_id == "ai_robots_access":
+            _append_digest_line(lines, f"Politique robots IA: {_digest_str(evidence.get('robots_ai_status') or data.get('status')) or 'non renseignée'}")
+            _append_digest_line(lines, f"Bots bloqués: {_safe_int(evidence.get('blocked_bot_count'))}")
+        elif kpi_id == "ai_schema_org":
+            valid_pages = _safe_int(evidence.get("json_ld_valid_pages") or data.get("json_ld_valid_pages") or data.get("pages_detected"))
+            pages_checked = _safe_int(evidence.get("pages_checked") or data.get("pages_checked"))
+            coverage = _optional_float(evidence.get("json_ld_coverage_pct") or data.get("json_ld_coverage_pct"))
+            parse_errors = _safe_int(evidence.get("json_ld_parse_errors") or data.get("json_ld_parse_errors"))
+            first_types = []
+            for row in rows:
+                first_types.extend(_ai_row_types(_safe_dict(row)))
+            type_preview = ", ".join(sorted(set(first_types))[:6])
+            _append_digest_line(lines, f"JSON-LD valide: {valid_pages}/{pages_checked or '?'} page(s)")
+            if coverage is not None:
+                _append_digest_line(lines, f"Couverture JSON-LD: {coverage:.1f}%")
+            if parse_errors > 0:
+                _append_digest_line(lines, f"Erreurs de parsing JSON-LD: {parse_errors}")
+            _append_digest_line(lines, f"Types detectes: {type_preview or 'aucun type @type prouve'}")
+        elif kpi_id == "ai_raw_content_visible":
+            _append_digest_line(lines, f"Pages avec contenu brut visible: {_safe_int(evidence.get('raw_content_visible_pages') or data.get('raw_content_visible_pages'))}")
+            coverage = _optional_float(evidence.get("raw_content_coverage_pct") or data.get("raw_content_coverage_pct"))
+            if coverage is not None:
+                _append_digest_line(lines, f"Couverture contenu HTML brut: {coverage:.1f}%")
+            _append_digest_line(lines, f"Pages nécessitant le rendu JavaScript: {_safe_int(evidence.get('rendered_content_used_pages') or data.get('rendered_content_used_pages'))}")
+        else:
+            _append_digest_line(lines, f"Pages détectées: {_safe_int(data.get('pages_detected') or data.get('page_count') or evidence.get('schema_org_pages') or evidence.get('faq_pages') or evidence.get('question_heading_pages'))}")
+            if kpi_id == "ai_heading_questions":
+                coverage = _optional_float(evidence.get("question_heading_coverage_pct") or data.get("question_heading_coverage_pct"))
+                pages_checked = _safe_int(evidence.get("pages_checked") or data.get("pages_checked"))
+                if pages_checked > 0:
+                    _append_digest_line(lines, f"Pages verifiees: {pages_checked}")
+                if coverage is not None:
+                    _append_digest_line(lines, f"Couverture titres questions: {coverage:.1f}%")
 
     elif kpi_id in {"perf_desktop_speed", "perf_mobile_speed", "perf_image_optim", "perf_cache", "perf_compression", "perf_console_errors", "eco_index_score"}:
         raw_perf_rows = _performance_digest_rows(data) if kpi_id in {"perf_desktop_speed", "perf_mobile_speed"} else []
@@ -2138,7 +2325,13 @@ _KPI_TYPE_DEFAULTS = {
     "seo_external_linking": "recommendation",
     "seo_h1_quality": "recommendation",
     "seo_meta_nlp": "recommendation",
-    "seo_ai_readiness": "recommendation",
+    "ai_llms_txt": "recommendation",
+    "ai_robots_access": "recommendation",
+    "ai_https_ready": "recommendation",
+    "ai_schema_org": "recommendation",
+    "ai_faq_schema": "recommendation",
+    "ai_raw_content_visible": "recommendation",
+    "ai_heading_questions": "recommendation",
     "ux_audience_targeting": "recommendation",
     "ux_social_sharing": "recommendation",
     "ux_design_ergonomics": "recommendation",
@@ -2391,10 +2584,9 @@ def _evaluate_module_versions(modules: list) -> dict:
         status = "passing"
         severity = None
     elif uncertain:
-        # Modules were detected but cannot be fully evaluated (not in local catalogue,
-        # or version data incomplete). This is inconclusive, not untested.
-        status = "warning"
-        severity = "medium"
+        # Detection is evidence, but it is not a support/security verdict.
+        status = "not_evaluated"
+        severity = None
     else:
         # Truly empty module list — scan ran but found nothing to evaluate
         status = "not_available"
@@ -2574,6 +2766,10 @@ def _build_contract_evidence(kpi_id: str, kpi_obj: dict, pages_scanned: int, dom
         non_transactional_forms_tested = _safe_int(data.get("non_transactional_forms_tested"))
         tests_run = _safe_int(data.get("tests_run"))
         signal_count = _safe_int(data.get("signal_count"))
+        responses_received = _safe_int(data.get("responses_received"))
+        valid_responses = _safe_int(data.get("valid_responses"))
+        transport_errors = _safe_int(data.get("transport_errors"))
+        timeouts = _safe_int(data.get("timeouts"))
         anomalies_count = _safe_int(data.get("anomalies") or data.get("anomalies_count"))
         suppressed_low_confidence_anomalies = _safe_int(data.get("suppressed_low_confidence_anomalies"))
         anomalies_by_type = _safe_dict(data.get("anomalies_by_type"))
@@ -2582,14 +2778,36 @@ def _build_contract_evidence(kpi_id: str, kpi_obj: dict, pages_scanned: int, dom
         ])
         anomalous_tests_raw = _safe_list(data.get("anomalous_tests_all", []))
         anomalous_tests_all = [_normalize_anomalous_test_row(_safe_dict(row)) for row in anomalous_tests_raw]
+        test_results_sample = [
+            _normalize_anomalous_test_row(_safe_dict(row))
+            for row in _safe_list(data.get("test_results_sample", []))
+        ]
+        explicit_no_usable_result = _clean_text(data.get("failure_reason")) in {
+            "form_fuzzer_no_usable_signals",
+            "form_fuzzer_no_usable_responses",
+        }
+        response_counters_reported = data.get("response_counters_reported")
+        if response_counters_reported is None:
+            response_counters_reported = "responses_received" in data or "valid_responses" in data
+        if not response_counters_reported and not explicit_no_usable_result:
+            sampled_responses = sum(
+                1 for row in [*test_results_sample, *anomalous_tests_all]
+                if _safe_int(row.get("status_code")) > 0
+            )
+            responses_received = max(
+                sampled_responses,
+                tests_run - transport_errors - timeouts,
+                0,
+            )
+        if not response_counters_reported and not explicit_no_usable_result:
+            valid_responses = max(responses_received, 0)
 
-        no_usable_signals = (
+        no_usable_results = (
             tests_run > 0
-            and signal_count == 0
-            and str(data.get("failure_reason") or "").strip() == "form_fuzzer_no_usable_signals"
+            and valid_responses == 0
         )
 
-        if no_usable_signals:
+        if no_usable_results:
             status_override = "not_evaluated"
             data_quality = "MISSING"
             confidence_penalty = 2
@@ -2616,6 +2834,10 @@ def _build_contract_evidence(kpi_id: str, kpi_obj: dict, pages_scanned: int, dom
             "non_transactional_forms_tested": non_transactional_forms_tested,
             "tests_run": tests_run,
             "signal_count": signal_count,
+            "responses_received": responses_received,
+            "valid_responses": valid_responses,
+            "transport_errors": transport_errors,
+            "timeouts": timeouts,
             "execution_status": data.get("execution_status"),
             "failure_reason": data.get("failure_reason"),
             "response_type": data.get("response_type"),
@@ -2625,6 +2847,7 @@ def _build_contract_evidence(kpi_id: str, kpi_obj: dict, pages_scanned: int, dom
             "anomalies_by_type": anomalies_by_type if anomalies_by_type or anomalies_count == 0 else _missing_field("Le détail des signaux par type n'a pas été conservé"),
             "affected_page_urls_all": affected_page_urls_all if affected_page_urls_all or forms_detected == 0 else _missing_field("Aucune URL de page formulaire n'a été conservée"),
             "anomalous_tests_all": anomalous_tests_all if anomalous_tests_all or anomalies_count == 0 else _missing_field("Les payloads de fuzzing anormaux n'ont pas été conservés"),
+            "test_results_sample": test_results_sample,
         })
         return evidence, data_quality, status_override, confidence_penalty
 
@@ -2834,17 +3057,22 @@ def _build_contract_evidence(kpi_id: str, kpi_obj: dict, pages_scanned: int, dom
         homepage_url = _clean_text(data.get("homepage_url") or domain_url)
         if homepage_h1_missing and homepage_url and homepage_url not in bad_h1_urls:
             bad_h1_urls = [homepage_url] + bad_h1_urls
-        if bad_h1_count > 0 and not bad_h1_urls:
+        effective_bad_h1_count = max(
+            bad_h1_count,
+            len(bad_h1_urls),
+            1 if homepage_h1_missing else 0,
+        )
+        if effective_bad_h1_count > 0 and not bad_h1_urls:
             data_quality = "PARTIAL"
             confidence_penalty = 1
         evidence.update({
             "data_quality": data_quality,
-            "bad_h1_page_count": bad_h1_count,
+            "bad_h1_page_count": effective_bad_h1_count,
             "bad_h1_urls_all": bad_h1_urls if bad_h1_urls or bad_h1_count == 0 else _missing_field("Les URLs avec H1 invalide n'ont pas été conservées"),
             "homepage_h1_missing": homepage_h1_missing,
             "homepage_url": homepage_url if homepage_url else _missing_field("URL de la page d'accueil absente"),
         })
-        evidence["affected_pages"] = max(len(bad_h1_urls), bad_h1_count)
+        evidence["affected_pages"] = effective_bad_h1_count
         return evidence, data_quality, status_override, confidence_penalty
 
     if kpi_id == "seo_internal_linking":
@@ -2865,7 +3093,7 @@ def _build_contract_evidence(kpi_id: str, kpi_obj: dict, pages_scanned: int, dom
             confidence_penalty = max(confidence_penalty, 1)
             if status_override is None and missing_count > 0:
                 status_override = "warning"
-        if reliable_coverage_pct and reliable_coverage_pct < 50.0:
+        if pages_checked > 0 and reliable_coverage_pct < 50.0:
             data_quality = "PARTIAL"
             confidence_penalty = max(confidence_penalty, 2)
             status_override = "not_evaluated"
@@ -2977,7 +3205,14 @@ def _build_contract_evidence(kpi_id: str, kpi_obj: dict, pages_scanned: int, dom
             eol = data.get("cms_eol")
             explicit_support_status = _clean_text(data.get("cms_support_status"))
         version_label = "Branche detectee" if re.match(r"^\d+\.x$", version, re.IGNORECASE) else "Version detectee"
-        support_status = explicit_support_status or ("end_of_life" if eol is True else "supported" if eol is False else _missing_field("Le statut de support n'a pas été déterminé par le scan"))
+        if explicit_support_status and (version or eol is not None):
+            support_status = explicit_support_status
+        elif eol is True:
+            support_status = "end_of_life"
+        elif eol is False and version:
+            support_status = "supported"
+        else:
+            support_status = _missing_field("Le statut de support n'a pas ete determine sans version exploitable")
         latest = _lookup_latest_version(product)
         latest_version = latest.get("latest_known_version") if latest else None
         comparison = None
@@ -3033,7 +3268,6 @@ def _build_contract_evidence(kpi_id: str, kpi_obj: dict, pages_scanned: int, dom
             evidence["detection_note"] = "Langage deduit depuis le systeme de gestion du site; version a verifier."
             evidence["language_inferred"] = True
             data_quality = "PARTIAL"
-            status_override = "not_evaluated"
             confidence_penalty = 1
         elif not language and context_product:
             data_quality = "PARTIAL"
@@ -3105,6 +3339,132 @@ def _build_contract_evidence(kpi_id: str, kpi_obj: dict, pages_scanned: int, dom
         })
         return evidence, "VALID", status_override, confidence_penalty
 
+    if kpi_id.startswith("ai_"):
+        rows = _safe_list(data.get("rows") or data.get("items"))
+        if kpi_id == "ai_llms_txt":
+            llms_present = _safe_int(data.get("llms_txt_present_pages")) > 0
+            parse_statuses = [
+                _clean_text(_safe_dict(row).get("parse_status")).lower()
+                for row in rows
+                if isinstance(row, dict)
+            ]
+            fetch_failed = any("fetch_error" in status or "httperror" in status for status in parse_statuses)
+            data_quality = "VALID" if llms_present else ("PARTIAL" if rows or fetch_failed else "MISSING")
+            confidence_penalty = 0 if llms_present else 1
+            evidence.update({
+                "data_quality": data_quality,
+                "llms_txt_present": llms_present,
+                "llms_txt_present_pages": _safe_int(data.get("llms_txt_present_pages")),
+                "llms_rows": rows,
+                "llms_url": _first_non_empty_str([
+                    _safe_dict(row).get("llms_url")
+                    for row in rows
+                    if isinstance(row, dict)
+                ]) or f"{domain_url.rstrip('/')}/llms.txt",
+                "llms_parse_status": parse_statuses[0] if parse_statuses else ("present" if llms_present else "missing"),
+                "fetch_failed": fetch_failed,
+            })
+            return evidence, data_quality, status_override, confidence_penalty
+
+        if kpi_id == "ai_robots_access":
+            bot_rows = rows or _safe_list(data.get("bots"))
+            if not bot_rows:
+                default_status = _clean_text(data.get("status")) or "unknown"
+                bot_rows = [
+                    {
+                        "bot": bot,
+                        "status": default_status,
+                        "source": "aggregator_fallback",
+                        "reason": "policy summarized without per-bot rows",
+                    }
+                    for bot in ["GPTBot", "OAI-SearchBot", "ClaudeBot", "PerplexityBot", "bingbot"]
+                ]
+            blocked_bots = _safe_list(data.get("blocked_bots"))
+            robots_status = _clean_text(data.get("status")) or "unknown"
+            bot_rows = [
+                {
+                    **_safe_dict(row),
+                    "status": _clean_text(_safe_dict(row).get("status")) or robots_status,
+                    "source": _clean_text(_safe_dict(row).get("source")) or "unknown",
+                    "reason": _clean_text(_safe_dict(row).get("reason")) or (
+                        "explicit AI policy" if robots_status in {"allowed", "explicit_allowed"} else
+                        "no explicit AI bot policy" if robots_status == "implicit_allowed" else
+                        "robots policy summarized"
+                    ),
+                }
+                for row in bot_rows
+            ]
+            evidence.update({
+                "data_quality": "VALID" if robots_status in {"allowed", "explicit_allowed", "blocked"} else "PARTIAL",
+                "robots_ai_status": robots_status,
+                "blocked_bot_count": len(blocked_bots),
+                "blocked_bots": blocked_bots,
+                "allowed_bots": _safe_list(data.get("allowed_bots")),
+                "robot_rows": bot_rows,
+            })
+            return evidence, evidence.get("data_quality"), status_override, confidence_penalty
+
+        if kpi_id == "ai_https_ready":
+            https_valid = bool(data.get("valid"))
+            evidence.update({
+                "data_quality": "VALID" if "valid" in data else "PARTIAL",
+                "https_valid": https_valid,
+                "certificate_issuer": data.get("issuer"),
+                "certificate_expiry": data.get("expiry") or data.get("not_after"),
+                "tls_protocol": data.get("protocol"),
+            })
+            return evidence, evidence.get("data_quality"), status_override, confidence_penalty
+
+        if kpi_id == "ai_schema_org":
+            valid_rows = [row for row in rows if _ai_row_has_json_ld_type(_safe_dict(row))]
+            valid_pages = _safe_int(data.get("json_ld_valid_pages")) or len(valid_rows)
+            pages_checked = _safe_int(data.get("pages_checked")) or _safe_int(evidence.get("pages_checked"))
+            parse_errors = _safe_int(data.get("json_ld_parse_errors"))
+            evidence.update({
+                "data_quality": "VALID" if valid_pages > 0 and valid_rows else "PARTIAL",
+                "schema_org_pages": valid_pages,
+                "json_ld_valid_pages": valid_pages,
+                "json_ld_coverage_pct": _coverage_pct(valid_pages, pages_checked),
+                "json_ld_parse_errors": parse_errors,
+                "pages_checked": pages_checked,
+                "schema_rows": rows,
+            })
+            return evidence, evidence.get("data_quality"), status_override, confidence_penalty
+
+        if kpi_id == "ai_faq_schema":
+            evidence.update({
+                "data_quality": "VALID" if _safe_int(data.get("pages_detected")) > 0 else "PARTIAL",
+                "faq_pages": _safe_int(data.get("pages_detected") or data.get("faq_pages")),
+                "schema_faq_pages": _safe_int(data.get("schema_faq_pages")),
+                "schema_rows": rows,
+            })
+            return evidence, evidence.get("data_quality"), status_override, confidence_penalty
+
+        if kpi_id == "ai_raw_content_visible":
+            pages_checked = _safe_int(data.get("pages_checked")) or _safe_int(evidence.get("pages_checked"))
+            raw_visible = _safe_int(data.get("raw_content_visible_pages"))
+            evidence.update({
+                "data_quality": "VALID" if rows or raw_visible > 0 else "PARTIAL",
+                "raw_content_visible_pages": raw_visible,
+                "rendered_content_used_pages": _safe_int(data.get("rendered_content_used_pages")),
+                "raw_content_coverage_pct": _coverage_pct(raw_visible, pages_checked),
+                "pages_checked": pages_checked,
+                "raw_content_rows": rows,
+            })
+            return evidence, evidence.get("data_quality"), status_override, confidence_penalty
+
+        if kpi_id == "ai_heading_questions":
+            question_pages = _safe_int(data.get("pages_detected") or data.get("page_count"))
+            pages_checked = _safe_int(data.get("pages_checked")) or _safe_int(evidence.get("pages_checked"))
+            evidence.update({
+                "data_quality": "VALID" if rows or question_pages > 0 else "PARTIAL",
+                "question_heading_pages": question_pages,
+                "question_heading_coverage_pct": _coverage_pct(question_pages, pages_checked),
+                "pages_checked": pages_checked,
+                "question_heading_rows": rows,
+            })
+            return evidence, evidence.get("data_quality"), status_override, confidence_penalty
+
     observed_metrics = {key: value for key, value in data.items() if key != "fix"}
     if not observed_metrics and _normalize_contract_status(kpi_obj.get("status")) == "not_evaluated":
         data_quality = "MISSING"
@@ -3169,6 +3529,17 @@ def _cap_severity_by_confidence(severity: Optional[str], confidence: str) -> Opt
 def _contract_fix(kpi_id: str, kpi_name: str, status: str, data: dict, severity: Optional[str]) -> Optional[str]:
     if status == "passing":
         return None
+    ai_fixes = {
+        "ai_llms_txt": "Publier un fichier /llms.txt accessible, en texte simple, listant les pages et contenus utiles pour les moteurs génératifs.",
+        "ai_robots_access": "Vérifier robots.txt et autoriser explicitement les agents IA souhaités si la stratégie éditoriale prévoit une indexation générative.",
+        "ai_https_ready": "Corriger la configuration TLS/HTTPS afin que les crawlers et moteurs IA puissent accéder au site sans erreur de sécurité.",
+        "ai_schema_org": "Ajouter des données structurées Schema.org sur les pages clés: Organization, WebSite, BreadcrumbList, Product, Article ou Service selon le contexte.",
+        "ai_faq_schema": "Ajouter des blocs FAQ visibles et, lorsque pertinent, un balisage FAQPage sur les pages répondant à des questions fréquentes.",
+        "ai_raw_content_visible": "Rendre le contenu principal disponible dans le HTML initial ou fournir un rendu serveur fiable pour éviter une dépendance totale au JavaScript.",
+        "ai_heading_questions": "Structurer les pages clés avec des H2/H3 explicites, idéalement sous forme de questions-réponses quand le contenu s'y prête.",
+    }
+    if kpi_id in ai_fixes:
+        return ai_fixes[kpi_id]
     ticket = _build_ticket_payload(kpi_id, kpi_name, severity or "medium", "aggregate", []) if status in {"failing", "warning"} else None
     recommended_action, _ = _extract_recommended_action(data, ticket, status)
     return recommended_action
@@ -3214,6 +3585,8 @@ def _build_contract_constat(kpi_id: str, kpi_name: str, status: str, kpi_type: s
         product_known = _tech_known(product)
         version_known = _tech_known(version)
         if status == "passing":
+            if product_known and not version_known:
+                return f"Le serveur {product} a été détecté, mais sa version n'est pas exposée publiquement. Cette non-exposition limite la divulgation technique et constitue une configuration de sécurité favorable; la qualité de preuve reste partielle."
             return f"Le serveur ou runtime détecté est {product} {version}. Aucun signal critique ou haut n'a été remonté dans l'agrégat utilisé pour ce KPI."
         if status in ("not_evaluated", "warning"):
             if not product_known:
@@ -3275,13 +3648,15 @@ def _build_contract_constat(kpi_id: str, kpi_name: str, status: str, kpi_type: s
         forms_detected = _safe_int(evidence.get("forms_detected"))
         forms_tested = _safe_int(evidence.get("forms_tested"))
         tests_run = _safe_int(evidence.get("tests_run"))
+        valid_responses = _safe_int(evidence.get("valid_responses"))
+        transport_errors = _safe_int(evidence.get("transport_errors"))
         anomalies_count = _safe_int(evidence.get("anomalies_count"))
         non_transactional_forms_tested = _safe_int(evidence.get("non_transactional_forms_tested"))
         suppressed_low_confidence_anomalies = _safe_int(evidence.get("suppressed_low_confidence_anomalies"))
         if status == "passing":
-            return f"{forms_detected} formulaire(s) ont été détectés et {forms_tested} testés, sans bug remonté par le fuzzing."
+            return f"{forms_detected} formulaire(s) ont été détectés, {forms_tested} testés et {valid_responses} réponse(s) exploitable(s) analysée(s), sans bug confirmé."
         if status == "not_evaluated":
-            return f"{forms_detected} formulaire(s) ont été détectés mais aucun test exploitable n'a été exécuté ({tests_run} test(s)). Le risque métier sur les parcours de soumission reste donc inconnu."
+            return f"{forms_detected} formulaire(s) ont été détectés et {tests_run} test(s) lancés, mais aucune réponse exploitable n'a été obtenue ({transport_errors} erreur(s) de transport). Le risque métier reste inconnu."
         if status == "warning":
             return f"{forms_detected} formulaire(s) ont été détectés mais seulement {forms_tested} ont été testés. La couverture reste partielle et {anomalies_count} signal(aux) ont déjà été remontés."
         suffix = ""
@@ -3307,6 +3682,78 @@ def _build_contract_constat(kpi_id: str, kpi_name: str, status: str, kpi_type: s
         if status == "passing":
             return "Aucun lien interne cassé n'a été remonté sur les pages échantillonnées."
         return f"{broken_count} lien(s) interne(s) cassé(s) ont été détectés. Un exemple concerne {source_page}, qui pointe vers {target_url} sans réponse exploitable."
+
+    if kpi_id == "ai_llms_txt":
+        affected_urls = [str(url).strip() for url in _safe_list(kpi_obj.get("pages_affected_urls")) if str(url).strip()]
+        fallback_url = "/llms.txt"
+        if affected_urls:
+            first_url = affected_urls[0]
+            fallback_url = first_url if first_url.endswith("/llms.txt") else f"{first_url.rstrip('/')}/llms.txt"
+        llms_url = _display_value(evidence.get("llms_url"), fallback_url)
+        parse_status = _display_value(evidence.get("llms_parse_status"), "non détecté")
+        if status == "passing":
+            return f"Le fichier llms.txt est accessible à l'adresse {llms_url} et fournit un point d'entrée exploitable pour les moteurs génératifs."
+        if evidence.get("fetch_failed"):
+            return f"Le fichier llms.txt attendu à {llms_url} n'a pas pu être récupéré correctement ({parse_status}). Les moteurs génératifs ne disposent donc pas d'une liste explicite des contenus à privilégier."
+        return f"Aucun fichier llms.txt exploitable n'a été détecté à {llms_url}. Le site reste consultable, mais il ne fournit pas de guide dédié aux moteurs génératifs."
+
+    if kpi_id == "ai_robots_access":
+        policy = _display_value(evidence.get("robots_ai_status"), "non déterminée")
+        blocked = _safe_int(evidence.get("blocked_bot_count"))
+        if status == "passing":
+            return f"Le fichier robots.txt contient une politique IA explicitement favorable pour les agents vérifiés. Politique observée: {policy}."
+        if policy == "implicit_allowed":
+            return "Aucun blocage des principaux agents IA n'a été détecté dans robots.txt, mais aucune règle IA explicite n'a été trouvée. Le signal reste donc partiel."
+        return f"{blocked} agent(s) IA sont bloqués ou ambiguës dans robots.txt. La politique observée ({policy}) peut limiter l'exploration générative du contenu public."
+
+    if kpi_id == "ai_https_ready":
+        expiry = _display_value(evidence.get("certificate_expiry"))
+        protocol = _display_value(evidence.get("tls_protocol"))
+        if status == "passing":
+            suffix = f" Certificat valide jusqu'au {expiry}." if expiry else ""
+            proto = f" Protocole: {protocol}." if protocol else ""
+            return f"L'accès HTTPS est valide pour les crawlers et moteurs IA.{suffix}{proto}".strip()
+        return "L'accès HTTPS n'est pas confirmé comme fiable. Les crawlers IA peuvent refuser ou dégrader l'exploration si le certificat ou la chaîne TLS pose problème."
+
+    if kpi_id == "ai_schema_org":
+        schema_pages = _safe_int(evidence.get("json_ld_valid_pages") or evidence.get("schema_org_pages"))
+        checked = _safe_int(evidence.get("pages_checked")) or pages_affected
+        coverage = _optional_float(evidence.get("json_ld_coverage_pct"))
+        parse_errors = _safe_int(evidence.get("json_ld_parse_errors"))
+        if status == "passing":
+            return f"Du JSON-LD Schema.org valide avec type @type concret est présent sur {schema_pages}/{checked} page(s) analysée(s), ce qui aide les moteurs IA à identifier les entités et contenus clés."
+        if schema_pages > 0:
+            suffix = f" Couverture observée: {coverage:.1f}%." if coverage is not None else ""
+            return f"Du JSON-LD Schema.org valide existe sur {schema_pages}/{checked} page(s), mais la couverture reste insuffisante pour conclure en V1.{suffix}"
+        if parse_errors > 0:
+            return f"Des blocs JSON-LD ont été trouvés mais {parse_errors} erreur(s) de parsing empêchent de confirmer un type Schema.org exploitable."
+        return f"Aucun JSON-LD Schema.org valide avec type @type concret n'a été détecté sur les {checked} page(s) analysée(s). Les moteurs IA devront inférer seuls le contexte métier."
+
+    if kpi_id == "ai_faq_schema":
+        faq_pages = _safe_int(evidence.get("faq_pages"))
+        schema_faq_pages = _safe_int(evidence.get("schema_faq_pages"))
+        if status == "passing":
+            return f"{faq_pages} page(s) FAQ ou question-réponse ont été détectées, dont {schema_faq_pages} avec un signal FAQ structuré."
+        return "Aucune page FAQ ou FAQPage exploitable n'a été détectée. Le site offre moins de réponses directement réutilisables par les moteurs génératifs."
+
+    if kpi_id == "ai_raw_content_visible":
+        raw_visible = _safe_int(evidence.get("raw_content_visible_pages"))
+        checked = _safe_int(evidence.get("pages_checked")) or pages_affected
+        rendered_used = _safe_int(evidence.get("rendered_content_used_pages"))
+        coverage = _optional_float(evidence.get("raw_content_coverage_pct"))
+        if status == "passing":
+            return f"Le contenu principal est visible dans le HTML initial sur {raw_visible}/{checked} page(s) analysée(s). {rendered_used} page(s) ont nécessité un rendu JavaScript complémentaire."
+        suffix = f" Couverture observée: {coverage:.1f}%." if coverage is not None else ""
+        return f"Le contenu principal est visible dans le HTML initial sur {raw_visible}/{checked} page(s), sous le seuil V1 de 70%. Une dépendance forte au JavaScript peut réduire l'extraction par certains crawlers IA.{suffix}"
+
+    if kpi_id == "ai_heading_questions":
+        question_pages = _safe_int(evidence.get("question_heading_pages"))
+        checked = _safe_int(evidence.get("pages_checked"))
+        coverage = _optional_float(evidence.get("question_heading_coverage_pct"))
+        if status == "passing":
+            return f"{question_pages} page(s) contiennent des titres formulés comme questions ou réponses, facilitant l'extraction de passages utiles par les moteurs génératifs."
+        suffix = f" Couverture observée: {coverage:.1f}% sur {checked} page(s)." if coverage is not None and checked else ""
+        return f"{question_pages} page(s) seulement contiennent des titres orientés questions-réponses, sous le seuil V1 de 20% ou 5 pages.{suffix}"
 
     if kpi_id == "seo_meta_tags":
         meta_missing_count = _safe_int(evidence.get("meta_missing_count"))
@@ -3400,8 +3847,6 @@ def _make_kpi_v2(kpi_name: str, kpi_obj: dict, axis: str, pages_scanned: int, do
         evidence["data_quality"] = digest_quality
     if digest_quality == "MISSING":
         status = "not_evaluated"
-    if status == "passing" and data_quality in {"PARTIAL", "MISSING"}:
-        status = "not_evaluated"
     kpi_type = _contract_type(kpi_id, axis, kpi_obj)
 
     if status in {"passing", "not_evaluated"}:
@@ -3432,6 +3877,25 @@ def _make_kpi_v2(kpi_name: str, kpi_obj: dict, axis: str, pages_scanned: int, do
     else:
         score = _compute_contract_score(status, severity, data_quality)
 
+    normalized_data = {
+        **v1_data,
+        "execution_status": v1_data.get("execution_status") or evidence.get("execution_status") or (
+            "not_completed" if status == "not_evaluated" else "completed"
+        ),
+        "failure_reason": v1_data.get("failure_reason") or evidence.get("failure_reason"),
+        "data_quality": data_quality,
+        "confidence": confidence,
+        "tested_targets": _safe_list(v1_data.get("tested_targets") or evidence.get("tested_targets")),
+        "rejected_candidates": _safe_list(v1_data.get("rejected_candidates") or evidence.get("rejected_candidates")),
+        "applicability_context": v1_data.get("applicability_context") or evidence.get("applicability_context"),
+    }
+    affected_urls = _collect_digest_urls(kpi_obj.get("pages_affected_urls"), evidence)
+    affected_pages = max(
+        v1_pages,
+        _safe_int(evidence.get("affected_pages")),
+        len(affected_urls),
+    )
+
     return {
         "kpi_id": kpi_id,
         "name": kpi_name,
@@ -3443,6 +3907,9 @@ def _make_kpi_v2(kpi_name: str, kpi_obj: dict, axis: str, pages_scanned: int, do
         "constat": _build_contract_constat(kpi_id, kpi_name, status, kpi_type, axis, kpi_obj, evidence),
         "score": score,
         "impact": _contract_impact(kpi_id, status, kpi_obj),
+        "pages_affected": affected_pages,
+        "pages_affected_urls": affected_urls,
+        "data": normalized_data,
         "evidence": evidence,
         "evidence_digest": evidence_digest,
         "fix": _contract_fix(kpi_id, kpi_name, status, v1_data, severity),
@@ -3549,6 +4016,10 @@ def _build_summary_v2(axes: dict, pages_scanned: int) -> dict:
         risk_breakdown[bucket]["failed"] += src["failed"]
         risk_breakdown[bucket]["high_confidence_failed"] += src["high_confidence_failed"]
 
+    measured_kpis = passed + warning + failed
+    coverage_pct = round((measured_kpis / total_kpis) * 100, 1) if total_kpis else 0.0
+    score_measured = round((passed / measured_kpis) * 100, 1) if measured_kpis else None
+
     return {
         "client_overview": {
             "health_status": health,
@@ -3563,6 +4034,10 @@ def _build_summary_v2(axes: dict, pages_scanned: int) -> dict:
             "warning_kpis": warning,
             "failed_kpis": failed,
             "not_evaluated_kpis": not_eval,
+            "measured_kpis": measured_kpis,
+            "coverage_pct": coverage_pct,
+            "score_measured": score_measured,
+            "score_basis": "measured_only",
             "critical_kpis": critical,
             "high_kpis": high,
             "medium_kpis": medium,
@@ -3604,10 +4079,19 @@ def build_kpi_centric_report(report: dict) -> dict:
         total_broken_buttons = len(broken_buttons) if broken_buttons else 0
     # SEO evidence: scanner stores counts in seo_kpi_extended, not in report["kpis"].
     # URL lists are not collected by the scanner for these KPIs — only counts are available.
-    missing_meta_evidence = _normalized_kpi_evidence(report, "Missing Meta Descriptions") or {"count": seo.get("pages_missing_meta_desc", 0), "affected_pages": []}
-    missing_title_evidence = _normalized_kpi_evidence(report, "Missing Page Titles") or {"count": seo.get("pages_missing_title", 0), "affected_pages": []}
+    missing_meta_evidence = _normalized_kpi_evidence(report, "Missing Meta Descriptions") or {
+        "count": seo.get("pages_missing_meta_desc", 0),
+        "affected_pages": _safe_list(report.get("seo_missing_meta_pages")),
+    }
+    missing_title_evidence = _normalized_kpi_evidence(report, "Missing Page Titles") or {
+        "count": seo.get("pages_missing_title", 0),
+        "affected_pages": _safe_list(report.get("seo_missing_title_pages")),
+    }
     missing_alt_evidence = {"images": []}
-    heading_hierarchy_evidence = {"count": seo.get("pages_with_bad_h1", 0), "affected_pages": []}
+    heading_hierarchy_evidence = {
+        "count": seo.get("pages_with_bad_h1", 0),
+        "affected_pages": _safe_list(report.get("seo_bad_heading_pages")),
+    }
     internal_contextual_links_evidence = _normalized_kpi_evidence(report, "Internal Contextual Links")
     pages_checked_total = _safe_int(report.get("pages_scanned", 0))
     seo_bad_h1_raw = _safe_int(seo.get("pages_with_bad_h1", 0))
@@ -3802,7 +4286,8 @@ def build_kpi_centric_report(report: dict) -> dict:
     module_count = _safe_int(module_verification.get("module_count"))
     cms_version_status = (
         "failing" if cms_eol is True
-        else "passing" if cms_eol is False or cms_detected_name
+        else "passing" if cms_eol is False and bool(cms_detected_version)
+        else "warning" if cms_detected_name and not cms_detected_version
         else "non_evalue"
     )
     
@@ -3813,8 +4298,8 @@ def build_kpi_centric_report(report: dict) -> dict:
             "pages_affected": 1,
             "pages_affected_urls": [report.get("domain", "")],
             "status": cms_version_status,
-            "type": "bug" if cms_eol is True else None,
-            "severity": "critical" if cms_eol is True else None,
+            "type": "bug" if cms_version_status in {"failing", "warning"} else None,
+            "severity": "critical" if cms_eol is True else ("medium" if cms_version_status == "warning" else None),
             "data": {
                 "cms_name": cms_kpi.get("cms_detected"),
                 "cms_version": cms_kpi.get("cms_version"),
@@ -4152,6 +4637,14 @@ def build_kpi_centric_report(report: dict) -> dict:
                 "non_transactional_forms_tested": functional_fuzzer_kpi.get("non_transactional_forms_tested", 0),
                 "tests_run": functional_fuzzer_kpi.get("tests_run", 0),
                 "signal_count": functional_fuzzer_kpi.get("signal_count", 0),
+                "responses_received": functional_fuzzer_kpi.get("responses_received", 0),
+                "valid_responses": functional_fuzzer_kpi.get("valid_responses", 0),
+                "response_counters_reported": (
+                    "responses_received" in functional_fuzzer_kpi
+                    or "valid_responses" in functional_fuzzer_kpi
+                ),
+                "transport_errors": functional_fuzzer_kpi.get("transport_errors", 0),
+                "timeouts": functional_fuzzer_kpi.get("timeouts", 0),
                 "response_type": functional_fuzzer_kpi.get("response_type"),
                 "submitted": functional_fuzzer_kpi.get("submitted"),
                 "execution_status": functional_fuzzer_kpi.get("execution_status"),
@@ -4165,6 +4658,7 @@ def build_kpi_centric_report(report: dict) -> dict:
                 "anomalies_by_type": functional_fuzzer_kpi.get("anomalies_by_type", {}),
                 "top_affected": functional_fuzzer_kpi.get("top_affected", []),
                 "anomalous_tests_all": _safe_list(functional_fuzzer_kpi.get("anomalous_tests_all", [])),
+                "test_results_sample": _safe_list(functional_fuzzer_kpi.get("test_results_sample", [])),
             }
         }
     }
@@ -4301,6 +4795,14 @@ def build_kpi_centric_report(report: dict) -> dict:
             for row in search_rows
         )
     search_passed = functional_kpi.get("search_passed")
+    search_failure_reason = next(
+        (
+            _clean_text(_safe_dict(row).get("failure_reason"))
+            for row in search_rows
+            if _clean_text(_safe_dict(row).get("failure_reason"))
+        ),
+        None,
+    )
     search_status = (
         "passing" if search_executed and search_passed is not False
         else "failing" if search_executed and search_passed is False
@@ -4318,6 +4820,9 @@ def build_kpi_centric_report(report: dict) -> dict:
             "has_search": functional_kpi.get("has_search"),
             "search_executed": search_executed,
             "search_passed": search_passed,
+            "execution_status": "completed" if search_executed else "not_started",
+            "failure_reason": search_failure_reason or (None if search_executed else "search_probe_not_executed"),
+            "data_quality": "VALID" if search_executed else "MISSING",
             "rows": search_rows,
         }
     }
@@ -4719,17 +5224,178 @@ def build_kpi_centric_report(report: dict) -> dict:
             "type": "recommendation" if _safe_int(seo.get('nlp_seo_meta_kpi', {}).get('meta_missing_pages', 0)) > 0 else None,
             "severity": None,
             "data": _safe_dict(seo.get("nlp_seo_meta_kpi", {})),
-        },
-        "AI Readiness (llms.txt)": {
-            "info": f"Pages avec llms.txt détecté: {seo.get('nlp_seo_ai_readiness_kpi', {}).get('llms_txt_present_pages', 0)}",
-            "impact": "Absence de llms.txt réduit la découvrabilité du site dans les moteurs génératifs",
-            "pages_affected": 1 if _safe_int(seo.get('nlp_seo_ai_readiness_kpi', {}).get('llms_txt_present_pages', 0)) == 0 else 0,
-            "pages_affected_urls": [report.get("domain", "")] if _safe_int(seo.get('nlp_seo_ai_readiness_kpi', {}).get('llms_txt_present_pages', 0)) == 0 else [],
-            "status": "failing" if _safe_int(seo.get('nlp_seo_ai_readiness_kpi', {}).get('llms_txt_present_pages', 0)) == 0 else "passing",
-            "type": "recommendation" if _safe_int(seo.get('nlp_seo_ai_readiness_kpi', {}).get('llms_txt_present_pages', 0)) == 0 else None,
-            "severity": "low" if _safe_int(seo.get('nlp_seo_ai_readiness_kpi', {}).get('llms_txt_present_pages', 0)) == 0 else None,
-            "data": _safe_dict(seo.get("nlp_seo_ai_readiness_kpi", {})),
         }
+    }
+
+    ai_kpis = _safe_dict(seo.get("ai_friendly_kpis"))
+    legacy_llms_kpi = _safe_dict(seo.get("nlp_seo_ai_readiness_kpi"))
+    llms_present_pages = _safe_int(ai_kpis.get("llms_txt_present_pages") or legacy_llms_kpi.get("llms_txt_present_pages"))
+    llms_rows = _safe_list(ai_kpis.get("llms_rows")) or _safe_list(legacy_llms_kpi.get("rows"))
+    llms_fetch_failed = any(
+        "fetch_error" in _clean_text(_safe_dict(row).get("parse_status")).lower()
+        or "httperror" in _clean_text(_safe_dict(row).get("parse_status")).lower()
+        for row in llms_rows
+        if isinstance(row, dict)
+    )
+    ai_robots_policy = _safe_dict(seo.get("ai_robots_policy"))
+    ai_robots_status = ai_robots_policy.get("status") or ("implicit_allowed" if seo.get("has_robots_txt") else "robots_missing")
+    ai_robots_blocked = _safe_list(ai_robots_policy.get("blocked_bots"))
+    ai_robots_allowed = _safe_list(ai_robots_policy.get("allowed_bots"))
+    ai_robot_rows = _safe_list(ai_robots_policy.get("bots"))
+    if not ai_robot_rows:
+        ai_robot_rows = [
+            {"bot": bot, "status": ai_robots_status, "source": "aggregator_fallback", "reason": "policy summarized without per-bot rows"}
+            for bot in ["GPTBot", "OAI-SearchBot", "ClaudeBot", "PerplexityBot", "bingbot"]
+        ]
+    ssl_info = _safe_dict(sec.get("ssl"))
+    ssl_valid = ssl_info.get("valid")
+    schema_rows = _safe_list(ai_kpis.get("schema_rows"))
+    valid_schema_rows = [row for row in schema_rows if _ai_row_has_json_ld_type(_safe_dict(row))]
+    schema_org_pages = _safe_int(ai_kpis.get("json_ld_valid_pages")) or len(valid_schema_rows)
+    schema_coverage_pct = _coverage_pct(schema_org_pages, pages_scanned_for_ratios)
+    schema_homepage_valid = any(_ai_row_is_homepage(_safe_dict(row), domain_url) for row in valid_schema_rows)
+    schema_passes = schema_homepage_valid or schema_coverage_pct >= 20.0
+    json_ld_parse_errors = _safe_int(ai_kpis.get("json_ld_parse_errors"))
+    faq_rows = _safe_list(ai_kpis.get("faq_rows"))
+    faq_visible_pages = _safe_int(ai_kpis.get("faq_pages"))
+    schema_faq_pages = _safe_int(ai_kpis.get("schema_faq_pages"))
+    faq_pages = max(faq_visible_pages, schema_faq_pages)
+    faq_has_evidence = bool(faq_rows) or schema_faq_pages > 0
+    faq_passes = faq_pages > 0 and faq_has_evidence
+    raw_content_visible_pages = _safe_int(ai_kpis.get("raw_content_visible_pages"))
+    rendered_content_used_pages = _safe_int(ai_kpis.get("rendered_content_used_pages"))
+    raw_content_rows = _safe_list(ai_kpis.get("raw_content_rows"))
+    raw_content_coverage_pct = _coverage_pct(raw_content_visible_pages, pages_scanned_for_ratios)
+    raw_content_has_data = bool(raw_content_rows) or raw_content_visible_pages > 0 or rendered_content_used_pages > 0
+    raw_content_passes = raw_content_coverage_pct >= 70.0
+    question_heading_pages = _safe_int(ai_kpis.get("question_heading_pages"))
+    question_heading_rows = _safe_list(ai_kpis.get("question_heading_rows"))
+    question_heading_coverage_pct = _coverage_pct(question_heading_pages, pages_scanned_for_ratios)
+    question_heading_passes = question_heading_coverage_pct >= 20.0 or question_heading_pages >= 5
+    ai_checked_pages = pages_scanned_for_ratios
+    robots_explicit_pass = ai_robots_status in {"allowed", "explicit_allowed"} and not ai_robots_blocked
+
+    axes["AI Friendly"] = {
+        "AI Readiness (llms.txt)": {
+            "info": f"Fichier llms.txt: {'présent' if llms_present_pages > 0 else 'non détecté'}",
+            "impact": _KPI_BUSINESS_IMPACT["ai_llms_txt"],
+            "pages_affected": 0 if llms_present_pages > 0 else 1,
+            "pages_affected_urls": [] if llms_present_pages > 0 else [report.get("domain", "")],
+            "status": "passing" if llms_present_pages > 0 else "warning",
+            "type": None if llms_present_pages > 0 else "recommendation",
+            "severity": None if llms_present_pages > 0 else "low",
+            "data": {
+                "llms_txt_present_pages": llms_present_pages,
+                "rows": llms_rows,
+                "execution_status": "completed",
+                "data_quality": "VALID" if llms_present_pages > 0 else ("PARTIAL" if llms_rows or llms_fetch_failed else "MISSING"),
+            },
+        },
+        "Robots IA": {
+            "info": f"Politique robots IA: {ai_robots_status}; bots bloqués: {len(ai_robots_blocked)}",
+            "impact": _KPI_BUSINESS_IMPACT["ai_robots_access"],
+            "pages_affected": len(ai_robots_blocked),
+            "pages_affected_urls": [] if robots_explicit_pass else [seo.get("robots_url") or report.get("domain", "")],
+            "status": "passing" if robots_explicit_pass else "warning",
+            "type": None if robots_explicit_pass else "recommendation",
+            "severity": None if robots_explicit_pass else "low",
+            "data": {
+                **ai_robots_policy,
+                "status": ai_robots_status,
+                "rows": ai_robot_rows,
+                "blocked_bots": ai_robots_blocked,
+                "allowed_bots": ai_robots_allowed,
+                "execution_status": "completed",
+                "data_quality": "VALID" if robots_explicit_pass or ai_robots_status == "blocked" else "PARTIAL",
+            },
+        },
+        "HTTPS pour Moteurs IA": {
+            "info": "HTTPS valide détecté" if ssl_valid is True else "HTTPS valide non confirmé",
+            "impact": _KPI_BUSINESS_IMPACT["ai_https_ready"],
+            "pages_affected": 0 if ssl_valid is True else 1,
+            "pages_affected_urls": [] if ssl_valid is True else [report.get("domain", "")],
+            "status": "passing" if ssl_valid is True else "warning",
+            "type": None if ssl_valid is True else "recommendation",
+            "severity": None if ssl_valid is True else "low",
+            "data": {
+                **ssl_info,
+                "execution_status": "completed" if ssl_info else "not_measured",
+                "data_quality": "VALID" if ssl_valid is True else "PARTIAL",
+            },
+        },
+        "Schema.org pour IA": {
+            "impact": _KPI_BUSINESS_IMPACT["ai_schema_org"],
+            "info": f"Pages avec JSON-LD Schema.org valide: {schema_org_pages}/{ai_checked_pages} ({schema_coverage_pct:.1f}%)",
+            "pages_affected": 0 if schema_passes else ai_checked_pages,
+            "pages_affected_urls": [] if schema_passes else [report.get("domain", "")],
+            "status": "passing" if schema_passes else "warning",
+            "type": None if schema_passes else "recommendation",
+            "severity": None if schema_passes else "low",
+            "data": {
+                "pages_detected": schema_org_pages,
+                "json_ld_valid_pages": schema_org_pages,
+                "json_ld_coverage_pct": schema_coverage_pct,
+                "json_ld_parse_errors": json_ld_parse_errors,
+                "homepage_json_ld_valid": schema_homepage_valid,
+                "pages_checked": ai_checked_pages,
+                "rows": schema_rows,
+                "execution_status": "completed",
+                "data_quality": "VALID" if schema_passes else ("PARTIAL" if schema_rows or schema_org_pages > 0 or json_ld_parse_errors > 0 else "MISSING"),
+            },
+        },
+        "FAQ lisible IA": {
+            "info": f"Pages FAQ ou FAQPage détectées: {faq_pages}",
+            "impact": _KPI_BUSINESS_IMPACT["ai_faq_schema"],
+            "pages_affected": 0 if faq_passes else 1,
+            "pages_affected_urls": [] if faq_passes else [report.get("domain", "")],
+            "status": "passing" if faq_passes else "warning",
+            "type": None if faq_passes else "recommendation",
+            "severity": None if faq_passes else "low",
+            "data": {
+                "pages_detected": faq_pages,
+                "faq_pages": faq_visible_pages,
+                "schema_faq_pages": schema_faq_pages,
+                "rows": faq_rows,
+                "execution_status": "completed",
+                "data_quality": "VALID" if faq_passes else "PARTIAL",
+            },
+        },
+        "Contenu HTML Brut IA": {
+            "info": f"Pages avec contenu principal visible dans le HTML brut: {raw_content_visible_pages}/{ai_checked_pages} ({raw_content_coverage_pct:.1f}%)",
+            "impact": _KPI_BUSINESS_IMPACT["ai_raw_content_visible"],
+            "pages_affected": max(ai_checked_pages - raw_content_visible_pages, 0),
+            "pages_affected_urls": [],
+            "status": "passing" if raw_content_passes else ("warning" if raw_content_has_data else "not_evaluated"),
+            "type": None if raw_content_passes else "recommendation",
+            "severity": None if raw_content_passes else "medium",
+            "data": {
+                "raw_content_visible_pages": raw_content_visible_pages,
+                "rendered_content_used_pages": rendered_content_used_pages,
+                "raw_content_coverage_pct": raw_content_coverage_pct,
+                "pages_checked": ai_checked_pages,
+                "rows": raw_content_rows,
+                "execution_status": "completed" if raw_content_has_data else "not_measured",
+                "data_quality": "VALID" if raw_content_passes else ("PARTIAL" if raw_content_has_data else "MISSING"),
+            },
+        },
+        "Titres Questions IA": {
+            "impact": _KPI_BUSINESS_IMPACT["ai_heading_questions"],
+            "info": f"Pages avec titres formules comme questions: {question_heading_pages}/{ai_checked_pages} ({question_heading_coverage_pct:.1f}%)",
+            "pages_affected": 0 if question_heading_passes else 1,
+            "pages_affected_urls": [] if question_heading_passes else [report.get("domain", "")],
+            "status": "passing" if question_heading_passes else "warning",
+            "type": None if question_heading_passes else "recommendation",
+            "severity": None if question_heading_passes else "low",
+            "data": {
+                "pages_detected": question_heading_pages,
+                "question_heading_pages": question_heading_pages,
+                "question_heading_coverage_pct": question_heading_coverage_pct,
+                "pages_checked": ai_checked_pages,
+                "rows": question_heading_rows,
+                "execution_status": "completed",
+                "data_quality": "VALID" if question_heading_passes else "PARTIAL",
+            },
+        },
     }
 
     # ─── AUDIT UX/UI ──────────────────────────────────────────────────────────────

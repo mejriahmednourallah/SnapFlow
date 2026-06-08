@@ -38,6 +38,11 @@ export interface AxisScoreBreakdown {
   x: number;
   y: number;
   scorePct: number;
+  scoreMeasured: number | null;
+  coveragePct: number;
+  measuredKpis: number;
+  totalKpis: number;
+  scoreBasis: 'measured_only';
 }
 
 export type RiskLevel = 'critical' | 'high' | 'medium' | 'low';
@@ -205,6 +210,11 @@ export interface AuditAxis {
   maxScore: number;
   description: string;
   findings: AuditFinding[];
+  scoreMeasured?: number | null;
+  coveragePct?: number;
+  measuredKpis?: number;
+  totalKpis?: number;
+  scoreBasis?: 'measured_only';
 }
 
 export interface AuditReport {
@@ -489,12 +499,16 @@ export function isNonTestedFinding(finding: AuditFinding): boolean {
   return finding.origin === 'coverage' || isNonTestedStatus(resolveFindingStatus(finding));
 }
 
+export function isClientVisibleFinding(finding: AuditFinding): boolean {
+  return !isNonTestedFinding(finding);
+}
+
 export function getTotalFindings(audit: AuditReport): number {
-  return audit.axes.reduce((sum, ax) => sum + ax.findings.length, 0);
+  return audit.axes.reduce((sum, ax) => sum + ax.findings.filter(isClientVisibleFinding).length, 0);
 }
 
 export function getCriticalCount(audit: AuditReport): number {
-  return audit.axes.reduce((sum, ax) => sum + ax.findings.filter(f => f.criticality === 'critical').length, 0);
+  return audit.axes.reduce((sum, ax) => sum + ax.findings.filter(f => isClientVisibleFinding(f) && f.criticality === 'critical').length, 0);
 }
 
 export function getAxisScoreBreakdown(axis: AuditAxis): AxisScoreBreakdown {
@@ -506,13 +520,16 @@ export function getAxisScoreBreakdown(axis: AuditAxis): AxisScoreBreakdown {
     status => isNonTestedStatus(status) && status !== 'not_available',
   ).length;
   const x = passed;
-  const y = passed + failed + notMeasured + notAvailable;
+  const y = passed + failed;
+  const totalKpis = y + notMeasured + notAvailable;
+  const coveragePct = totalKpis > 0 ? Math.round((y / totalKpis) * 100) : 0;
   const measuredEcoScore = /eco/i.test(`${axis.id} ${axis.name}`)
     ? axis.findings.find(finding => typeof finding.displayScorePct === 'number')?.displayScorePct
     : undefined;
-  const scorePct = typeof measuredEcoScore === 'number'
+  const scoreMeasured = typeof measuredEcoScore === 'number'
     ? Math.max(0, Math.min(100, Math.round(measuredEcoScore)))
-    : y > 0 ? Math.round((x / y) * 100) : 0;
+    : y > 0 ? Math.round((x / y) * 100) : null;
+  const scorePct = scoreMeasured ?? 0;
 
   return {
     passed,
@@ -522,6 +539,11 @@ export function getAxisScoreBreakdown(axis: AuditAxis): AxisScoreBreakdown {
     x,
     y,
     scorePct,
+    scoreMeasured,
+    coveragePct,
+    measuredKpis: y,
+    totalKpis,
+    scoreBasis: 'measured_only',
   };
 }
 
@@ -535,8 +557,7 @@ export function getRiskLevelFromScore(scorePct: number): RiskLevel {
 export function getAuditGlobalScore(audit: AuditReport): number {
   const passCount = audit.passingKpis?.length ?? 0;
   const failCount = (audit.bugs?.length ?? 0) + (audit.recommendations?.length ?? 0) + (audit.compliance?.length ?? 0);
-  const coverageCount = audit.auditCoverage?.length ?? 0;
-  const rawTotal = passCount + failCount + coverageCount;
+  const rawTotal = passCount + failCount;
 
   if (rawTotal > 0) {
     return Math.round((passCount / rawTotal) * 100);
@@ -579,11 +600,18 @@ function toAuditActionItem(finding: AuditFinding, typeOverride?: string): AuditA
 
 export function recomputeAuditReport(audit: AuditReport): AuditReport {
   const axes = audit.axes.map((axis) => {
-    const breakdown = getAxisScoreBreakdown(axis);
+    const findings = axis.findings.filter(isClientVisibleFinding);
+    const breakdown = getAxisScoreBreakdown({ ...axis, findings });
     return {
       ...axis,
       score: breakdown.x,
       maxScore: breakdown.y,
+      scoreMeasured: breakdown.scoreMeasured,
+      coveragePct: breakdown.coveragePct,
+      measuredKpis: breakdown.measuredKpis,
+      totalKpis: breakdown.totalKpis,
+      scoreBasis: breakdown.scoreBasis,
+      findings,
     };
   });
 
@@ -651,7 +679,8 @@ export function recomputeAuditReport(audit: AuditReport): AuditReport {
   const failCount = failedFindings.length;
   const coverageCount = coverageFindings.length;
   const total = passCount + failCount + coverageCount;
-  const globalScore = total > 0 ? Math.round((passCount / total) * 100) : 0;
+  const measuredTotal = passCount + failCount;
+  const globalScore = measuredTotal > 0 ? Math.round((passCount / measuredTotal) * 100) : 0;
 
   const summary: AuditSummary = {
     total,

@@ -54,6 +54,7 @@ class TestKPICentricReport(unittest.TestCase):
             "Audit Fonctionnel",
             "Audit de Performance et Temps de Réponse",
             "SEO",
+            "AI Friendly",
             "Audit UX/UI",
             "Eco Index",
             "RGPD",
@@ -61,6 +62,206 @@ class TestKPICentricReport(unittest.TestCase):
         actual_axes = list(self.kpi_report["axes"].keys())
         for axis in expected_axes:
             self.assertIn(axis, actual_axes, f"Missing axis: {axis}")
+
+    def test_ai_friendly_axis_owns_llms_txt(self):
+        axes = self.kpi_report["axes"]
+
+        self.assertIn("AI Friendly", axes)
+        self.assertIn("AI Readiness (llms.txt)", axes["AI Friendly"])
+        self.assertEqual(axes["AI Friendly"]["AI Readiness (llms.txt)"]["kpi_id"], "ai_llms_txt")
+        self.assertNotIn("AI Readiness (llms.txt)", axes["SEO"])
+
+    def test_ai_llms_fetch_error_is_partial_evidence(self):
+        report = json.loads(json.dumps(self.report))
+        seo = report.setdefault("site_metrics", {}).setdefault("seo", {})
+        seo["nlp_seo_ai_readiness_kpi"] = {
+            "llms_txt_present_pages": 0,
+            "rows": [
+                {
+                    "llms_url": "https://example.test/llms.txt",
+                    "length": 0,
+                    "parse_status": "fetch_error:HTTPError",
+                }
+            ],
+        }
+        seo["ai_friendly_kpis"] = {
+            "llms_txt_present_pages": 0,
+            "llms_rows": seo["nlp_seo_ai_readiness_kpi"]["rows"],
+        }
+
+        rebuilt = build_kpi_centric_report(report)
+        llms = rebuilt["axes"]["AI Friendly"]["AI Readiness (llms.txt)"]
+
+        self.assertEqual(llms["kpi_id"], "ai_llms_txt")
+        self.assertEqual(llms["status"], "warning")
+        self.assertEqual(llms["evidence"]["data_quality"], "PARTIAL")
+        self.assertEqual(llms["evidence_digest"]["quality"], "PARTIAL")
+        self.assertIn("n'a pas pu être récupéré", llms["constat"])
+
+    def test_ai_faq_uses_faq_rows_not_generic_schema_rows(self):
+        report = json.loads(json.dumps(self.report))
+        seo = report.setdefault("site_metrics", {}).setdefault("seo", {})
+        seo["ai_friendly_kpis"] = {
+            "faq_pages": 1,
+            "schema_faq_pages": 0,
+            "faq_rows": [
+                {
+                    "page_url": "https://example.test/faq",
+                    "page_type": "faq",
+                    "schema_faq_present": False,
+                    "title": "Questions fréquentes",
+                }
+            ],
+            "schema_rows": [
+                {
+                    "page_url": "https://example.test/",
+                    "schema_faq_present": False,
+                }
+            ],
+        }
+
+        rebuilt = build_kpi_centric_report(report)
+        faq = rebuilt["axes"]["AI Friendly"]["FAQ lisible IA"]
+        rows = faq["evidence_digest"]["rows"]
+
+        self.assertEqual(faq["status"], "passing")
+        self.assertEqual(rows[0]["page_url"], "https://example.test/faq")
+        self.assertEqual(rows[0]["page_type"], "faq")
+
+    def test_ai_schema_requires_valid_json_ld_types_not_counter_only(self):
+        report = json.loads(json.dumps(self.report))
+        report["domain"] = "https://example.test"
+        report["pages_scanned"] = 100
+        seo = report.setdefault("site_metrics", {}).setdefault("seo", {})
+        seo["ai_friendly_kpis"] = {
+            "schema_org_pages": 100,
+            "schema_rows": [
+                {
+                    "page_url": "https://example.test/",
+                    "schema_faq_present": False,
+                }
+            ],
+        }
+
+        rebuilt = build_kpi_centric_report(report)
+        schema = rebuilt["axes"]["AI Friendly"]["Schema.org pour IA"]
+
+        self.assertEqual(schema["kpi_id"], "ai_schema_org")
+        self.assertEqual(schema["status"], "warning")
+        self.assertEqual(schema["evidence"]["data_quality"], "PARTIAL")
+        self.assertIn("aucun type @type", " ".join(schema["evidence_digest"]["proof_lines"]).lower())
+
+    def test_ai_schema_homepage_json_ld_passes_even_with_low_coverage(self):
+        report = json.loads(json.dumps(self.report))
+        report["domain"] = "https://example.test"
+        report["pages_scanned"] = 100
+        seo = report.setdefault("site_metrics", {}).setdefault("seo", {})
+        seo["ai_friendly_kpis"] = {
+            "json_ld_valid_pages": 1,
+            "schema_rows": [
+                {
+                    "page_url": "https://example.test/",
+                    "json_ld_valid": True,
+                    "json_ld_types": "Organization",
+                    "json_ld_count": 1,
+                }
+            ],
+        }
+
+        rebuilt = build_kpi_centric_report(report)
+        schema = rebuilt["axes"]["AI Friendly"]["Schema.org pour IA"]
+
+        self.assertEqual(schema["status"], "passing")
+        self.assertEqual(schema["evidence"]["json_ld_valid_pages"], 1)
+        self.assertEqual(schema["evidence"]["data_quality"], "VALID")
+
+    def test_ai_schema_ten_percent_json_ld_is_warning_without_homepage(self):
+        report = json.loads(json.dumps(self.report))
+        report["domain"] = "https://example.test"
+        report["pages_scanned"] = 100
+        seo = report.setdefault("site_metrics", {}).setdefault("seo", {})
+        seo["ai_friendly_kpis"] = {
+            "json_ld_valid_pages": 10,
+            "schema_rows": [
+                {
+                    "page_url": f"https://example.test/page-{idx}",
+                    "json_ld_valid": True,
+                    "json_ld_types": "Article",
+                    "json_ld_count": 1,
+                }
+                for idx in range(10)
+            ],
+        }
+
+        rebuilt = build_kpi_centric_report(report)
+        schema = rebuilt["axes"]["AI Friendly"]["Schema.org pour IA"]
+
+        self.assertEqual(schema["status"], "warning")
+        self.assertAlmostEqual(schema["evidence"]["json_ld_coverage_pct"], 10.0)
+
+    def test_ai_robots_implicit_allowed_is_partial_warning(self):
+        report = json.loads(json.dumps(self.report))
+        seo = report.setdefault("site_metrics", {}).setdefault("seo", {})
+        seo["ai_robots_policy"] = {
+            "status": "implicit_allowed",
+            "bots": [
+                {
+                    "bot": "GPTBot",
+                    "status": "implicit_allowed",
+                    "source": "robots.txt",
+                    "reason": "no explicit AI bot policy",
+                }
+            ],
+        }
+
+        rebuilt = build_kpi_centric_report(report)
+        robots = rebuilt["axes"]["AI Friendly"]["Robots IA"]
+
+        self.assertEqual(robots["status"], "warning")
+        self.assertEqual(robots["evidence"]["data_quality"], "PARTIAL")
+
+    def test_ai_robots_explicit_allowed_passes(self):
+        report = json.loads(json.dumps(self.report))
+        seo = report.setdefault("site_metrics", {}).setdefault("seo", {})
+        seo["ai_robots_policy"] = {
+            "status": "explicit_allowed",
+            "allowed_bots": ["GPTBot"],
+            "bots": [
+                {
+                    "bot": "GPTBot",
+                    "status": "explicit_allowed",
+                    "source": "robots.txt",
+                    "reason": "Allow rule",
+                }
+            ],
+        }
+
+        rebuilt = build_kpi_centric_report(report)
+        robots = rebuilt["axes"]["AI Friendly"]["Robots IA"]
+
+        self.assertEqual(robots["status"], "passing")
+        self.assertEqual(robots["evidence"]["data_quality"], "VALID")
+
+    def test_ai_raw_content_one_percent_is_warning(self):
+        report = json.loads(json.dumps(self.report))
+        report["pages_scanned"] = 100
+        seo = report.setdefault("site_metrics", {}).setdefault("seo", {})
+        seo["ai_friendly_kpis"] = {
+            "raw_content_visible_pages": 1,
+            "raw_content_rows": [
+                {
+                    "page_url": "https://example.test/page",
+                    "raw_content_visible": True,
+                    "raw_content_word_count": 420,
+                }
+            ],
+        }
+
+        rebuilt = build_kpi_centric_report(report)
+        raw_content = rebuilt["axes"]["AI Friendly"]["Contenu HTML Brut IA"]
+
+        self.assertEqual(raw_content["status"], "warning")
+        self.assertAlmostEqual(raw_content["evidence"]["raw_content_coverage_pct"], 1.0)
 
     def test_kpi_minimum_count(self):
         total_kpis = sum(len(axis_kpis) for axis_kpis in self.kpi_report["axes"].values())
@@ -515,8 +716,62 @@ class TestKPICentricReport(unittest.TestCase):
         self.assertEqual(evidence["tests_run"], 50)
         self.assertEqual(evidence["signal_count"], 0)
         self.assertEqual(evidence["failure_reason"], "form_fuzzer_no_usable_signals")
-        self.assertIn("signaux exploitables: 0", digest_lines)
+        self.assertIn("réponses valides: 0", digest_lines)
         self.assertIn("form_fuzzer_no_usable_signals", digest_lines)
+
+    def test_hidden_server_version_remains_passing_with_partial_quality(self):
+        report = json.loads(json.dumps(self.report))
+        da = report.setdefault("domain_analysis", {})
+        da["cms_kpi"] = {
+            "server_tech": "Apache",
+            "server_version": "",
+            "module_versions": [],
+            "cve_severity": {"critical": 0, "high": 0, "medium": 0, "low": 0},
+        }
+
+        rebuilt = build_kpi_centric_report(report)
+        server = self._find_kpi(rebuilt, "tech_server_version")
+
+        self.assertEqual(server["status"], "passing")
+        self.assertEqual(server["evidence"]["data_quality"], "PARTIAL")
+        self.assertIn("pas expos", server["constat"].lower())
+
+    def test_detected_cms_without_exact_version_is_warning_not_untested(self):
+        report = json.loads(json.dumps(self.report))
+        da = report.setdefault("domain_analysis", {})
+        da["cms_kpi"] = {
+            "cms_detected": "Joomla",
+            "cms_version": "",
+            "cms_version_eol": None,
+            "cms_support_status": "",
+            "module_versions": [],
+            "cve_severity": {"critical": 0, "high": 0, "medium": 0, "low": 0},
+        }
+
+        rebuilt = build_kpi_centric_report(report)
+        cms = self._find_kpi(rebuilt, "tech_cms_version")
+
+        self.assertEqual(cms["status"], "warning")
+        self.assertEqual(cms["severity"], "medium")
+        self.assertEqual(cms["type"], "bug")
+        self.assertEqual(cms["evidence"]["data_quality"], "PARTIAL")
+        self.assertIn("Joomla", cms["constat"])
+        self.assertIn("version", cms["constat"].lower())
+
+    def test_homepage_missing_h1_counts_one_affected_page(self):
+        report = json.loads(json.dumps(self.report))
+        report["domain"] = "https://example.com/"
+        seo = report.setdefault("site_metrics", {}).setdefault("seo", {})
+        seo["pages_with_bad_h1"] = 0
+        seo["homepage_h1_kpi"] = {"homepage_h1_missing": True}
+
+        rebuilt = build_kpi_centric_report(report)
+        heading = self._find_kpi(rebuilt, "seo_heading_structure")
+
+        self.assertEqual(heading["status"], "failing")
+        self.assertEqual(heading["pages_affected"], 1)
+        self.assertEqual(heading["evidence"]["bad_h1_page_count"], 1)
+        self.assertIn("https://example.com/", heading["pages_affected_urls"])
 
     def test_meta_kpi_returns_full_affected_url_lists(self):
         report = json.loads(json.dumps(self.report))

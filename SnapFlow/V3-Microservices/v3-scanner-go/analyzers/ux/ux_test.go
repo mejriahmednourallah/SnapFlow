@@ -108,6 +108,30 @@ func TestAnalyzeMarksContextualMeasurementUnreliableWithoutContentZone(t *testin
 	}
 }
 
+func TestAnalyzeRecognizesJoomlaMainContentZone(t *testing.T) {
+	html := `<html><body>
+		<header><a href="/menu">Menu</a></header>
+		<div id="content">
+			<div class="com-content-article">
+				<p>` + strings.Repeat("article content ", 80) + `</p>
+				<a href="/related">Related article</a>
+			</div>
+		</div>
+	</body></html>`
+
+	res := Analyze("https://example.com/article", html, "https://example.com")
+
+	if !res.ContentZoneDetected || !res.ContextualMeasurementReliable {
+		t.Fatalf("expected Joomla content zone to be reliable, got %#v", res)
+	}
+	if res.ContentZoneSelector == "" || res.ContentZoneConfidence == "" {
+		t.Fatalf("expected selector and confidence metadata, got %#v", res)
+	}
+	if res.ContextualInternalLinks != 1 {
+		t.Fatalf("expected one contextual link, got %d", res.ContextualInternalLinks)
+	}
+}
+
 func TestAnalyzeDetectsCommerceFunnelSignals(t *testing.T) {
 	html := `<html><body>
 		<a href="/panier?action=show">Panier</a>

@@ -116,8 +116,8 @@ describe('Axis Mapping', () => {
       expect(finding?.affectedCount).toBe(2);
       expect(finding?.exampleUrls).toContain('https://example.com/');
       expect(finding?.recommendation).toContain('Optimiser');
-      expect(report.globalScore).toBe(70);
-      expect(report.summary?.total).toBe(10);
+      expect(report.globalScore).toBe(0);
+      expect(report.summary?.total).toBe(1);
       expect(report.summary?.critical).toBe(1);
       expect(report.strategicSummary).toBe('Synthese backend prioritaire.');
       expect(finding?.evidence?.some((line) => line.includes('4200'))).toBe(true);
@@ -174,6 +174,196 @@ describe('Axis Mapping', () => {
       expect(functionalAxis?.findings.some((finding) => finding.id === 'seo_broken_links')).toBe(false);
     });
 
+    it('maps AI Friendly backend axis and ai_* KPIs to the AI bucket', () => {
+      const api: ApiResponse = {
+        scan_id: 'test-scan-ai-friendly-1',
+        domain: 'https://example.com',
+        report_version: 'v2',
+        axes: {
+          'AI Friendly': {
+            llms: {
+              kpi_id: 'ai_llms_txt',
+              type: 'recommendation',
+              name: 'AI Readiness (llms.txt)',
+              status: 'warning',
+              severity: 'low',
+              confidence: 'low',
+              constat: 'Le fichier llms.txt n est pas detecte.',
+              score: 55,
+              impact: 'Decouvrabilite reduite dans les moteurs generatifs.',
+              evidence: {
+                data_quality: 'PARTIAL',
+                detection_source: ['http_probe'],
+                pages_checked: 1,
+                affected_pages: 1,
+              },
+              fix: 'Publier un fichier llms.txt utile.',
+            },
+          },
+        },
+      };
+
+      const report = mapApiResponseToReport(api, 'audit-ai-friendly-1', {
+        url: 'https://example.com',
+        site_name: 'Test Site',
+      });
+
+      const aiAxis = report.axes.find((axis) => axis.id === 'ai-friendly');
+      const seoAxis = report.axes.find((axis) => axis.id === 'seo');
+
+      expect(aiAxis).toBeDefined();
+      expect(aiAxis?.findings.some((finding) => finding.id === 'ai_llms_txt')).toBe(true);
+      expect(seoAxis?.findings.some((finding) => finding.id === 'ai_llms_txt')).toBe(false);
+    });
+
+    it('routes legacy seo_ai_readiness KPI to AI Friendly for backward compatibility', () => {
+      const api: ApiResponse = {
+        scan_id: 'test-scan-ai-legacy-1',
+        domain: 'https://example.com',
+        report_version: 'v2',
+        axes: {
+          SEO: {
+            llms: {
+              kpi_id: 'seo_ai_readiness',
+              type: 'recommendation',
+              name: 'AI Readiness (llms.txt)',
+              status: 'warning',
+              severity: 'low',
+              confidence: 'low',
+              constat: 'Ancien KPI llms.txt.',
+              score: 55,
+              impact: 'Decouvrabilite IA reduite.',
+              evidence: {
+                data_quality: 'PARTIAL',
+                detection_source: ['http_probe'],
+                pages_checked: 1,
+                affected_pages: 1,
+              },
+              fix: 'Publier llms.txt.',
+            },
+          },
+        },
+      };
+
+      const report = mapApiResponseToReport(api, 'audit-ai-legacy-1', {
+        url: 'https://example.com',
+        site_name: 'Test Site',
+      });
+
+      expect(report.axes.find((axis) => axis.id === 'ai-friendly')?.findings.some((finding) => finding.title === 'AI Readiness (llms.txt)')).toBe(true);
+      expect(report.axes.find((axis) => axis.id === 'seo')?.findings.some((finding) => finding.title === 'AI Readiness (llms.txt)')).toBe(false);
+    });
+
+    it('replaces generic AI Friendly wording with KPI-specific client text', () => {
+      const api: ApiResponse = {
+        scan_id: 'test-scan-ai-wording-1',
+        domain: 'https://example.com',
+        report_version: 'v2',
+        axes: {
+          'AI Friendly': {
+            llms: {
+              kpi_id: 'ai_llms_txt',
+              type: 'recommendation',
+              name: 'AI Readiness (llms.txt)',
+              status: 'warning',
+              severity: 'low',
+              confidence: 'low',
+              constat: 'Un point d amelioration a ete detecte sur ce controle.',
+              score: 58,
+              impact: 'Decouvrabilite IA reduite.',
+              evidence: {
+                data_quality: 'PARTIAL',
+                detection_source: ['http_probe'],
+                pages_checked: 1,
+                affected_pages: 1,
+              },
+              evidence_digest: {
+                quality: 'PARTIAL',
+                proof_lines: [
+                  'URL testee: https://example.com/llms.txt',
+                  'Resultat de recuperation: fetch_error:HTTPError',
+                ],
+                rows: [
+                  { llms_url: 'https://example.com/llms.txt', parse_status: 'fetch_error:HTTPError' },
+                ],
+                urls: ['https://example.com'],
+                csv_columns: ['llms_url', 'parse_status'],
+              },
+              fix: 'Corriger : AI Readiness (llms.txt)',
+            },
+          },
+        },
+      };
+
+      const report = mapApiResponseToReport(api, 'audit-ai-wording-1', {
+        url: 'https://example.com',
+        site_name: 'Test Site',
+      });
+      const finding = report.axes.find((axis) => axis.id === 'ai-friendly')?.findings[0];
+
+      expect(finding?.description).toContain('llms.txt');
+      expect(finding?.description).not.toContain('Un point d amelioration');
+      expect(finding?.recommendation).toContain('moteurs generatifs');
+      expect(finding?.recommendation).not.toContain('Corriger :');
+    });
+
+    it('formats AI Schema.org JSON-LD evidence with human labels', () => {
+      const api: ApiResponse = {
+        scan_id: 'test-scan-ai-schema-evidence-1',
+        domain: 'https://example.com',
+        report_version: 'v2',
+        axes: {
+          'AI Friendly': {
+            schema: {
+              kpi_id: 'ai_schema_org',
+              type: 'recommendation',
+              name: 'Schema.org pour IA',
+              status: 'warning',
+              severity: 'low',
+              confidence: 'medium',
+              constat: 'JSON-LD partiel.',
+              score: 60,
+              impact: 'Compréhension IA limitée.',
+              evidence: {
+                data_quality: 'PARTIAL',
+                json_ld_valid_pages: 10,
+                json_ld_coverage_pct: 10,
+                json_ld_parse_errors: 2,
+                schema_types: 'Organization, WebSite',
+              },
+              evidence_digest: {
+                quality: 'PARTIAL',
+                proof_lines: [
+                  'json_ld_valid_pages: 10',
+                  'json_ld_coverage_pct: 10',
+                  'json_ld_parse_errors: 2',
+                  'schema_types: Organization, WebSite',
+                ],
+                rows: [
+                  { page_url: 'https://example.com/', json_ld_valid: true, json_ld_types: 'Organization' },
+                ],
+                csv_columns: ['page_url', 'json_ld_valid', 'json_ld_types'],
+              },
+              fix: 'Ajouter un JSON-LD complet.',
+            },
+          },
+        },
+      };
+
+      const report = mapApiResponseToReport(api, 'audit-ai-schema-evidence-1', {
+        url: 'https://example.com',
+        site_name: 'Test Site',
+      });
+
+      const finding = report.axes.find((axis) => axis.id === 'ai-friendly')?.findings[0];
+      const evidence = finding?.evidence?.join(' ') ?? '';
+
+      expect(evidence).toContain('Pages avec JSON-LD valide');
+      expect(evidence).toContain('Couverture JSON-LD');
+      expect(evidence).toContain('Erreurs de parsing JSON-LD');
+      expect((finding?.annexes ?? []).join(' ')).toContain('Types detectes');
+    });
+
     it('keeps legacy V1 scanner fields mapped when the new contract is absent', () => {
       const api: ApiResponse = {
         scan_id: 'test-scan-v1-legacy-1',
@@ -215,7 +405,7 @@ describe('Axis Mapping', () => {
       expect((finding?.evidence ?? []).some((line) => /metrics\.|data quality|VALID/i.test(line))).toBe(false);
     });
 
-    it('counts non-tested KPIs in visible totals without classifying them as actions', () => {
+    it('keeps backend non-tested KPIs out of client-visible findings and actions', () => {
       const api: ApiResponse = {
         scan_id: 'test-scan-non-tested-tech-1',
         domain: 'https://example.com',
@@ -272,19 +462,18 @@ describe('Axis Mapping', () => {
       const breakdown = getAxisScoreBreakdown(techAxis!);
       const nonTested = techAxis?.findings.filter((finding) => finding.origin === 'coverage') ?? [];
 
-      expect(techAxis?.findings).toHaveLength(5);
-      expect(breakdown.x).toBe(1);
-      expect(breakdown.y).toBe(5);
-      expect(nonTested).toHaveLength(4);
-      expect(nonTested.filter((finding) => finding.kpiLabels?.statut === 'Non concluant')).toHaveLength(2);
-      expect(nonTested.filter((finding) => finding.kpiLabels?.statut === 'Non testé')).toHaveLength(2);
-      expect(nonTested.filter((finding) => finding.kpiLabels?.typeLabel === 'Recommandation')).toHaveLength(2);
-      expect(nonTested.filter((finding) => finding.kpiLabels?.typeLabel === 'Indéterminé')).toHaveLength(2);
+      expect(techAxis?.findings).toHaveLength(2);
+      expect(breakdown.x).toBe(2);
+      expect(breakdown.y).toBe(2);
+      expect(breakdown.scoreMeasured).toBe(100);
+      expect(breakdown.coveragePct).toBe(100);
+      expect(nonTested).toHaveLength(0);
       expect(report.bugs.some((item) => item.source_kpi === 'tech_cve_check')).toBe(false);
       expect(report.recommendations.some((item) => item.source_kpi === 'tech_programming_language')).toBe(false);
+      expect(report.auditCoverage).toEqual([]);
     });
 
-    it('normalizes all backend non-tested status variants before badge/action classification', () => {
+    it('hides all backend non-tested status variants from client lists', () => {
       const api: ApiResponse = {
         scan_id: 'test-scan-non-tested-variants-1',
         domain: 'https://example.com',
@@ -330,12 +519,10 @@ describe('Axis Mapping', () => {
 
       const securityFindings = report.axes.find((axis) => axis.id === 'security')?.findings ?? [];
 
-      expect(securityFindings).toHaveLength(4);
-      expect(securityFindings.every((finding) => finding.origin === 'coverage')).toBe(true);
-      expect(securityFindings.every((finding) => finding.status !== 'fail')).toBe(true);
-      expect(securityFindings.every((finding) => finding.kpiLabels?.statut === 'Non testé')).toBe(true);
+      expect(securityFindings).toHaveLength(0);
       expect(report.bugs).toHaveLength(0);
       expect(report.recommendations).toHaveLength(0);
+      expect(report.auditCoverage).toEqual([]);
     });
   });
 
@@ -704,14 +891,11 @@ describe('Axis Mapping', () => {
         site_name: 'Test Site',
       });
 
-      const finding = report.axes.find((axis) => axis.id === 'technique')?.findings[0];
+      const findings = report.axes.find((axis) => axis.id === 'technique')?.findings ?? [];
 
-      expect(finding?.title).toBe('Version du langage de programmation');
-      expect(finding?.description).toContain('serveur Apache');
-      expect(finding?.description).toContain('2.4');
-      expect(finding?.evidenceSummary).toContain('Serveur detecte : Apache');
-      expect(finding?.evidenceSummary).toContain('Version serveur : 2.4');
-      expect((finding?.evidenceSummary ?? []).some((line) => /Source de detection|scanner_aggregation|stack_fingerprint/i.test(line))).toBe(false);
+      expect(findings).toHaveLength(0);
+      expect(report.recommendations.some((item) => item.source_kpi === 'tech_programming_language')).toBe(false);
+      expect(report.auditCoverage).toEqual([]);
     });
 
     it('shows unverified module versions as to-review, not validated', () => {
@@ -745,15 +929,11 @@ describe('Axis Mapping', () => {
         site_name: 'Test Site',
       });
 
-      const finding = report.axes.find((axis) => axis.id === 'technique')?.findings[0];
+      const findings = report.axes.find((axis) => axis.id === 'technique')?.findings ?? [];
 
-      expect(finding?.title).toBe('Version des modules');
-      expect(finding?.status).toBe('not_evaluated');
-      expect(finding?.kpiLabels?.statut).toBe('Non concluant');
-      expect(finding?.description).toContain('3 modules');
-      expect(finding?.description).toContain('version exploitable');
-      expect(finding?.recommendation).not.toContain('Controle conforme');
-      expect(finding?.evidenceSummary).toContain('Modules avec version detectee : 3');
+      expect(findings).toHaveLength(0);
+      expect(report.recommendations.some((item) => item.source_kpi === 'tech_modules_versions')).toBe(false);
+      expect(report.auditCoverage).toEqual([]);
     });
 
     it('uses specific privacy KPI titles instead of repeating the axis label', () => {
@@ -821,7 +1001,7 @@ describe('Axis Mapping', () => {
       expect(finding?.description).not.toMatch(/\bLCP\b|\bCLS\b|\bKPI\b/i);
     });
 
-    it('renders failed mobile CWV execution as non-tested without fake zero score', () => {
+    it('hides failed mobile CWV execution from client findings without fake zero score', () => {
       const api: ApiResponse = {
         scan_id: 'test-scan-mobile-cwv-missing',
         domain: 'https://example.com',
@@ -862,15 +1042,14 @@ describe('Axis Mapping', () => {
         site_name: 'Test Site',
       });
 
-      const finding = report.axes.find((axis) => axis.id === 'performance')?.findings.find((item) => item.id === 'perf_mobile_speed');
+      const findings = report.axes.find((axis) => axis.id === 'performance')?.findings ?? [];
 
-      expect(finding?.kpiLabels?.statut).toBe('Non testé');
-      expect(finding?.status).toBe('not_evaluated');
-      expect([finding?.description, ...(finding?.evidenceSummary ?? [])].join(' ')).not.toContain('Score mobile estime : 0 %');
-      expect(finding?.evidenceSummary?.join(' ')).toContain('mobile_cwv_measurement_failed');
+      expect(findings.some((item) => item.id === 'perf_mobile_speed')).toBe(false);
+      expect(report.recommendations.some((item) => item.source_kpi === 'perf_mobile_speed')).toBe(false);
+      expect(report.auditCoverage).toEqual([]);
     });
 
-    it('keeps form fuzzer no-signal cases non-tested with debugging counters', () => {
+    it('hides form fuzzer no-signal cases from client findings', () => {
       const api: ApiResponse = {
         scan_id: 'test-scan-forms-no-signals',
         domain: 'https://example.com',
@@ -913,14 +1092,46 @@ describe('Axis Mapping', () => {
         site_name: 'Test Site',
       });
 
-      const finding = report.axes.find((axis) => axis.id === 'functional')?.findings.find((item) => item.id === 'func_forms');
-      const evidence = finding?.evidenceSummary?.join(' ') ?? '';
+      const findings = report.axes.find((axis) => axis.id === 'functional')?.findings ?? [];
 
-      expect(finding?.kpiLabels?.statut).toBe('Non testé');
-      expect(finding?.status).toBe('not_evaluated');
-      expect(evidence).toContain('122/0');
-      expect(evidence).toContain('signaux exploitables: 0');
-      expect(evidence).toContain('form_fuzzer_no_usable_signals');
+      expect(findings.some((item) => item.id === 'func_forms')).toBe(false);
+      expect(report.bugs.some((item) => item.source_kpi === 'func_forms')).toBe(false);
+      expect(report.recommendations.some((item) => item.source_kpi === 'func_forms')).toBe(false);
+      expect(report.auditCoverage).toEqual([]);
     });
+  });
+});
+
+describe('Measured-only axis scoring', () => {
+  it('keeps a perfect measured score while exposing 20 percent coverage', () => {
+    const axis = {
+      id: 'technique',
+      name: 'Technique',
+      icon: 'technique',
+      score: 0,
+      maxScore: 0,
+      description: '',
+      findings: [
+        { id: 'pass', title: 'Measured pass', status: 'pass', type: 'pass', criticality: 'low', priority: 'moyen-terme', description: '', recommendation: '' },
+        ...Array.from({ length: 4 }, (_, index) => ({
+          id: `nt-${index}`,
+          title: `Not tested ${index}`,
+          status: 'not_evaluated',
+          type: 'recommendation',
+          origin: 'coverage',
+          criticality: 'low',
+          priority: 'moyen-terme',
+          description: '',
+          recommendation: '',
+        })),
+      ],
+    } as any;
+
+    const breakdown = getAxisScoreBreakdown(axis);
+
+    expect(breakdown.scoreMeasured).toBe(100);
+    expect(breakdown.coveragePct).toBe(20);
+    expect(breakdown.measuredKpis).toBe(1);
+    expect(breakdown.totalKpis).toBe(5);
   });
 });

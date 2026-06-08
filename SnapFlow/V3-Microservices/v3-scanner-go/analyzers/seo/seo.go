@@ -42,6 +42,23 @@ type HTTPProbeResult struct {
 	Body        string `json:"-"`
 }
 
+type AIRobotRule struct {
+	Bot       string   `json:"bot"`
+	Status    string   `json:"status"`
+	Allow     []string `json:"allow,omitempty"`
+	Disallow  []string `json:"disallow,omitempty"`
+	Source    string   `json:"source"`
+	Reason    string   `json:"reason,omitempty"`
+}
+
+type AIRobotsPolicy struct {
+	Status              string        `json:"status"`
+	Bots                []AIRobotRule `json:"bots"`
+	BlockedBots         []string      `json:"blocked_bots"`
+	AllowedBots         []string      `json:"allowed_bots"`
+	ImplicitAllowedBots []string      `json:"implicit_allowed_bots"`
+}
+
 type SEOResult struct {
 	URL                   string        `json:"url"`
 	RawHTML               string        `json:"-"`
@@ -356,6 +373,132 @@ func ProbeRobotsTxt(baseURL string) HTTPProbeResult {
 	}
 	client := &http.Client{Timeout: 8 * time.Second}
 	return probeHTTPResource(client, root+"/robots.txt")
+}
+
+func AnalyzeAIRobotsPolicy(robotsTxtContent string) AIRobotsPolicy {
+	targetBots := []string{"GPTBot", "OAI-SearchBot", "ClaudeBot", "PerplexityBot", "bingbot"}
+	if strings.TrimSpace(robotsTxtContent) == "" {
+		bots := make([]AIRobotRule, 0, len(targetBots))
+		for _, bot := range targetBots {
+			bots = append(bots, AIRobotRule{
+				Bot:    bot,
+				Status: "robots_missing",
+				Source: "missing",
+				Reason: "robots.txt was not available during scan",
+			})
+		}
+		return AIRobotsPolicy{Status: "robots_missing", Bots: bots}
+	}
+
+	type group struct {
+		agents   []string
+		allow    []string
+		disallow []string
+	}
+	var groups []group
+	current := group{}
+	flush := func() {
+		if len(current.agents) > 0 {
+			groups = append(groups, current)
+		}
+		current = group{}
+	}
+
+	for _, rawLine := range strings.Split(robotsTxtContent, "\n") {
+		line := strings.TrimSpace(strings.SplitN(rawLine, "#", 2)[0])
+		if line == "" {
+			flush()
+			continue
+		}
+		parts := strings.SplitN(line, ":", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		key := strings.ToLower(strings.TrimSpace(parts[0]))
+		value := strings.TrimSpace(parts[1])
+		switch key {
+		case "user-agent":
+			if len(current.agents) > 0 && (len(current.allow) > 0 || len(current.disallow) > 0) {
+				flush()
+			}
+			current.agents = append(current.agents, strings.ToLower(value))
+		case "allow":
+			current.allow = append(current.allow, value)
+		case "disallow":
+			current.disallow = append(current.disallow, value)
+		}
+	}
+	flush()
+
+	findRule := func(bot string) (group, string, bool) {
+		needle := strings.ToLower(bot)
+		var wildcard *group
+		for i := range groups {
+			for _, agent := range groups[i].agents {
+				switch strings.ToLower(strings.TrimSpace(agent)) {
+				case needle:
+					return groups[i], "explicit", true
+				case "*":
+					g := groups[i]
+					wildcard = &g
+				}
+			}
+		}
+		if wildcard != nil {
+			return *wildcard, "wildcard", true
+		}
+		return group{}, "implicit", false
+	}
+
+	isBlocked := func(g group) bool {
+		for _, disallow := range g.disallow {
+			trimmed := strings.TrimSpace(disallow)
+			if trimmed == "" {
+				continue
+			}
+			if trimmed == "/" || strings.HasPrefix(trimmed, "/*") {
+				for _, allow := range g.allow {
+					if strings.TrimSpace(allow) == "/" {
+						return false
+					}
+				}
+				return true
+			}
+		}
+		return false
+	}
+
+	policy := AIRobotsPolicy{Status: "implicit_allowed"}
+	for _, bot := range targetBots {
+		g, source, found := findRule(bot)
+		rule := AIRobotRule{Bot: bot, Source: source}
+		if found {
+			rule.Allow = append(rule.Allow, g.allow...)
+			rule.Disallow = append(rule.Disallow, g.disallow...)
+		}
+		switch {
+		case found && isBlocked(g):
+			rule.Status = "blocked"
+			rule.Reason = "matching robots rule disallows the site root"
+			policy.BlockedBots = append(policy.BlockedBots, bot)
+		case found && len(g.allow) > 0:
+			rule.Status = "allowed"
+			policy.AllowedBots = append(policy.AllowedBots, bot)
+		case found:
+			rule.Status = "implicit_allowed"
+			policy.ImplicitAllowedBots = append(policy.ImplicitAllowedBots, bot)
+		default:
+			rule.Status = "implicit_allowed"
+			policy.ImplicitAllowedBots = append(policy.ImplicitAllowedBots, bot)
+		}
+		policy.Bots = append(policy.Bots, rule)
+	}
+	if len(policy.BlockedBots) > 0 {
+		policy.Status = "blocked"
+	} else if len(policy.AllowedBots) > 0 {
+		policy.Status = "allowed"
+	}
+	return policy
 }
 
 func Analyze(targetURL string, html string, hasSitemap bool, hasRobots bool) SEOResult {

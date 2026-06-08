@@ -1939,6 +1939,7 @@ func startScan(ctx context.Context, config ScannerConfig) {
 		"sitemap_detected_via":           sitemapProbe.DetectedVia,
 		"robots_url":                     robotsProbe.FinalURL,
 		"robots_detected_via":            robotsProbe.DetectedVia,
+		"ai_robots_policy":               seo.AnalyzeAIRobotsPolicy(robotsTxtContent),
 		"total_internal_links":           summary.TotalInternalLinks,
 		"total_external_links":           summary.TotalExternalLinks,
 		"total_resource_size_kb":         math.Round((float64(atomic.LoadInt64(&totalResourceBytes))/1024.0)*10) / 10,
@@ -2282,6 +2283,8 @@ func startScan(ctx context.Context, config ScannerConfig) {
 			"data_quality":       me.result.DataQuality,
 			"passed":             me.result.Passed,
 			"issues":             me.result.Issues,
+			"render_engine":      me.result.RenderEngine,
+			"attempts":           me.result.Attempts,
 			"error":              me.result.Error,
 		}
 		if me.result.Available && me.result.FCPMS > 0 && me.result.LCPMS > 0 {

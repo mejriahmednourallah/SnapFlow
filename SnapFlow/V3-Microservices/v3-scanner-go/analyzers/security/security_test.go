@@ -1,6 +1,10 @@
 package security
 
-import "testing"
+import (
+	"net/http"
+	"net/http/httptest"
+	"testing"
+)
 
 func TestFindLoginFormRejectsNewsletterFooter(t *testing.T) {
 	html := `<form id="blockEmailSubscription_displayFooter" action="#blockEmailSubscription_displayFooter">
@@ -27,6 +31,25 @@ func TestFindLoginFormAcceptsPasswordLogin(t *testing.T) {
 	target, _ := findLoginForm(html, "https://example.test")
 	if target != "https://example.test/account/login" {
 		t.Fatalf("expected password login target, got %q", target)
+	}
+}
+
+func TestConfirmLoginTargetRejectsHomepageRedirect(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/login" {
+			http.Redirect(w, r, "/", http.StatusFound)
+			return
+		}
+		_, _ = w.Write([]byte(`<html><body>Homepage</body></html>`))
+	}))
+	defer server.Close()
+
+	target, reason := confirmLoginTarget(server.URL+"/login", server.URL)
+	if target.ActionURL != "" {
+		t.Fatalf("expected redirected candidate to be rejected, got %#v", target)
+	}
+	if reason != "login_candidate_redirected_to_homepage" {
+		t.Fatalf("expected homepage redirect reason, got %q", reason)
 	}
 }
 

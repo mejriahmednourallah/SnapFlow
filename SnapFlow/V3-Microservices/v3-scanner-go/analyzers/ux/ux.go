@@ -15,6 +15,9 @@ type UXResult struct {
 	ContextualInternalLinks       int      `json:"contextual_internal_links"`
 	ContentZoneDetected           bool     `json:"content_zone_detected"`
 	ContextualMeasurementReliable bool     `json:"contextual_measurement_reliable"`
+	ContentZoneSelector           string   `json:"content_zone_selector,omitempty"`
+	ContentZoneConfidence         string   `json:"content_zone_confidence,omitempty"`
+	ContentZoneFailureReason      string   `json:"content_zone_failure_reason,omitempty"`
 	IsReadable                    bool     `json:"is_readable"`
 	HasMap                        bool     `json:"has_map"`
 	// Phase E: count instead of bool
@@ -65,6 +68,42 @@ func hasCommerceFunnelSignal(pageURL, lowerHtml string, doc *goquery.Document) b
 	}
 
 	return false
+}
+
+func selectContentZone(doc *goquery.Document) (*goquery.Selection, string, string) {
+	selectors := []string{
+		"main", "article", "[role='main']", "#content", "#main",
+		".main-content", ".content", ".region-content", ".layout-content", ".node__content",
+		".com-content-article", ".item-page", ".article-body", ".site-main",
+		"#sp-main-body", ".content-area",
+	}
+	for _, selector := range selectors {
+		if candidate := doc.Find(selector).First(); candidate.Length() > 0 && len(strings.TrimSpace(candidate.Text())) >= 120 {
+			return candidate, selector, "high"
+		}
+	}
+
+	var best *goquery.Selection
+	bestScore := 0
+	doc.Find("body section, body div").Each(func(_ int, candidate *goquery.Selection) {
+		if candidate.Closest("nav, header, footer, aside, [role='navigation'], .menu, .navbar, .footer, .header, .sidebar").Length() > 0 {
+			return
+		}
+		textLength := len(strings.TrimSpace(candidate.Text()))
+		if textLength < 500 {
+			return
+		}
+		linkCount := candidate.Find("a[href]").Length()
+		score := textLength - linkCount*30
+		if score > bestScore {
+			bestScore = score
+			best = candidate
+		}
+	})
+	if best != nil {
+		return best, "density_fallback", "medium"
+	}
+	return doc.Find("__snapflow_no_content_zone__"), "", "none"
 }
 
 func Analyze(pageURL string, html string, baseDomain string) UXResult {
@@ -142,9 +181,14 @@ func Analyze(pageURL string, html string, baseDomain string) UXResult {
 	}
 
 	// 3. Detect contextual (in-article) internal links vs. menu links (Maillage)
-	mainArea := doc.Find("main, article, [role='main'], #content, #main, .main-content, .content, .region-content, .layout-content, .node__content").First()
+	mainArea, contentSelector, contentConfidence := selectContentZone(doc)
 	res.ContentZoneDetected = mainArea.Length() > 0
-	res.ContextualMeasurementReliable = res.ContentZoneDetected
+	res.ContentZoneSelector = contentSelector
+	res.ContentZoneConfidence = contentConfidence
+	res.ContextualMeasurementReliable = res.ContentZoneDetected && contentConfidence != "none"
+	if !res.ContentZoneDetected {
+		res.ContentZoneFailureReason = "main_content_zone_not_identified"
+	}
 
 	contextualLinks := 0
 	normalizeHost := func(h string) string {

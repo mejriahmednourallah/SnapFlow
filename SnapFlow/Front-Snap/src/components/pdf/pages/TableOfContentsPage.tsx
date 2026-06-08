@@ -16,21 +16,29 @@ export function TableOfContentsPage({ report, theme, clientLogoSrc }: TableOfCon
   const s = makePageStyles(theme);
   const t = theme ?? undefined;
 
-  const baseEntries = [
-    '01 Couverture',
-    '02 Table des matières',
-    '03 Résumé exécutif',
-    '04 Grille des contrôles',
+  const hasAxes = report.axes.length > 0;
+  const hasRecommendations = report.recommendations.length > 0;
+  const hasAnnexes = report.axes.some((axis) =>
+    axis.findings.some((finding) =>
+      finding.evidence.length > 0 ||
+      finding.annexes.length > 0 ||
+      finding.exampleUrls.length > 0 ||
+      finding.page ||
+      finding.pageUrl,
+    ),
+  );
+  const labels = [
+    'Couverture',
+    'Table des matières',
+    'Résumé exécutif',
+    ...(hasAxes ? ['Grille des contrôles'] : []),
+    ...report.axes.map((axis) => axis.name),
+    ...(hasRecommendations ? ["Plan d'action", "Priorités d'action"] : []),
+    'Conclusion',
+    ...(hasAnnexes ? ['Annexes'] : []),
+    'Quatrième de couverture',
   ];
-  const axisEntries = report.axes.map((axis, idx) => `${String(idx + 5).padStart(2, '0')} ${axis.name}`);
-  const endEntries = [
-    `${String(axisEntries.length + 5).padStart(2, '0')} Plan d'action`,
-    `${String(axisEntries.length + 6).padStart(2, '0')} Priorités d'action`,
-    `${String(axisEntries.length + 7).padStart(2, '0')} Conclusion`,
-    `${String(axisEntries.length + 8).padStart(2, '0')} Annexes`,
-    `${String(axisEntries.length + 9).padStart(2, '0')} Quatrième de couverture`,
-  ];
-  const entries = [...baseEntries, ...axisEntries, ...endEntries];
+  const entries = labels.map((label, idx) => `${String(idx + 1).padStart(2, '0')} ${label}`);
 
   return (
     <Page size="A4" style={s.page}>

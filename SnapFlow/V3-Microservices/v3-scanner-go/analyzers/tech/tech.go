@@ -98,18 +98,19 @@ type CVESeverity struct {
 // TechResult no longer carries a numeric Score.
 // Passed is false only when CMS version is detectable AND is known EOL.
 type TechResult struct {
-	URL              string         `json:"url"`
-	Stack            []DetectedTech `json:"stack"`
-	CMS              string         `json:"cms,omitempty"`
-	CMSVersion       string         `json:"cms_version,omitempty"`
-	CMSVersionRange  string         `json:"cms_version_range,omitempty"`
-	CMSVersionEOL    bool           `json:"cms_version_eol"`
-	CMSSupportStatus string         `json:"cms_support_status,omitempty"`
-	InferenceSources []string       `json:"inference_sources,omitempty"`
-	Server           string         `json:"server,omitempty"`
-	Language         string         `json:"language,omitempty"`
-	LanguageVersion  string         `json:"language_version,omitempty"`
-	LanguageInferred bool           `json:"language_inferred,omitempty"`
+	URL                 string         `json:"url"`
+	Stack               []DetectedTech `json:"stack"`
+	CMS                 string         `json:"cms,omitempty"`
+	CMSVersion          string         `json:"cms_version,omitempty"`
+	CMSVersionRange     string         `json:"cms_version_range,omitempty"`
+	CMSVersionEOL       bool           `json:"cms_version_eol"`
+	CMSVersionEvaluated bool           `json:"cms_version_evaluated"`
+	CMSSupportStatus    string         `json:"cms_support_status,omitempty"`
+	InferenceSources    []string       `json:"inference_sources,omitempty"`
+	Server              string         `json:"server,omitempty"`
+	Language            string         `json:"language,omitempty"`
+	LanguageVersion     string         `json:"language_version,omitempty"`
+	LanguageInferred    bool           `json:"language_inferred,omitempty"`
 	// Gap #2: module versions extracted from stack
 	ModuleVersions []ModuleVersion `json:"module_versions"`
 	// Gap #3: server/language version from response headers
@@ -768,26 +769,27 @@ func Analyze(targetURL string, html string, headers *http.Header) TechResult {
 	osHint := inferOSHintFromServerBanner(serverBanner)
 
 	return TechResult{
-		URL:              targetURL,
-		Stack:            stack,
-		CMS:              cms,
-		CMSVersion:       cmsVersion,
-		CMSVersionRange:  cmsVersionRange,
-		CMSVersionEOL:    eol,
-		CMSSupportStatus: cmsSupportStatus,
-		InferenceSources: inferenceSources,
-		Server:           server,
-		Language:         lang,
-		LanguageVersion:  langVersion,
-		LanguageInferred: languageInferred,
-		ModuleVersions:   moduleVersions,
-		ServerTech:       serverTech,
-		ServerVersion:    serverVersion,
-		ServerBanner:     serverBanner,
-		OSHint:           osHint,
-		CVESeverity:      CVESeverity{}, // populated by future CVE lookup service
-		Passed:           passed,
-		Issues:           issues,
-		ServiceName:      "v3-tech-detector-go",
+		URL:                 targetURL,
+		Stack:               stack,
+		CMS:                 cms,
+		CMSVersion:          cmsVersion,
+		CMSVersionRange:     cmsVersionRange,
+		CMSVersionEOL:       eol,
+		CMSVersionEvaluated: cmsVersion != "",
+		CMSSupportStatus:    cmsSupportStatus,
+		InferenceSources:    inferenceSources,
+		Server:              server,
+		Language:            lang,
+		LanguageVersion:     langVersion,
+		LanguageInferred:    languageInferred,
+		ModuleVersions:      moduleVersions,
+		ServerTech:          serverTech,
+		ServerVersion:       serverVersion,
+		ServerBanner:        serverBanner,
+		OSHint:              osHint,
+		CVESeverity:         CVESeverity{}, // populated by future CVE lookup service
+		Passed:              passed,
+		Issues:              issues,
+		ServiceName:         "v3-tech-detector-go",
 	}
 }

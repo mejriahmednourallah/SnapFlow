@@ -1,4 +1,4 @@
-import { Page, View, Text, Image, Svg, Rect } from '@react-pdf/renderer';
+import { Page, View, Text, Image } from '@react-pdf/renderer';
 import snapflowLogo from '@/assets/snapflow-logo.png';
 import type { AuditDocumentData } from '../types';
 import type { PdfTheme } from '../theme';
@@ -15,11 +15,25 @@ export function BackCoverPage({ report, theme, clientLogoSrc }: BackCoverPagePro
   const t = theme ?? undefined;
 
   return (
-    <Page size="A4" style={s.page}>
-      <Svg width="595" height="842" style={{ position: 'absolute', top: 0, left: 0 }}>
-        <Rect x={0} y={0} width={595} height={842} fill={t?.heroBg ?? '#10243C'} />
-        <Rect x={0} y={700} width={595} height={142} fill={t?.accent ?? '#4E8CCF'} opacity={0.18} />
-      </Svg>
+    <Page
+      size="A4"
+      style={{
+        ...s.page,
+        backgroundColor: t?.heroBg ?? '#10243C',
+        paddingBottom: 0,
+      }}
+    >
+      <View
+        style={{
+          position: 'absolute',
+          left: 0,
+          right: 0,
+          bottom: 0,
+          height: 142,
+          backgroundColor: t?.accent ?? '#4E8CCF',
+          opacity: 0.18,
+        }}
+      />
 
       <View style={{ paddingHorizontal: 48, paddingTop: 180, alignItems: 'center' }}>
         <Text style={{ fontFamily: 'PlayfairDisplay', fontSize: 36, color: t?.heroText ?? '#EFF6FF', textAlign: 'center' }}>

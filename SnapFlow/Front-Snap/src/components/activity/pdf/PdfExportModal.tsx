@@ -32,29 +32,29 @@ export interface PdfExportModalProps {
 
 const COVER_KPI_DEFS = [
   { key: 'total', label: 'Total' },
-  { key: 'meetings', label: 'Reunions' },
+  { key: 'meetings', label: 'Réunions' },
   { key: 'open', label: 'En cours' },
-  { key: 'resolved', label: 'Resolus' },
+  { key: 'resolved', label: 'Résolus' },
   { key: 'critical', label: 'Critiques' },
-  { key: 'blocked', label: 'Bloques' },
-  { key: 'closure', label: 'Delai' },
+  { key: 'blocked', label: 'Bloqués' },
 ] as const;
 
 const SECTION_DEFS = [
-  { key: 'sommaire', label: 'Table des matieres' },
-  { key: 'merci', label: 'Page de cloture' },
+  { key: 'sommaire', label: 'Table des matières' },
+  { key: 'merci', label: 'Page de clôture' },
 ] as const;
 
 const REPORT_STRUCTURE_DEFS = [
-  'Contexte + indicateurs globaux',
-  'Etat des tickets avec graphique',
+  'Indicateurs globaux',
+  'État des tickets avec graphique',
   'Typologie des tickets',
-  'Priorites des tickets',
-  'Tickets clotures et ouverts',
-  'Workflow operationnel',
-  'Tables actionnables si donnees',
-  'Blocages si presents',
-  'Reunions si presentes',
+  'Priorité des tickets',
+  'Détails des tickets clôturés',
+  'Détails des tickets ouverts',
+  'Tickets en cours de test et pris en charge',
+  'Tables actionnables si données',
+  'Tickets bloqués si présents',
+  "Réunions et points d'échange si présents",
 ] as const;
 
 export function PdfExportModal({
@@ -81,7 +81,7 @@ export function PdfExportModal({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle className="text-lg font-bold">Exporter le rapport activite</DialogTitle>
+          <DialogTitle className="text-lg font-bold">Exporter le rapport d'activité</DialogTitle>
         </DialogHeader>
 
         <div>

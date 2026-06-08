@@ -50,6 +50,8 @@ class RenderRequest(BaseModel):
     engine: Optional[str] = "chromium"
     allow_obscura_fallback: Optional[bool] = False
     settle_ms: Optional[int] = 1000
+    # "desktop" | "mobile_3g"
+    profile: Optional[str] = "desktop"
 
 
 class ScreenshotRequest(BaseModel):
@@ -82,6 +84,12 @@ class DiscoverRenderedRequest(BaseModel):
     force_chromium: Optional[bool] = False
 
 
+class SearchProbeRequest(BaseModel):
+    url: str
+    query: Optional[str] = "snapflow-test"
+    timeout_ms: Optional[int] = 30000
+
+
 # ── Endpoints ──────────────────────────────────────────────────────────────────
 
 @app.get("/health")
@@ -98,6 +106,7 @@ async def render(req: RenderRequest):
         engine=req.engine or "chromium",
         allow_obscura_fallback=bool(req.allow_obscura_fallback),
         settle_ms=req.settle_ms if req.settle_ms is not None else 1000,
+        profile=req.profile or "desktop",
     )
     return {
         "status":        result.status,
@@ -128,8 +137,18 @@ async def render(req: RenderRequest):
         "confidence": result.confidence,
         "wait_until": result.wait_until,
         "attempts": result.attempts or [],
+        "profile": result.profile,
         "error":         result.error,
     }
+
+
+@app.post("/test-search")
+async def test_search(req: SearchProbeRequest):
+    return await _pool.test_search(
+        req.url,
+        query=req.query or "snapflow-test",
+        timeout_ms=req.timeout_ms or 30000,
+    )
 
 
 @app.post("/discover-rendered")
