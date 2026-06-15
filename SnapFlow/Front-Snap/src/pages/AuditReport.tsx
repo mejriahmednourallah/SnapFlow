@@ -380,7 +380,10 @@ const AuditReport = () => {
     try {
       const { generateAuditPdf } = await import('@/lib/generateAuditPdf.tsx');
       const clientLogoUrl = projectInfo?.logo_url ?? undefined;
-      await generateAuditPdf(audit, theme, { clientLogoUrl });
+      await generateAuditPdf(audit, theme, {
+        clientLogoUrl,
+        siteUrl: projectInfo?.url ?? audit.url,
+      });
       toast({ title: 'PDF téléchargé', description: 'Le rapport complet a été exporté.' });
     } catch (error) {
       console.error('PDF export error:', error);

@@ -181,6 +181,7 @@ async def discover_rendered(req: DiscoverRenderedRequest):
         "consent_banner": result.consent_banner,
         "shadow_dom": result.shadow_dom,
         "auth_wall": result.auth_wall,
+        "form_exploration": result.form_exploration,
         "confidence": result.confidence,
         "error": result.error,
     }

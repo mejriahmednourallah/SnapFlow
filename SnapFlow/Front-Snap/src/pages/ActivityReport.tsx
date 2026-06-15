@@ -42,6 +42,7 @@ interface ProjectInfo {
 
 const DEFAULT_ACTIVITY_PDF_SECTIONS: Record<string, boolean> = {
   sommaire: true,
+  perimetre: true,
   merci: false,
 };
 
@@ -50,6 +51,7 @@ const DEFAULT_ACTIVITY_COVER_KPIS: Record<string, boolean> = {
   meetings: true,
   open: true,
   resolved: true,
+  cancelled: true,
   critical: true,
   blocked: true,
   closure: true,
@@ -69,7 +71,7 @@ const ActivityReport = () => {
   const [showPdfAdvanced, setShowPdfAdvanced] = useState(false);
   const [selectedThemeId, setSelectedThemeId] = useState(PDF_THEMES[0]?.id || 'slate');
   const [pdfColor, setPdfColor] = useState(PDF_THEMES[0]?.primary || '#1E3A5F');
-  const [pdfBrandLeft, setPdfBrandLeft] = useState("RAPPORT D'ACTIVITE");
+  const [pdfBrandLeft, setPdfBrandLeft] = useState('MEDIANET RUN SERVICES');
   const [pdfBrandRight, setPdfBrandRight] = useState('SNAPFLOW');
   const [pdfContactEmail, setPdfContactEmail] = useState('');
   const [pdfContactWeb, setPdfContactWeb] = useState('');

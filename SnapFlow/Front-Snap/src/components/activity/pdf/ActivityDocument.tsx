@@ -47,6 +47,7 @@ const matchesAny = (value: string, needles: string[]) => {
 
 const isClosed = (value: string) => matchesAny(value, ['clotur', 'closed', 'clos', 'ferme', 'resolu', 'resolved']);
 const isResolvedOnly = (value: string) => matchesAny(value, ['resolu', 'resolved']);
+const isCancelled = (value: string) => matchesAny(value, ['annul', 'cancel', 'reject', 'rejete', 'rejet']);
 const isBlocked = (value: string) => matchesAny(value, ['bloqu', 'attente', 'hold', 'suspend']);
 const isTesting = (value: string) => matchesAny(value, ['test', 'validation', 'recette']);
 const isAcknowledged = (value: string) => matchesAny(value, ['pris en charge', 'assign', 'ack']);
@@ -124,8 +125,9 @@ function paginate<T>(items: T[], size = TABLE_PAGE_SIZE): T[][] {
 function buildData(issues: RedmineIssue[], totalCount: number) {
   const total = issues.length;
   const meetings = issues.filter(issue => isMeeting(issue.tracker.name));
+  const cancelledTickets = issues.filter(issue => isCancelled(issue.status.name));
   const closedTickets = issues.filter(issue => isClosed(issue.status.name));
-  const openTickets = issues.filter(issue => !isClosed(issue.status.name));
+  const openTickets = issues.filter(issue => !isClosed(issue.status.name) && !isCancelled(issue.status.name));
   const blockedTickets = issues.filter(issue => isBlocked(issue.status.name));
   const testingTickets = issues.filter(issue => isTesting(issue.status.name) && !isClosed(issue.status.name));
   const acknowledgedTickets = issues.filter(issue =>
@@ -157,6 +159,7 @@ function buildData(issues: RedmineIssue[], totalCount: number) {
     { key: 'meetings', label: 'Réunions', value: String(meetings.length), caption: "Points d'échange", status: meetings.length ? 'success' : 'warning' },
     { key: 'open', label: 'Ouverts', value: String(openTickets.length), caption: `${pct(openTickets.length, total)} % du volume`, status: openTickets.length ? 'warning' : 'success' },
     { key: 'resolved', label: 'Clôturés', value: String(closedTickets.length), caption: `${pct(closedTickets.length, total)} % livrés`, status: 'success' },
+    { key: 'cancelled', label: 'Annulés', value: String(cancelledTickets.length), caption: `${pct(cancelledTickets.length, total)} % sans suite`, status: cancelledTickets.length ? 'warning' : 'success' },
     { key: 'critical', label: 'Critiques', value: String(criticalIssues.length), caption: 'Priorité urgente ou critique', status: criticalIssues.length ? 'danger' : 'success' },
     { key: 'blocked', label: 'Bloqués', value: String(blockedTickets.length), caption: 'Actions en attente', status: blockedTickets.length ? 'danger' : 'success' },
   ];
@@ -173,6 +176,7 @@ function buildData(issues: RedmineIssue[], totalCount: number) {
     meetings,
     openTickets,
     closedTickets,
+    cancelledTickets,
     blockedTickets,
     testingTickets,
     acknowledgedTickets,
@@ -190,6 +194,8 @@ function buildData(issues: RedmineIssue[], totalCount: number) {
     priorityRows: colorize(countBy(issues, issue => issue.priority.name)),
     closedByType: colorize(countBy(closedTickets, issue => issue.tracker.name)),
     openByType: colorize(countBy(openTickets, issue => issue.tracker.name)),
+    cancelledByType: colorize(countBy(cancelledTickets, issue => issue.tracker.name)),
+    cancelledByPriority: colorize(countBy(cancelledTickets, issue => issue.priority.name)),
     activeByType: colorize(countBy(activeTickets, issue => issue.tracker.name)),
     blockedByType: colorize(countBy(blockedTickets, issue => issue.tracker.name)),
     blockedByPriority: colorize(countBy(blockedTickets, issue => issue.priority.name)),
@@ -202,6 +208,8 @@ type ActivityData = ReturnType<typeof buildData>;
 function buildActivitySections(data: ActivityData) {
   return {
     showActiveTables: data.activeTickets.length > 0,
+    showCancelledAnalysis: data.cancelledTickets.length > 0,
+    showCancelledTables: data.cancelledTickets.length > 0,
     showBlockedAnalysis: data.blockedTickets.length > 0,
     showBlockedTables: data.blockedTickets.length > 0,
     showMeetings: data.meetings.length > 0,
@@ -212,10 +220,8 @@ function filterSummary(filters?: ActivityDocumentProps['filters']) {
   const parts = [
     filters?.statusLabel ? `Statut : ${filters.statusLabel}` : null,
     filters?.trackerLabel ? `Tracker : ${filters.trackerLabel}` : null,
-    filters?.dateFrom ? `Depuis : ${filters.dateFrom}` : null,
-    filters?.dateTo ? `Jusqu'au ${filters.dateTo}` : null,
   ].filter(Boolean);
-  return parts.length ? parts.join(' | ') : 'Tous les tickets disponibles';
+  return parts.length ? parts.join(' | ') : null;
 }
 
 function periodLabel(filters?: ActivityDocumentProps['filters']) {
@@ -273,11 +279,11 @@ function ActivitySlidePage({
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 9 }}>
           <View style={{ width: 30, height: 4, backgroundColor: dark ? '#FFFFFF' : brandColor, borderRadius: 3 }} />
           <Text style={{ fontSize: 8, fontFamily: 'DMSans', fontWeight: 700, color: dark ? 'rgba(255,255,255,0.82)' : t.muted }}>
-            {options.brandLeft || "RAPPORT D'ACTIVITE"}
+            {options.brandLeft || 'MEDIANET RUN SERVICES'}
           </Text>
         </View>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-          {project.logo_url ? <Image src={project.logo_url} style={{ width: 86, height: 28, objectFit: 'contain' }} /> : <Text style={{ fontSize: 8, color: dark ? 'rgba(255,255,255,0.82)' : t.muted }}>{project.site_name}</Text>}
+          {project.logo_url ? <Image src={project.logo_url} style={{ width: 86, height: 28, objectFit: 'contain' }} /> : null}
         </View>
       </View>
 
@@ -286,7 +292,6 @@ function ActivitySlidePage({
           <Text style={{ fontFamily: 'DMSans', fontWeight: 700, fontSize: 23, color: dark ? '#FFFFFF' : t.text, textTransform: 'uppercase' }}>{title}</Text>
           {subtitle ? <Text style={{ fontSize: 8.5, marginTop: 5, color: dark ? 'rgba(255,255,255,0.72)' : t.muted }}>{subtitle}</Text> : null}
         </View>
-        <Text style={{ fontSize: 8, color: dark ? 'rgba(255,255,255,0.72)' : t.muted }}>{project.site_name}</Text>
       </View>
 
       <View style={{ flex: 1 }}>
@@ -644,13 +649,20 @@ function CoverPage({ project, filters, options, data, theme, accentColor }: { pr
   return (
     <Page {...LANDSCAPE_PAGE} style={{ backgroundColor: t.hero, color: '#FFFFFF', fontFamily: 'DMSans', padding: 34 }}>
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 46 }}>
-        <Text style={{ color: 'rgba(255,255,255,0.8)', fontSize: 9, fontFamily: 'DMSans', fontWeight: 700 }}>{options.brandLeft || "RAPPORT D'ACTIVITÉ"}</Text>
-        {project.logo_url ? <Image src={project.logo_url} style={{ width: 94, height: 30, objectFit: 'contain' }} /> : <Text style={{ color: 'rgba(255,255,255,0.8)', fontSize: 9, fontFamily: 'DMSans', fontWeight: 700 }}>{project.site_name}</Text>}
+        <View>
+          <Text style={{ color: 'rgba(255,255,255,0.88)', fontSize: 9, fontFamily: 'DMSans', fontWeight: 700 }}>{options.brandLeft || 'MEDIANET RUN SERVICES'}</Text>
+          {options.brandRight ? <Text style={{ color: 'rgba(255,255,255,0.62)', fontSize: 7, marginTop: 3 }}>{options.brandRight}</Text> : null}
+        </View>
+        {project.logo_url ? <Image src={project.logo_url} style={{ width: 94, height: 30, objectFit: 'contain' }} /> : null}
       </View>
       <Text style={{ fontFamily: 'PlayfairDisplay', fontSize: 44, color: '#FFFFFF', lineHeight: 1.06 }}>RAPPORT{'\n'}D'ACTIVITÉ</Text>
-      <Text style={{ color: 'rgba(255,255,255,0.84)', fontSize: 13, marginTop: 16 }}>{project.site_name}</Text>
       <Text style={{ color: 'rgba(255,255,255,0.72)', fontSize: 9, marginTop: 8 }}>{periodLabel(filters)}</Text>
-      <Text style={{ color: 'rgba(255,255,255,0.64)', fontSize: 8, marginTop: 4 }}>{filterSummary(filters)}</Text>
+      {filterSummary(filters) ? (
+        <Text style={{ color: 'rgba(255,255,255,0.64)', fontSize: 8, marginTop: 4 }}>{filterSummary(filters)}</Text>
+      ) : null}
+      <Text style={{ color: 'rgba(255,255,255,0.7)', fontSize: 8, marginTop: 14, width: '64%', lineHeight: 1.45 }}>
+        #Maintenance #Webmastering #Sécurité #Hosting #Backup #Data #Business #Support
+      </Text>
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 9, marginTop: 30 }}>
         {selectedKpis.map(kpi => (
           <View key={kpi.key} wrap={false} style={{ width: '23.2%', minHeight: 68, backgroundColor: 'rgba(255,255,255,0.12)', borderRadius: 10, padding: 9 }}>
@@ -670,15 +682,101 @@ function CoverPage({ project, filters, options, data, theme, accentColor }: { pr
 
 function SommairePage({ project, options, theme, sections }: { project: DashboardProject; options: ActivityPdfOptions; theme?: PdfTheme; sections: string[] }) {
   const t = pageText(theme);
+  const groups = [
+    {
+      num: '01',
+      title: 'PÉRIMÈTRE',
+      subtitle: 'Cadre du projet et services couverts',
+      items: ['Maintenance corrective', 'Webmastering', 'Système de ticketing'],
+    },
+    {
+      num: '02',
+      title: 'SUIVI DES ACTIVITÉS RÉALISÉES',
+      subtitle: 'Indicateurs, graphiques et détails tickets',
+      items: sections.slice(0, 7),
+    },
+    {
+      num: '03',
+      title: 'SYNTHÈSE ET CONCLUSION',
+      subtitle: 'Blocages, réunions et clôture du rapport',
+      items: sections.slice(7),
+    },
+  ];
   return (
-    <ActivitySlidePage title="SOMMAIRE" subtitle="Activités réalisées" project={project} theme={theme} options={options}>
-      <View style={{ backgroundColor: t.surface, borderRadius: 16, padding: 24, borderWidth: 0.8, borderColor: t.border, width: '78%', alignSelf: 'center', marginTop: 10 }}>
-        {sections.map((section, index) => (
-          <View key={section} style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 11, borderBottomWidth: index === sections.length - 1 ? 0 : 0.7, borderBottomColor: t.border }}>
-            <Text style={{ fontSize: 11, color: t.text, fontFamily: 'DMSans', fontWeight: 700 }}>{section}</Text>
-            <Text style={{ fontSize: 10, color: t.muted }}>{String(index + 1).padStart(2, '0')}</Text>
+    <ActivitySlidePage title="SOMMAIRE" subtitle="Périmètre, suivi des activités réalisées, synthèse et conclusion" project={project} theme={theme} options={options}>
+      <View style={{ flexDirection: 'row', gap: 14, marginTop: 8 }}>
+        {groups.map(group => (
+          <View key={group.num} style={{ flex: 1, backgroundColor: t.surface, borderRadius: 16, padding: 18, borderWidth: 0.8, borderColor: t.border, minHeight: 318 }}>
+            <Text style={{ fontSize: 38, color: options.pdfColor || t.accent, fontFamily: 'DMSans', fontWeight: 700, lineHeight: 1 }}>{group.num}</Text>
+            <Text style={{ fontSize: 13, color: t.text, fontFamily: 'DMSans', fontWeight: 700, marginTop: 12, textTransform: 'uppercase', lineHeight: 1.2 }}>{group.title}</Text>
+            <Text style={{ fontSize: 8.2, color: t.muted, marginTop: 6, lineHeight: 1.35 }}>{group.subtitle}</Text>
+            <View style={{ marginTop: 14, gap: 7 }}>
+              {(group.items.length ? group.items : ['Merci']).slice(0, 8).map(item => (
+                <Text key={item} style={{ fontSize: 8.8, color: t.text, lineHeight: 1.25 }}>• {item}</Text>
+              ))}
+            </View>
           </View>
         ))}
+      </View>
+    </ActivitySlidePage>
+  );
+}
+
+function PerimetrePage({ project, filters, options, theme, accentColor }: { project: DashboardProject; filters?: ActivityDocumentProps['filters']; options: ActivityPdfOptions; theme?: PdfTheme; accentColor: string }) {
+  const t = pageText(theme);
+  const blocks = [
+    {
+      title: 'MAINTENANCE CORRECTIVE',
+      subtitle: 'Intervention curative',
+      items: [
+        'Correction des anomalies et bugs',
+        'Adaptation des modules',
+        'Adaptation des plugins',
+        'Corrections des failles de sécurité',
+      ],
+    },
+    {
+      title: 'WEBMASTERING',
+      subtitle: 'Gestion de contenu',
+      items: [
+        'Mises à jour du contenu des rubriques et sous-rubriques',
+        'Mises à jour du contenu média: photos, images, bannières et vidéos',
+        'Création et mise à jour des bannières',
+        'Détection et correction des liens cassés et des images rompues',
+      ],
+    },
+    {
+      title: 'SYSTÈME DE TICKETING',
+      subtitle: "Rapport d'activité annuel",
+      items: [
+        'Suivi des demandes via Redmine',
+        'Classification par statut, priorité et typologie',
+        'Traçabilité des actions, blocages et validations',
+        'Historique des réunions et points d’échange',
+      ],
+    },
+  ];
+  return (
+    <ActivitySlidePage title="PÉRIMÈTRE & CADRE DU PROJET" subtitle={`Services couverts par le contrat | ${periodLabel(filters)}`} project={project} theme={theme} options={options}>
+      <View style={{ gap: 14 }}>
+        <View style={{ backgroundColor: t.surface, borderRadius: 16, borderWidth: 0.8, borderColor: t.border, padding: 17 }}>
+          <Text style={{ fontSize: 10, color: t.text, lineHeight: 1.5 }}>
+            Ce rapport est élaboré dans le cadre du contrat de run services du site audité. Il présente le périmètre couvert, les activités suivies via le système de ticketing et les interventions réalisées durant {periodSentence(filters)}.
+          </Text>
+        </View>
+        <View style={{ flexDirection: 'row', gap: 14 }}>
+          {blocks.map(block => (
+            <View key={block.title} style={{ flex: 1, backgroundColor: t.surface, borderRadius: 16, borderWidth: 0.8, borderColor: t.border, padding: 16, minHeight: 238 }}>
+              <Text style={{ fontSize: 10, color: accentColor, fontFamily: 'DMSans', fontWeight: 700, textTransform: 'uppercase' }}>{block.title}</Text>
+              <Text style={{ fontSize: 8.3, color: t.muted, marginTop: 5, textTransform: 'uppercase' }}>{block.subtitle}</Text>
+              <View style={{ marginTop: 14, gap: 8 }}>
+                {block.items.map(item => (
+                  <Text key={item} style={{ fontSize: 8.8, color: t.text, lineHeight: 1.35 }}>• {item}</Text>
+                ))}
+              </View>
+            </View>
+          ))}
+        </View>
       </View>
     </ActivitySlidePage>
   );
@@ -692,12 +790,14 @@ export function ActivityDocument({ project, issues, totalCount, filters, options
   const t = pageText(theme);
   const accentColor = options.pdfColor || t.accent;
   const generatedSections = [
+    'Périmètre',
     'Indicateurs globaux',
     'État des tickets',
     'Typologie des tickets',
     'Priorité des tickets',
     'Détails des tickets clôturés',
     'Détails des tickets ouverts',
+    sections.showCancelledAnalysis ? 'Tickets annulés' : null,
     'Tickets en cours de test et pris en charge',
     sections.showActiveTables ? 'Tickets en cours de traitement' : null,
     sections.showBlockedAnalysis ? 'Tickets bloqués' : null,
@@ -712,12 +812,16 @@ export function ActivityDocument({ project, issues, totalCount, filters, options
         <SommairePage project={project} options={options} theme={theme} sections={generatedSections} />
       )}
 
-      <ActivitySlidePage title="INDICATEURS GLOBAUX" subtitle={periodLabel(filters)} project={project} theme={theme} options={options}>
+      {options.sections.perimetre !== false && (
+        <PerimetrePage project={project} filters={filters} options={options} theme={theme} accentColor={accentColor} />
+      )}
+
+      <ActivitySlidePage title="SUIVI DES ACTIVITÉS RÉALISÉES" subtitle="INDICATEURS GLOBAUX" project={project} theme={theme} options={options}>
         <View style={{ flexDirection: 'row', gap: 18 }}>
           <View style={{ flex: 1.05, gap: 12 }}>
             <View style={{ backgroundColor: t.surface, borderRadius: 15, padding: 18, borderWidth: 0.8, borderColor: t.border }}>
               <Text style={{ fontSize: 10, color: t.muted, lineHeight: 1.45 }}>
-                Les interventions réalisées durant {periodSentence(filters)} sont au nombre de {data.totalCount || data.total} dont {data.meetings.length} réunion(s). Ce rapport présente l'état des tickets, leur typologie, leurs priorités et les points d'échange associés au projet {project.site_name}.
+                Ce rapport est élaboré dans le cadre du contrat de run services du site afin de présenter les interventions réalisées durant {periodSentence(filters)} et qui sont en définitif au nombre de {data.totalCount || data.total} dont {data.meetings.length} réunion(s).
               </Text>
             </View>
             <MetricStrip kpis={data.kpis.slice(0, 3)} theme={theme} accentColor={accentColor} />
@@ -764,6 +868,13 @@ export function ActivityDocument({ project, issues, totalCount, filters, options
             <View style={{ flexDirection: 'row', gap: 10 }}>
               <BigNumberPanel value={data.openTickets.length} label="NOMBRE TICKETS OUVERTS" caption="Chiffres basés sur la typologie des tickets ouverts" theme={theme} status={data.openTickets.length ? 'warning' : 'success'} accentColor={accentColor} grow />
             </View>
+            {data.openTickets[0] ? (
+              <View style={{ marginTop: 12 }}>
+                <SectionNote theme={theme} accentColor={accentColor}>
+                  Le ticket est ouvert parce qu'il reste en attente d'une action, d'une décision ou d'un retour permettant de poursuivre le traitement.
+                </SectionNote>
+              </View>
+            ) : null}
           </View>
           <View style={{ flex: 1 }}>
             <View style={{ backgroundColor: t.surface, borderRadius: 12, padding: 14, borderWidth: 0.8, borderColor: t.border }}>
@@ -773,6 +884,34 @@ export function ActivityDocument({ project, issues, totalCount, filters, options
           </View>
         </View>
       </ActivitySlidePage>
+
+      {sections.showCancelledAnalysis && (
+        <ActivitySlidePage title="TICKETS ANNULÉS" subtitle="Tickets sortis du périmètre de traitement ou clôturés sans suite" project={project} theme={theme} options={options}>
+          <View style={{ flexDirection: 'row', gap: 16 }}>
+            <View style={{ width: 188 }}>
+              <BigNumberPanel value={data.cancelledTickets.length} label="NOMBRE TICKETS ANNULÉS" caption="Demandes annulées, rejetées ou sorties du périmètre actif" theme={theme} status="warning" accentColor={accentColor} />
+            </View>
+            <View style={{ flex: 1, backgroundColor: t.surface, borderRadius: 12, borderWidth: 0.8, borderColor: t.border, padding: 14 }}>
+              <Text style={{ fontSize: 10, fontFamily: 'DMSans', fontWeight: 700, color: t.primary, marginBottom: 10 }}>TYPOLOGIE DES TICKETS ANNULÉS</Text>
+              <VerticalBars rows={data.cancelledByType} theme={theme} />
+            </View>
+            <View style={{ flex: 1, backgroundColor: t.surface, borderRadius: 12, borderWidth: 0.8, borderColor: t.border, padding: 14 }}>
+              <Text style={{ fontSize: 10, fontFamily: 'DMSans', fontWeight: 700, color: t.primary, marginBottom: 10 }}>PRIORITÉ DES TICKETS ANNULÉS</Text>
+              <HorizontalBars rows={data.cancelledByPriority} theme={theme} limit={5} />
+            </View>
+          </View>
+        </ActivitySlidePage>
+      )}
+
+      {sections.showCancelledTables && renderTicketTablePages({
+        issues: data.cancelledTickets,
+        title: 'TICKETS ANNULÉS',
+        subtitle: "Identifiant, sujet, type, priorité et date d'ouverture",
+        project,
+        theme,
+        options,
+        accentColor,
+      })}
 
       <ActivitySlidePage title="TICKETS EN COURS DE TEST ET PRIS EN CHARGE" subtitle="Le traitement complet côté équipe est présenté avec les tickets en validation ou en attente de fermeture." project={project} theme={theme} options={options}>
         <WorkflowPanel data={data} theme={theme} accentColor={accentColor} />

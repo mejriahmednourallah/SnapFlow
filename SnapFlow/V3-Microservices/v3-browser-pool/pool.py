@@ -166,6 +166,7 @@ class DiscoveryResult:
     consent_banner: Optional[dict] = None
     shadow_dom: Optional[dict] = None
     auth_wall: Optional[dict] = None
+    form_exploration: Optional[dict] = None
     confidence: str = "low"
     error: Optional[str] = None
 
@@ -1293,7 +1294,13 @@ class BrowserPool:
                       const tag = el.tagName.toLowerCase();
                       if (el.id) return `${tag}#${esc(el.id)}`;
                       const name = el.getAttribute("name");
-                      if (name) return `${tag}[name="${esc(name)}"]`;
+                      if (name) {
+                        const type = String(el.getAttribute("type") || "").toLowerCase();
+                        const value = el.getAttribute("value");
+                        return ["checkbox", "radio"].includes(type) && value
+                          ? `${tag}[name="${esc(name)}"][value="${esc(value)}"]`
+                          : `${tag}[name="${esc(name)}"]`;
+                      }
                       const type = el.getAttribute("type");
                       if (type) return `${tag}[type="${esc(type)}"]`;
                       const parent = el.parentElement;
@@ -1314,6 +1321,21 @@ class BrowserPool:
                       return aria ? short(aria, 120) : "";
                     };
                     const riskSet = new Set();
+                    const rejectedCandidates = [];
+                    const browserManagedReason = (field) => {
+                      const type = String(field.getAttribute("type") || "").toLowerCase();
+                      const name = String(field.getAttribute("name") || field.id || "")
+                        .toLowerCase()
+                        .replace(/\\[\\]$/, "");
+                      if (type === "hidden") return "hidden_field";
+                      if ([
+                        "form_build_id", "form_token", "form_id", "captcha_sid",
+                        "captcha_token", "captcha_cacheable", "g-recaptcha-response",
+                        "h-captcha-response", "cf-turnstile-response"
+                      ].includes(name)) return "browser_managed_field";
+                      if (/(^|[_-])(csrf|xsrf)([_-]|$)/.test(name)) return "csrf_token";
+                      return "";
+                    };
                     const classifyFieldRisk = (field) => {
                       const type = String(field.getAttribute("type") || field.tagName || "").toLowerCase();
                       const name = String(field.getAttribute("name") || field.id || "").toLowerCase();
@@ -1339,8 +1361,26 @@ class BrowserPool:
                     const externalLinks = Array.from(new Set(links.filter((href) => !isAllowed(href)))).slice(0, 20);
 
                     const forms = extractForms ? Array.from(document.querySelectorAll("form")).map((form, formIndex) => {
-                      const fields = Array.from(form.querySelectorAll("input, textarea, select"))
-                        .filter((field) => !["hidden", "submit", "button", "reset", "image"].includes(String(field.getAttribute("type") || "").toLowerCase()))
+                      const formSelector = selectorFor(form) || `form:nth-of-type(${formIndex + 1})`;
+                      const formCandidates = Array.from(form.querySelectorAll("input, textarea, select"));
+                      formCandidates.forEach((field) => {
+                        const reason = browserManagedReason(field);
+                        if (reason) {
+                          rejectedCandidates.push({
+                            name: field.getAttribute("name") || field.id || field.tagName.toLowerCase(),
+                            type: String(field.getAttribute("type") || field.tagName || "text").toLowerCase(),
+                            selector: selectorFor(field),
+                            form_selector: formSelector,
+                            reason,
+                            source: "chromium_rendered",
+                          });
+                        }
+                      });
+                      const fields = formCandidates
+                        .filter((field) => {
+                          const type = String(field.getAttribute("type") || "").toLowerCase();
+                          return !["submit", "button", "reset", "image"].includes(type) && !browserManagedReason(field);
+                        })
                         .map((field) => {
                           classifyFieldRisk(field);
                           return {
@@ -1352,15 +1392,45 @@ class BrowserPool:
                             required: field.hasAttribute("required") || field.getAttribute("aria-required") === "true",
                             visible: !!(field.offsetWidth || field.offsetHeight || field.getClientRects().length),
                             enabled: !field.disabled,
+                            value: field.value || "",
+                            min: field.getAttribute("min") || "",
+                            max: field.getAttribute("max") || "",
+                            step: field.getAttribute("step") || "",
+                            pattern: field.getAttribute("pattern") || "",
+                            minlength: field.getAttribute("minlength"),
+                            maxlength: field.getAttribute("maxlength"),
+                            autocomplete: field.getAttribute("autocomplete") || "",
+                            group_name: field.getAttribute("name") || "",
+                            checked: !!field.checked,
+                            options: field.tagName.toLowerCase() === "select"
+                              ? Array.from(field.options).map((option) => ({
+                                  label: short(option.textContent || option.label || option.value || "", 120),
+                                  value: option.value || "",
+                                  selected: option.selected,
+                                  disabled: option.disabled,
+                                })).slice(0, 50)
+                              : [],
                           };
                         });
+                      const formButtons = Array.from(form.querySelectorAll("button, input[type='button'], input[type='submit'], [role='button']"))
+                        .map((button) => ({
+                          text: short(button.innerText || button.getAttribute("value") || button.getAttribute("aria-label") || "", 100),
+                          selector: selectorFor(button),
+                          type: button.getAttribute("type") || button.getAttribute("role") || button.tagName.toLowerCase(),
+                          disabled: !!button.disabled,
+                        }))
+                        .filter((button) => button.text || button.selector)
+                        .slice(0, 30);
                       return {
-                        selector: form.id ? `form#${esc(form.id)}` : `form:nth-of-type(${formIndex + 1})`,
+                        selector: formSelector,
                         action: form.getAttribute("action") || "",
                         method: String(form.getAttribute("method") || "get").toUpperCase(),
                         text: short(form.innerText, 320),
                         fields,
                         submit_selector: selectorFor(form.querySelector('button[type="submit"], input[type="submit"], button:not([type])')),
+                        buttons: formButtons,
+                        enctype: form.getAttribute("enctype") || "",
+                        novalidate: form.hasAttribute("novalidate"),
                       };
                     }) : [];
 
@@ -1400,6 +1470,7 @@ class BrowserPool:
                       buttons,
                       risk_flags: Array.from(riskSet),
                       candidate_messages: messageCandidates,
+                      rejected_candidates: rejectedCandidates,
                     };
                 }""",
                 {
@@ -1410,6 +1481,174 @@ class BrowserPool:
             )
 
             payload = payload if isinstance(payload, dict) else {}
+            exploration = {"steps": [], "paths_explored": 0, "interactions": 0, "truncated": False}
+            if extract_forms and payload.get("forms"):
+                async def inspect_form_state() -> dict:
+                    result = await page.evaluate(
+                        """() => {
+                          const clean = (value) => String(value || "").replace(/\\s+/g, " ").trim();
+                          const esc = (value) => window.CSS && CSS.escape
+                            ? CSS.escape(String(value))
+                            : String(value).replace(/["\\\\]/g, "\\\\$&");
+                          const visible = (el) => {
+                            if (!el) return false;
+                            const style = getComputedStyle(el);
+                            const rect = el.getBoundingClientRect();
+                            return style.display !== "none" && style.visibility !== "hidden" &&
+                              style.opacity !== "0" && rect.width > 0 && rect.height > 0;
+                          };
+                          const selectorFor = (el) => {
+                            if (!el || !el.tagName) return "";
+                            const tag = el.tagName.toLowerCase();
+                            if (el.id) return `${tag}#${esc(el.id)}`;
+                            const name = el.getAttribute("name");
+                            if (name) {
+                              const type = String(el.getAttribute("type") || "").toLowerCase();
+                              const value = el.getAttribute("value");
+                              return ["checkbox", "radio"].includes(type) && value
+                                ? `${tag}[name="${esc(name)}"][value="${esc(value)}"]`
+                                : `${tag}[name="${esc(name)}"]`;
+                            }
+                            const parent = el.parentElement;
+                            if (!parent) return tag;
+                            const siblings = Array.from(parent.children).filter((node) => node.tagName === el.tagName);
+                            return `${tag}:nth-of-type(${Math.max(1, siblings.indexOf(el) + 1)})`;
+                          };
+                          const browserManaged = (field) => {
+                            const type = String(field.getAttribute("type") || "").toLowerCase();
+                            const name = String(field.getAttribute("name") || field.id || "")
+                              .toLowerCase()
+                              .replace(/\\[\\]$/, "");
+                            return type === "hidden" ||
+                              ["form_build_id", "form_token", "form_id", "captcha_sid", "captcha_token",
+                               "captcha_cacheable", "g-recaptcha-response", "h-captcha-response",
+                               "cf-turnstile-response"].includes(name) ||
+                              /(^|[_-])(csrf|xsrf)([_-]|$)/.test(name);
+                          };
+                          const fields = Array.from(document.querySelectorAll("form input, form textarea, form select"))
+                            .filter((field) => !["submit", "button", "reset", "image"].includes(
+                              String(field.getAttribute("type") || "").toLowerCase()
+                            ) && !browserManaged(field))
+                            .filter(visible)
+                            .map((field) => ({
+                              name: field.getAttribute("name") || field.id || field.tagName.toLowerCase(),
+                              type: String(field.getAttribute("type") || field.tagName || "text").toLowerCase(),
+                              selector: selectorFor(field),
+                              required: field.hasAttribute("required") || field.getAttribute("aria-required") === "true",
+                              value: field.value || "",
+                              min: field.getAttribute("min") || "",
+                              max: field.getAttribute("max") || "",
+                              step: field.getAttribute("step") || "",
+                              pattern: field.getAttribute("pattern") || "",
+                              minlength: field.getAttribute("minlength"),
+                              maxlength: field.getAttribute("maxlength"),
+                              autocomplete: field.getAttribute("autocomplete") || "",
+                              checked: !!field.checked,
+                              options: field.tagName.toLowerCase() === "select"
+                                ? Array.from(field.options).map((option) => ({
+                                    label: clean(option.textContent || option.label || option.value),
+                                    value: option.value || "",
+                                    selected: option.selected,
+                                    disabled: option.disabled,
+                                  })).slice(0, 24)
+                                : [],
+                            }));
+                          const interactions = [];
+                          Array.from(document.querySelectorAll(
+                            "form button, form input[type='button'], form [role='button'], form a"
+                          )).filter(visible).forEach((button) => {
+                            const type = String(button.getAttribute("type") || "").toLowerCase();
+                            const text = clean(button.innerText || button.value || button.getAttribute("aria-label"));
+                            if (type === "submit" || /envoyer|submit|payer|payment|commander|confirmer|send|delete|supprimer/i.test(text)) return;
+                            if (/suivant|next|continuer|continue|precedent|previous|retour|back/i.test(text)) {
+                              interactions.push({kind: "click", selector: selectorFor(button), label: text});
+                            }
+                          });
+                          Array.from(document.querySelectorAll("form select")).filter(visible).forEach((field) => {
+                            Array.from(field.options).filter((option) => !option.disabled && option.value !== field.value)
+                              .slice(0, 3)
+                              .forEach((option) => interactions.push({
+                                kind: "select",
+                                selector: selectorFor(field),
+                                value: option.value,
+                                label: clean(option.textContent || option.value),
+                              }));
+                          });
+                          Array.from(document.querySelectorAll("form input[type='radio'], form input[type='checkbox']"))
+                            .filter(visible)
+                            .filter((field) => !field.checked)
+                            .slice(0, 8)
+                            .forEach((field) => interactions.push({
+                              kind: "check",
+                              selector: selectorFor(field),
+                              value: field.value || "true",
+                              label: field.getAttribute("name") || field.id || "option",
+                            }));
+                          return {
+                            url: location.href,
+                            title: document.title || "",
+                            fields,
+                            interactions: interactions.slice(0, 12),
+                          };
+                        }"""
+                    )
+                    return result if isinstance(result, dict) else {}
+
+                queue: list[list[dict]] = [[]]
+                seen_paths: set[str] = set()
+                while queue and exploration["paths_explored"] < 8 and exploration["interactions"] < 24:
+                    path = queue.pop(0)
+                    fingerprint = json.dumps(path, sort_keys=True)
+                    if fingerprint in seen_paths:
+                        continue
+                    seen_paths.add(fingerprint)
+                    try:
+                        await page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
+                        await page.wait_for_timeout(250)
+                        replayed: list[dict] = []
+                        for interaction in path[:6]:
+                            locator = page.locator(str(interaction.get("selector") or "")).first
+                            if await locator.count() == 0:
+                                break
+                            kind = interaction.get("kind")
+                            if kind == "select":
+                                await locator.select_option(str(interaction.get("value") or ""))
+                            elif kind == "check":
+                                await locator.check()
+                            else:
+                                await locator.click()
+                            replayed.append(interaction)
+                            exploration["interactions"] += 1
+                            await page.wait_for_timeout(300)
+                        state = await inspect_form_state()
+                    except Exception as exc:
+                        logger.debug("Form discovery path rejected: %s", exc)
+                        continue
+                    current_host = urlparse(str(state.get("url") or page.url)).hostname or ""
+                    if not _host_matches_allowed(current_host, allowed_domains):
+                        continue
+                    exploration["paths_explored"] += 1
+                    exploration["steps"].append({
+                        "index": len(exploration["steps"]),
+                        "path": replayed,
+                        "url": state.get("url") or page.url,
+                        "title": state.get("title") or "",
+                        "fields": state.get("fields") or [],
+                        "next_interactions": state.get("interactions") or [],
+                    })
+                    if len(replayed) >= 6:
+                        continue
+                    for interaction in (state.get("interactions") or []):
+                        if len(queue) + exploration["paths_explored"] >= 8:
+                            exploration["truncated"] = True
+                            break
+                        candidate = [*replayed, interaction]
+                        candidate_fingerprint = json.dumps(candidate, sort_keys=True)
+                        if candidate_fingerprint not in seen_paths:
+                            queue.append(candidate)
+                await page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
+                await page.wait_for_timeout(250)
+            payload["form_exploration"] = exploration
             runtime = await page.evaluate(
                 """() => {
                     const clean = (value) => String(value || "").replace(/\\s+/g, " ").trim();
@@ -1543,6 +1782,7 @@ class BrowserPool:
                 consent_banner=payload.get("consent_banner"),
                 shadow_dom=payload.get("shadow_dom"),
                 auth_wall=payload.get("auth_wall"),
+                form_exploration=payload.get("form_exploration"),
                 confidence=confidence,
             )
         except asyncio.TimeoutError:

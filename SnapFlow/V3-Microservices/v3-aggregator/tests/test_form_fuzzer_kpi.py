@@ -106,6 +106,26 @@ class TestFormFuzzerKPIInBuildReport(unittest.TestCase):
             "nlp_results": {},
         }
 
+    def _page_row_with_null_numeric_metrics(self):
+        row = self._minimal_page_row()
+        row["metrics"]["seo"].update({
+            "images_no_alt": None,
+            "node_style_url_count": None,
+        })
+        row["metrics"]["ux"].update({
+            "simulator_count": None,
+            "raw_ip_link_count": None,
+        })
+        row["metrics"]["headless"] = {
+            "available": False,
+            "fcp_ms": None,
+            "lcp_ms": None,
+            "invisible_links": None,
+            "console_error_count": None,
+            "non_functional_button_count": None,
+        }
+        return row
+
     def _minimal_summary_row(self, form_fuzzer_summary):
         return {
             "domain": "https://example.com",
@@ -161,6 +181,40 @@ class TestFormFuzzerKPIInBuildReport(unittest.TestCase):
         self.assertEqual(normalized["status"], "failing")
         self.assertEqual(normalized["evidence"]["detail"]["tests_run"], 8)
         self.assertEqual(kpi["top_affected"][0]["page_url"], "https://example.com/contact")
+
+    def test_null_numeric_page_metrics_do_not_abort_report_build(self):
+        page_rows = [self._page_row_with_null_numeric_metrics()]
+        summary_row = self._minimal_summary_row({
+            "enabled": True,
+            "forms_discovered": 0,
+            "forms_tested": 0,
+            "tests_run": 0,
+            "anomalies_found": 0,
+            "duration_ms": 0,
+            "skipped_reason": "",
+        })
+
+        main.get_db = lambda: _FakeConn(page_rows, summary_row)
+        main._load_form_fuzzer_table_stats = lambda cur, scan_id: {
+            "forms_tested": 0,
+            "tests_run": 0,
+            "anomalies_count": 0,
+            "anomalies_by_type": {},
+            "top_findings": [],
+            "top_affected": [],
+        }
+
+        report = main.build_report("scan_form_fuzzer")
+
+        self.assertEqual(report["site_metrics"]["ux"]["total_invisible_links"], 0)
+        self.assertEqual(
+            report["site_metrics"]["performance"]["console_error_kpi"]["pages_with_console_errors"],
+            0,
+        )
+        self.assertEqual(
+            report["site_metrics"]["performance"]["button_kpi"]["pages_with_nonfunc_buttons"],
+            0,
+        )
 
     def test_fallbacks_to_table_when_summary_missing(self):
         page_rows = [self._minimal_page_row()]

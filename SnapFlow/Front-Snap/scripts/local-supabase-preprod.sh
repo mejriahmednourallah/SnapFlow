@@ -38,6 +38,11 @@ Environment overrides:
   REDMINE_API_KEY      Admin API key used by local Redmine Edge Functions.
   REDMINE_LOGIN_RATE_LIMIT_SALT
                       Local-only salt for Redmine login rate-limit hashes.
+  GEMINI_API_KEY      Optional Gemini key for Form Tester AI generation.
+  FORM_TESTER_GEMINI_MODEL
+                      Defaults to gemini-2.0-flash.
+  FORM_EXECUTOR_2CAPTCHA_API_KEY
+                      Optional 2Captcha key used by the local Form Executor.
 EOF
 }
 
@@ -95,6 +100,9 @@ REDMINE_BASE_URL="${REDMINE_BASE_URL:-$DEFAULT_REDMINE_BASE_URL}"
 REDMINE_API_KEY="${REDMINE_API_KEY:-$(read_env_value REDMINE_API_KEY "$SUPABASE_ENV_FILE" "$V3_ENV_FILE" "$FRONT_DIR/.env" "$V3_DIR/.env.preprod")}"
 REDMINE_LOGIN_RATE_LIMIT_SALT="${REDMINE_LOGIN_RATE_LIMIT_SALT:-$(read_env_value REDMINE_LOGIN_RATE_LIMIT_SALT "$SUPABASE_ENV_FILE" "$V3_ENV_FILE" "$FRONT_DIR/.env" "$V3_DIR/.env.preprod")}"
 REDMINE_LOGIN_RATE_LIMIT_SALT="${REDMINE_LOGIN_RATE_LIMIT_SALT:-snapflow-local-redmine-login}"
+GEMINI_API_KEY="${GEMINI_API_KEY:-$(read_env_value GEMINI_API_KEY "$SUPABASE_ENV_FILE" "$V3_ENV_FILE" "$FRONT_DIR/.env" "$V3_DIR/.env.preprod")}"
+FORM_TESTER_GEMINI_MODEL="${FORM_TESTER_GEMINI_MODEL:-gemini-2.0-flash}"
+FORM_EXECUTOR_2CAPTCHA_API_KEY="${FORM_EXECUTOR_2CAPTCHA_API_KEY:-$(read_env_value FORM_EXECUTOR_2CAPTCHA_API_KEY "$V3_ENV_FILE" "$V3_DIR/.env.preprod")}"
 
 get_status_var() {
   local key="$1"
@@ -164,9 +172,19 @@ write_env_files() {
 DB_PASS=$DB_PASS
 VITE_SUPABASE_URL=$api_url
 VITE_SUPABASE_PUBLISHABLE_KEY=$anon_key
+FORM_EXECUTOR_DATABASE_URL=postgresql://postgres:postgres@host.docker.internal:54322/postgres
+FORM_EXECUTOR_SUPABASE_URL=http://host.docker.internal:54321
+SUPABASE_SERVICE_ROLE_KEY=$service_role_key
+FORM_EXECUTOR_ARTIFACT_BUCKET=form-test-artifacts
 REDMINE_BASE_URL=$REDMINE_BASE_URL
 REDMINE_API_KEY=$REDMINE_API_KEY
 REDMINE_LOGIN_RATE_LIMIT_SALT=$REDMINE_LOGIN_RATE_LIMIT_SALT
+GEMINI_API_KEY=$GEMINI_API_KEY
+FORM_TESTER_GEMINI_MODEL=$FORM_TESTER_GEMINI_MODEL
+FORM_TESTER_AI_BRANCHING_V2=true
+FORM_EXECUTOR_2CAPTCHA_API_KEY=$FORM_EXECUTOR_2CAPTCHA_API_KEY
+FORM_EXECUTOR_CAPTCHA_TIMEOUT_S=120
+FORM_EXECUTOR_CAPTCHA_POLL_INTERVAL_S=5
 EOF
 
   cat > "$SUPABASE_ENV_FILE" <<EOF
@@ -174,6 +192,7 @@ EOF
 # Used by: npx supabase functions serve --env-file supabase/.env.local --no-verify-jwt
 
 SUPABASE_URL=$api_url
+FORM_TESTER_PUBLIC_STORAGE_ORIGIN=$api_url
 SUPABASE_ANON_KEY=$anon_key
 SUPABASE_SERVICE_ROLE_KEY=$service_role_key
 SCANNER_BASE_URL=$SCANNER_BASE_URL
@@ -181,7 +200,22 @@ AUDIT_API_URL=$SCANNER_BASE_URL
 REDMINE_BASE_URL=$REDMINE_BASE_URL
 REDMINE_API_KEY=$REDMINE_API_KEY
 REDMINE_LOGIN_RATE_LIMIT_SALT=$REDMINE_LOGIN_RATE_LIMIT_SALT
+GEMINI_API_KEY=$GEMINI_API_KEY
+FORM_TESTER_GEMINI_MODEL=$FORM_TESTER_GEMINI_MODEL
+FORM_TESTER_AI_BRANCHING_V2=true
 EOF
+
+  if [ -n "$GEMINI_API_KEY" ]; then
+    echo "Gemini secret: configured for local Supabase Edge Functions."
+  else
+    echo "Gemini secret: missing; Form Tester will use heuristic fallback."
+  fi
+
+  if [ -n "$FORM_EXECUTOR_2CAPTCHA_API_KEY" ]; then
+    echo "2Captcha secret: configured for the local Form Executor."
+  else
+    echo "2Captcha secret: missing; CAPTCHA challenges will remain blocked."
+  fi
 }
 
 cleanup_environment() {
@@ -195,6 +229,9 @@ cleanup_environment() {
   echo "Stopping local preprod stack and removing its volumes..."
   (
     cd "$V3_DIR"
+    FORM_EXECUTOR_DATABASE_URL="${FORM_EXECUTOR_DATABASE_URL:-postgresql://postgres:postgres@host.docker.internal:54322/postgres}" \
+    FORM_EXECUTOR_SUPABASE_URL="${FORM_EXECUTOR_SUPABASE_URL:-http://host.docker.internal:54321}" \
+    SUPABASE_SERVICE_ROLE_KEY="${SUPABASE_SERVICE_ROLE_KEY:-local-cleanup-placeholder}" \
     docker compose -p snapflow-local-preprod -f docker-compose.preprod.yml down --volumes --remove-orphans
   )
 

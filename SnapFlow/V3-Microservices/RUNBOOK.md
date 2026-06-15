@@ -74,7 +74,34 @@ Default scans now request `headless_concurrency=24` and clamp request overrides 
 
 ## Local Preprod Run
 
+### Form Tester Gemini configuration
+
+Form Tester reads Gemini configuration only from server-side environment
+variables. Never expose these values through a `VITE_*` variable.
+
+```powershell
+$env:GEMINI_API_KEY="<new-key>"
+$env:FORM_TESTER_GEMINI_MODEL="gemini-2.0-flash"
+```
+
+Then launch local Supabase:
+
+```bash
+cd Front-Snap
+./scripts/local-supabase-preprod.sh
+```
+
+The bootstrap copies these variables into `supabase/.env.local`. If Gemini is
+missing or unavailable, Form Tester uses its deterministic heuristic generator.
+The authenticated `form-tester-ai-status` function reports provider, model and
+availability without returning the secret.
+
 The local launcher uses `.env.local` and the `snapflow-local-preprod` compose project.
+For Form Tester browser execution, `.env.local` must also contain:
+`FORM_EXECUTOR_DATABASE_URL`, `FORM_EXECUTOR_SUPABASE_URL`,
+`SUPABASE_SERVICE_ROLE_KEY`, and `FORM_EXECUTOR_ARTIFACT_BUCKET`.
+`./run-all.sh --local` backfills the safe local defaults when the local
+Supabase env file already exists.
 
 If `.env.local` is missing, create/start the local Supabase preprod environment first:
 

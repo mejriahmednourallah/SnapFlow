@@ -35,22 +35,26 @@ const COVER_KPI_DEFS = [
   { key: 'meetings', label: 'Réunions' },
   { key: 'open', label: 'En cours' },
   { key: 'resolved', label: 'Résolus' },
+  { key: 'cancelled', label: 'Annulés' },
   { key: 'critical', label: 'Critiques' },
   { key: 'blocked', label: 'Bloqués' },
 ] as const;
 
 const SECTION_DEFS = [
   { key: 'sommaire', label: 'Table des matières' },
+  { key: 'perimetre', label: 'Page périmètre' },
   { key: 'merci', label: 'Page de clôture' },
 ] as const;
 
 const REPORT_STRUCTURE_DEFS = [
+  'Périmètre & cadre du projet',
   'Indicateurs globaux',
   'État des tickets avec graphique',
   'Typologie des tickets',
   'Priorité des tickets',
   'Détails des tickets clôturés',
   'Détails des tickets ouverts',
+  'Tickets annulés si présents',
   'Tickets en cours de test et pris en charge',
   'Tables actionnables si données',
   'Tickets bloqués si présents',

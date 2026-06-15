@@ -96,9 +96,41 @@ read_env_value() {
   local key="$1"
   local file="$2"
   local line value
+  if [ ! -f "$file" ]; then
+    return 0
+  fi
   line="$(grep -E "^[[:space:]]*${key}[[:space:]]*=" "$file" | tail -n 1 || true)"
   value="${line#*=}"
   printf '%s' "$value" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's/^"//' -e 's/"$//' -e "s/^'//" -e "s/'$//"
+}
+
+append_env_if_missing() {
+  local file="$1"
+  local key="$2"
+  local value="$3"
+
+  if [ -n "$(read_env_value "$key" "$file")" ] || [ -z "$value" ]; then
+    return 0
+  fi
+
+  printf '%s=%s\n' "$key" "$value" >> "$file"
+}
+
+ensure_local_form_executor_env() {
+  local file="$1"
+  local supabase_env="../Front-Snap/supabase/.env.local"
+  local service_role_key
+
+  if [ "$LOCAL" != true ]; then
+    return 0
+  fi
+
+  service_role_key="$(read_env_value "SUPABASE_SERVICE_ROLE_KEY" "$supabase_env")"
+
+  append_env_if_missing "$file" "FORM_EXECUTOR_DATABASE_URL" "postgresql://postgres:postgres@host.docker.internal:54322/postgres"
+  append_env_if_missing "$file" "FORM_EXECUTOR_SUPABASE_URL" "http://host.docker.internal:54321"
+  append_env_if_missing "$file" "SUPABASE_SERVICE_ROLE_KEY" "$service_role_key"
+  append_env_if_missing "$file" "FORM_EXECUTOR_ARTIFACT_BUCKET" "form-test-artifacts"
 }
 
 require_env_file() {
@@ -124,8 +156,20 @@ validate_env_file() {
     fi
   done
 
+  for key in FORM_EXECUTOR_DATABASE_URL FORM_EXECUTOR_SUPABASE_URL SUPABASE_SERVICE_ROLE_KEY; do
+    value="$(read_env_value "$key" "$file")"
+    if [ -z "$value" ]; then
+      missing+=("$key")
+    fi
+  done
+
   if [ "${#missing[@]}" -gt 0 ]; then
     echo "Missing required key(s) in $file: ${missing[*]}" >&2
+    if [ "$LOCAL" = true ]; then
+      echo "Refresh local env with: cd ../Front-Snap && ./scripts/local-supabase-preprod.sh" >&2
+    else
+      echo "Set the Form Executor Supabase values in .env.preprod before starting preprod." >&2
+    fi
     exit 1
   fi
 }
@@ -142,6 +186,7 @@ fi
 compose_cmd+=(--env-file "$ENV_FILE" -f docker-compose.preprod.yml)
 
 require_env_file "$ENV_FILE"
+ensure_local_form_executor_env "$ENV_FILE"
 validate_env_file "$ENV_FILE"
 
 log "Mode     : $([ "$LOCAL" = true ] && echo "local preprod" || echo "preprod")"

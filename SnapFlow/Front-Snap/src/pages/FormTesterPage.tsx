@@ -12,7 +12,7 @@ const FormTesterPage = () => {
         <div>
           <h1 className="text-2xl font-bold">Form Tester</h1>
           <p className="text-sm text-muted-foreground">
-            Créez, validez et exécutez des workflows de test de formulaires.
+            Creez, validez et executez des workflows de test de formulaires.
           </p>
         </div>
       </div>

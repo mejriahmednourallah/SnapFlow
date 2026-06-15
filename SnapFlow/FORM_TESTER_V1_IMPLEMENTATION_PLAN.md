@@ -4,7 +4,7 @@
 
 Transformer la fonctionnalite Formulaire Testing en un atelier de test visuel inspire de n8n. Le client doit pouvoir detecter un formulaire, construire plusieurs scenarios, controler chaque etape, suivre l'execution, examiner les preuves, demander de l'aide a l'IA et exporter les resultats.
 
-Le V1 couvre les tests fonctionnels et de validation des formulaires publics. Il n'inclut pas le fuzzing de securite agressif, les paiements, le contournement automatique des CAPTCHA/OTP ou l'execution autonome par l'IA.
+Le V1 couvre les tests fonctionnels et de validation des formulaires publics. Il n'inclut pas le fuzzing de securite agressif, les paiements, les OTP ou l'execution autonome par l'IA. La resolution automatique des CAPTCHA visuels est prise en charge via l'API 2Captcha.
 
 ## 2. Problemes Actuels
 
@@ -51,6 +51,8 @@ Le nouvel atelier doit permettre au client de :
 - Inscription.
 - Connexion.
 - Prise de rendez-vous.
+- Resolution automatique de CAPTCHA visuel (image/text) via l'API 2Captcha.
+- Detection des CAPTCHA non resolvables (reCAPTCHA v3 enterprise, hCaptcha score eleve) avec blocage propre.
 - Upload de fichier.
 - Environnements staging et production-safe.
 - Tests nominaux, invalides et limites.
@@ -72,7 +74,7 @@ Le nouvel atelier doit permettre au client de :
 
 - Paiement et checkout.
 - Fuzzing SQLi, XSS ou tests de securite agressifs.
-- Contournement automatique CAPTCHA ou OTP.
+- Contournement automatique OTP.
 - Boucles et expressions avancees.
 - Noeuds JavaScript ou HTTP personnalises.
 - Prise de controle interactive du navigateur.
@@ -294,6 +296,11 @@ Champs minimum :
 - `error_code text null`
 - `error_message text null`
 - `retry_count integer`
+- `captcha_detected boolean default false`
+- `captcha_type text null`
+- `captcha_solved boolean default false`
+- `captcha_solve_duration_ms integer null`
+- `captcha_solve_cost numeric(10,6) null`
 
 ### 7.7 Ajouter `workflow_logs`
 
@@ -492,9 +499,23 @@ v3-form-executor/
 
 `challenge_resolver.py`
 
-- Definir une interface pour CAPTCHA/OTP.
-- Ne fournir aucun contournement automatique en V1.
-- Retourner `blocked` avec `challenge_type` et `failure_reason`.
+- Detecter le type de CAPTCHA present sur la page via des selecteurs DOM cibles (iframe `g-recaptcha`, `h-captcha`, `.cf-turnstile`, `img[src*="captcha"]`).
+- Pour les CAPTCHAs visuels resolvables (image CAPTCHA, reCAPTCHA v2) : soumettre a l'API 2Captcha (`createTask`), polluer la resolution (`getTaskResult` toutes les 5 secondes), puis injecter le token dans le formulaire.
+- Pour les CAPTCHAs avances non resolvables (reCAPTCHA v3 enterprise, hCaptcha a score eleve) : retourner `blocked` avec `challenge_type` et `failure_reason`.
+- Timeout de resolution configurable via `FORM_EXECUTOR_CAPTCHA_TIMEOUT_S` (defaut 120 secondes).
+- Enregistrer `captcha_solved: true`, `captcha_solve_duration_ms` et `captcha_solve_cost` dans le step result. Logger le type de CAPTCHA detecte mais jamais le token resolu.
+- La cle API 2Captcha est lue depuis `FORM_EXECUTOR_2CAPTCHA_API_KEY` (variable d'environnement, jamais loggee ni persistee).
+- Sans cle API configuree : le CAPTCHA est detecte mais aucune resolution n'est tentee, l'etape devient `blocked` avec `failure_reason: "no_captcha_api_key_configured"`. Aucune erreur levee.
+
+**Fonctions principales :**
+- `detect_captcha(page)` → `CaptchaInfo | None`
+- `is_solvable(captcha_info)` → `bool`
+- `solve_captcha(page, captcha_info, api_key)` → `SolveResult`
+- `resolve_or_block(page, api_key, timeout_s)` → `StepResult`
+
+**Endpoints 2Captcha utilises :**
+- `POST https://api.2captcha.com/createTask` (types : `RecaptchaV2Task`, `ImageToTextTask`)
+- `POST https://api.2captcha.com/getTaskResult` (polling)
 
 ### 8.3 Regles d'Execution
 
@@ -512,6 +533,8 @@ v3-form-executor/
 - Aucun payload de securite agressif.
 - Aucun resultat simule ne doit etre marque `passed`.
 - Une panne de l'executor produit `error`, jamais `failed`.
+- Un CAPTCHA detecte declenche automatiquement `challenge_resolver.resolve_or_block()`. Si la resolution reussit, l'execution continue. Si elle echoue (timeout, type non supporte, erreur API), l'etape devient `blocked` avec `challenge_type`, `challenge_url`, `captcha_solve_attempted: true` et `failure_reason`.
+- Les screenshots d'une etape bloquee pour CAPTCHA montrent le challenge mais masquent les eventuels tokens.
 
 ## 9. Edge Functions
 
@@ -562,6 +585,7 @@ v3-form-executor/
 - `form-workflows-export`
 - `form-workflow-schedules`
 - `form-workflows-ticket`
+- `form-captcha-proxy` *(optionnel, recommande pour la production)* — Edge Function qui lit `2CAPTCHA_API_KEY` depuis Supabase Vault et agit comme proxy vers l'API 2Captcha. L'executor appelle cette fonction au lieu d'appeler 2Captcha directement, evitant de stocker la cle dans les variables d'environnement du conteneur. Non requis pour le V1.
 
 ### 9.3 Code partage
 
@@ -816,7 +840,8 @@ L'IA ne peut jamais :
 - Lancer une execution.
 - Approuver une version.
 - Creer automatiquement un ticket.
-- Contourner un CAPTCHA ou OTP.
+
+L'IA peut suggerer si un CAPTCHA detecte est probablement resolvable ou non, mais ne peut ni le resoudre ni contourner un OTP.
 
 ## 12. Exports et Redmine
 
@@ -838,6 +863,8 @@ Le PDF contient :
 - Erreurs et raisons de blocage.
 - Captures autorisees.
 - Donnees redacted.
+- Statut de resolution CAPTCHA par etape (resolu / non resolu / bloque).
+- Duree de resolution et cout estime (visible uniquement pour l'admin).
 - Suggestions et recommandations.
 
 ### 12.2 CSV
@@ -887,7 +914,8 @@ La creation reste manuelle. Le bouton est desactive si aucun projet n'est associ
 - Version approuvee epinglee.
 - Une nouvelle version ne remplace pas automatiquement la version planifiee.
 - Dispatcher les executions via cron Supabase ou un worker dedie.
-- Envoyer une notification applicative et un email apres succes, echec, erreur ou blocage.
+- Envoyer une notification applicative et un email apres succes, echec, erreur, blocage ou resolution CAPTCHA.
+- Une execution planifiee rencontrant un CAPTCHA tente une resolution automatique via 2Captcha. En cas d'echec, l'etape devient `blocked` avec preuve et notification. En cas de succes, l'execution continue normalement.
 - Afficher la prochaine execution et la derniere execution dans le dashboard.
 - Desactiver automatiquement un planning si sa version ou son workflow est supprime.
 
@@ -936,6 +964,9 @@ Mettre a jour les exemples d'environnement avec :
 - `FORM_EXECUTOR_ARTIFACT_BUCKET`
 - `OBSCURA_CDP_URL`
 - Variables Supabase service role.
+- `FORM_EXECUTOR_2CAPTCHA_API_KEY` — cle API 2Captcha (stockee dans Supabase Vault, injectee dans K8s secrets ; jamais commitee dans Git).
+- `FORM_EXECUTOR_CAPTCHA_TIMEOUT_S` — timeout maximum pour la resolution d'un CAPTCHA (defaut 120).
+- `FORM_EXECUTOR_CAPTCHA_POLL_INTERVAL_S` — intervalle de polling 2Captcha (defaut 5).
 
 ## 15. Strategie de Migration
 
@@ -971,7 +1002,10 @@ Critere de sortie :
 - Implementer les handlers V1.
 - Ajouter redaction et artefacts.
 - Ajouter stop, retry, run step et run from.
-- Ajouter les fixtures HTML locales.
+- Implemeter `challenge_resolver.py` avec integration 2Captcha (detection, resolution, fallback sans cle).
+- Ajouter les fixtures HTML locales incluant des pages avec CAPTCHA (image, reCAPTCHA v2).
+- Ajouter les tests de detection et resolution CAPTCHA avec mock 2Captcha.
+- Ajouter les tests de blocage pour CAPTCHA non resolvables et fallback sans cle API.
 
 Critere de sortie :
 
@@ -985,6 +1019,50 @@ Critere de sortie :
 - Ajouter file durable et commandes.
 - Ajouter Realtime.
 - Ajouter validation d'approbation.
+
+## 18. Gestion des Secrets 2Captcha
+
+### 18.1 Stockage de la cle API
+
+La cle API 2Captcha ne doit **jamais** etre commitee dans Git, ni apparaître dans les logs, artefacts, step results ou notifications.
+
+**Developpement local :**
+```powershell
+$env:FORM_EXECUTOR_2CAPTCHA_API_KEY="<cle-2captcha>"
+docker compose --profile form-tester up v3-form-executor
+```
+
+**Deploiement k3s :**
+```powershell
+kubectl create secret generic form-executor-secrets \
+  --from-literal=2CAPTCHA_API_KEY="<cle-2captcha>" \
+  -n snapflow-prod
+```
+
+**Edge Functions (si proxy utilise) :**
+```powershell
+npx supabase secrets set 2CAPTCHA_API_KEY="<cle-2captcha>"
+```
+
+### 18.2 Fallback sans cle API
+
+Si `FORM_EXECUTOR_2CAPTCHA_API_KEY` est vide ou absente :
+- `challenge_resolver` detecte le CAPTCHA mais ne tente pas de resolution.
+- L'etape est marquee `blocked` avec `failure_reason: "no_captcha_api_key_configured"`.
+- Le comportement est identique au V1 sans 2Captcha (blocage propre avec preuve et notification).
+- Aucune erreur n'est levee — le workflow continue avec l'etape bloquee.
+
+### 18.3 Rotation de cle
+
+- La cle 2Captcha peut etre changee sans redeploiement en mettant a jour le secret K8s.
+- L'executor lit la variable d'environnement a chaque nouvelle execution (pas de cache).
+- Documenter la procedure de rotation dans le RUNBOOK.
+
+### 18.4 Cout
+
+- Le cout de chaque resolution CAPTCHA est enregistre dans `workflow_step_results.captcha_solve_cost`.
+- Aucun budget maximum n'est applique en V1. Les couts sont consultables par l'administrateur uniquement.
+- Les CAPTCHAs echoues (timeout, type non supporte) ne generent pas de cout 2Captcha (seule la creation de tache est facturable ; le polling ne l'est pas).
 
 Critere de sortie :
 
@@ -1152,3 +1230,351 @@ Executer egalement les tests Deno des Edge Functions selon la commande standard 
 - IA copilote complet, jamais autonome.
 - CAPTCHA/OTP bloques jusqu'a definition d'une strategie fournisseur et juridique.
 - Integration separee des KPI d'audit.
+
+## 20. Backlog Operationnel par Phases
+
+Cycle obligatoire pour chaque phase :
+
+1. Implementer uniquement la phase courante.
+2. Lancer les tests de la phase.
+3. Corriger les regressions.
+4. Valider localement les criteres de sortie.
+5. S'arreter et confirmer avant de passer a la phase suivante.
+
+### Phase 0 - Stabilisation avant refonte
+
+Objectif : empecher les faux resultats avant de construire la nouvelle UI.
+
+- [x] Identifier les endroits ou une execution simulee est affichee comme reelle.
+- [x] Remplacer `execution_source: 'chromium'` simule par `simulated_legacy`.
+- [x] Elargir la contrainte DB `workflow_results_execution_source_check`.
+- [x] Adapter les types frontend `ExecutionResponse` et `WorkflowResult`.
+- [x] Afficher clairement `Simulation legacy`, `Chromium reel`, `Executor indisponible`.
+- [x] Corriger les textes mojibake visibles dans Form Tester.
+- [x] Empecher tout wording qui laisse croire qu'une simulation est un test navigateur reel.
+
+Tests Phase 0 :
+
+- [x] Test Edge Function : simulation retourne `simulated_legacy`.
+- [x] Test frontend : resultat simule affiche un badge non reel.
+- [x] `npm run build`.
+- [x] Tests Supabase/Edge si disponibles.
+
+Validation Phase 0 :
+
+- [x] Aucun resultat simule ne peut etre confondu avec Chromium.
+- [x] L'ancienne fonctionnalite reste utilisable.
+- [x] Aucune refonte UI lourde n'est encore engagee.
+
+### Phase 1 - Contrats, scenarios et versions
+
+- [x] Creer migration Supabase Form Tester V1.
+- [x] Ajouter `form_test_scenarios`.
+- [x] Ajouter `form_scenario_versions`.
+- [x] Ajouter `scenario_id` aux nodes, edges et fields.
+- [x] Ajouter `scenario_id` et `scenario_version_id` aux results.
+- [x] Backfiller un scenario par defaut pour chaque workflow existant.
+- [x] Creer une version initiale depuis chaque workflow existant.
+- [x] Ajouter checksum de version.
+- [x] Interdire la modification d'une version approuvee.
+- [x] Ajouter statuts `draft`, `pending`, `approved`, `rejected`.
+- [x] Adapter RLS client/admin.
+- [x] Empecher un client d'approuver sa propre version.
+- [x] Adapter `_shared/formTester.ts`.
+- [x] Adapter `form-workflows`.
+- [x] Adapter `form-workflows-approve`.
+- [x] Adapter `form-workflows-execute`.
+
+Tests Phase 1 :
+
+- [x] Migration sur DB locale propre.
+- [x] Migration sur DB locale avec anciens workflows.
+- [x] Tests RLS client/admin.
+- [x] Test version approuvee immutable.
+- [x] Test execution refusee si version non approuvee.
+
+Validation Phase 1 :
+
+- [x] Anciennes donnees lisibles.
+- [x] Plusieurs scenarios par workflow.
+- [x] Une execution pointe vers une version precise.
+
+### Phase 2 - Queue d'execution et resultats par etape
+
+- [x] Ajouter `workflow_step_results`.
+- [x] Ajouter `workflow_logs`.
+- [x] Ajouter `workflow_artifacts`.
+- [x] Ajouter `workflow_execution_commands`.
+- [x] Ajouter statuts `queued`, `running`, `stopping`, `passed`, `failed`, `error`, `blocked`, `cancelled`.
+- [x] Modifier `form-workflows-execute` pour creer une execution queued.
+- [x] Ajouter `form-executions`.
+- [x] Ajouter `form-execution-control`.
+- [x] Ajouter redaction minimale avant persistence.
+- [x] Preparer Supabase Realtime.
+
+Tests Phase 2 :
+
+- [ ] Test creation execution queued.
+- [ ] Test commande stop.
+- [ ] Test logs lisibles par proprietaire.
+- [ ] Test anciens resultats legacy.
+- [x] `npm run build`.
+
+Validation Phase 2 :
+
+- [x] L'UI peut afficher une execution progressive.
+- [x] Les resultats ne sont plus un blob unique.
+
+Etat de validation locale Phase 2 au 2026-06-08 :
+
+- [x] 21 tests frontend et contractuels cibles passent.
+- [x] Build production Vite valide.
+- [ ] Migration Supabase locale appliquee par l'utilisateur.
+- [ ] Script d'integration `scripts/test-form-tester-phase2.mjs` valide sur la base locale.
+
+Correctif de compatibilite ajoute apres validation UI :
+
+- [x] Normaliser les resultats historiques sans `execution_source`.
+- [x] Ne pas afficher `0 ms` comme une duree mesuree.
+- [x] Remplacer le faux verdict `Erreur` par `Non interpretable` lorsque la tentative ne contient aucune preuve.
+- [x] Ajouter un backfill `legacy_unknown` sans attribuer abusivement Chromium.
+- [x] Conserver le polling lorsque Supabase Realtime redemarre temporairement.
+
+### Phase 3 - Nouveau service `v3-form-executor`
+
+- [x] Creer `V3-Microservices/v3-form-executor/`.
+- [x] Ajouter worker, executor, storage, redaction et settings.
+- [x] Implementer les handlers V1.
+- [x] Valider le graphe avant execution.
+- [x] Utiliser un contexte navigateur isole par execution.
+- [x] Ecrire step results, logs et artefacts redacted.
+- [x] Retourner `blocked` sur CAPTCHA/OTP.
+- [x] Retourner `error` sur panne executor.
+- [x] Ne jamais retourner `passed` pour une execution non jouee.
+- [x] Ajouter Dockerfile et service compose.
+
+Tests Phase 3 :
+
+- [x] Fixtures contact, login, upload.
+- [x] Test CAPTCHA/OTP blocked.
+- [x] Test stop/retry/run_step/run_from.
+- [x] Test redaction.
+- [x] `python -m pytest tests -q`.
+
+Validation Phase 3 :
+
+- [x] Au moins 3 types de formulaires V1 passent sur fixtures.
+- [x] Chaque echec montre etape, erreur et preuve.
+
+Checkpoint local Phase 3 - 2026-06-08 :
+
+- `12 passed` dans `v3-form-executor/tests`.
+- Contact, login et upload executes dans un vrai Chromium local.
+- CAPTCHA et OTP retournes en `blocked`, sans bypass.
+- Un submit sans effet observable retourne `failed` avec code, screenshot et snapshot HTML.
+- Une panne du moteur retourne `error`, jamais un faux succes.
+- `step` et `from_step` rejouent les prerequis en setup sans les presenter comme nouveaux tests.
+- Le worker ne reclame que les lignes `queued` avec `execution_source=pending_executor` et version approuvee referencee.
+- Aucun Docker ni Supabase n'a ete demarre pendant cette validation.
+
+### Phase 4 - Orchestration complete
+
+- [x] Brancher queue, executor et Edge Functions.
+- [x] Ajouter lock atomique.
+- [x] Traiter stop/retry/run_step/run_from.
+- [ ] Differencier `failed` metier et `error` technique.
+- [ ] Ajouter notifications.
+- [ ] Ajouter timeouts et quotas.
+- [ ] Ajouter feature flag executor.
+
+Tests Phase 4 :
+
+- [x] Execution approuvee jouee une seule fois.
+- [x] Deux workers ne prennent pas la meme execution.
+- [x] Stop pendant running fonctionne.
+- [ ] Executor indisponible devient `error`.
+
+Validation Phase 4 :
+
+- [x] L'execution reelle remplace la simulation.
+- [ ] Rollback possible via feature flag.
+
+Checkpoint local Phase 4 - 2026-06-08 :
+
+- Execution reelle Chromium validee sur `https://httpbin.org/forms/post`.
+- Soumission complete passee avec `14/14` etapes, `final_url=https://httpbin.org/post`, et `2` requetes reseau.
+- Les commandes utilisateur sont exposees dans la page resultats :
+  - relancer toute une execution terminee ;
+  - executer une seule etape ;
+  - executer depuis une etape.
+- Le worker cree deja une nouvelle execution `queued` pour `retry`, `run_step` et `run_from`.
+- Tests frontend cibles Phase 4 : `23 passed`.
+- Build frontend Vite valide.
+
+### Phase 5 - Refonte UI n8n-like
+
+- [ ] Refaire dashboard Form Tester.
+- [x] Refaire builder en trois panneaux.
+- [x] Activer canvas libre ReactFlow.
+- [ ] Ajouter scenarios, versions, palette, inspector, logs, IA et issues.
+- [x] Ajouter scenarios, palette, inspector, logs live et generation de cas IA.
+- [ ] Ajouter versions et panneau issues dans le nouveau builder.
+- [x] Ajouter validation des connexions et cycles.
+- [x] Ajouter etat sauvegarde.
+- [ ] Ajouter warnings production-safe.
+- [ ] Nettoyer tous les textes mojibake.
+
+Tests Phase 5 :
+
+- [x] Creation/suppression/connexion/deplacement de noeuds.
+- [x] Sauvegarde et reload du graphe.
+- [x] Brouillon executable sans approbation en mode V1 non bloquant.
+- [x] `npm run build`.
+- [x] Tests frontend cibles.
+
+Validation Phase 5 :
+
+- [x] L'utilisateur construit les conditions et assertions sans JSON.
+- [x] L'UI ne propose aucune action non supportee backend.
+
+Checkpoint local Phase 5 - Branches et cas IA - 2026-06-08 :
+
+- Branches typees `true/false`, `success/failure` persistees dans les snapshots.
+- Routage graphe reel dans Chromium; les branches non choisies ne sont pas executees.
+- Creation, suppression et connexion de noeuds depuis ReactFlow.
+- Protection frontend et backend contre les cycles.
+- Re-detection bloquee si elle risque d'effacer un graphe personnalise.
+- Generation IA avec fallback heuristique de cas nominaux, invalides et limites.
+- Clonage independant des scenarios, valeurs de champs et identifiants de noeuds.
+- Execution groupee des cas et matrice resultat attendu/resultat observe.
+- Cas de validation navigateur attendu considere comme un test reussi.
+- Tests executor : `18 passed`.
+- Tests frontend cibles : `28 passed`.
+- Build frontend Vite valide.
+
+Checkpoint local Phase 5 - Generation IA dynamique V2 - 2026-06-10 :
+
+- La detection produit un `FormProfile` versionne avec type metier, confiance,
+  methode, action, selecteur de soumission, contraintes, options, etapes,
+  conditions, preuves candidates et effets possibles.
+- L'exploration navigateur est bornee a 6 etapes, 8 chemins et 24 interactions,
+  recharge un contexte propre entre les chemins et ne soumet pas le formulaire.
+- La bibliotheque deterministe genere entre 4 et 12 cas selon le type de
+  formulaire et ses capacites speciales; le LLM enrichit ce socle sans pouvoir
+  inventer de champ, d'option, de selecteur ou de type de signal.
+- Le plan V2 distingue `success`, `validation_error`, `business_rejection`,
+  `server_error` et `blocked`, avec valeurs, parcours, oracle, effets possibles
+  et raisonnement inspectables avant application.
+- Le compilateur serveur valide champs, options, groupes radio, seuils, signaux,
+  parcours et graphes avant une application atomique par
+  `form_test_apply_generated_suite()`.
+- Chaque scenario compile contient une chaine post-soumission executable :
+  `submit -> inspect_response -> condition -> assert/screenshot`.
+- L'oracle pondere URL, DOM, validation, reponse HTTP, formulaire, texte et
+  reseau. Une preuve entre 0.40 et 0.64 produit `inconclusive`, jamais un faux
+  echec.
+- `submit.py` collecte les observations V2 sans interrompre le graphe; les
+  scenarios historiques conservent leur comportement.
+- L'aperçu UI permet de corriger le type, les valeurs, le resultat attendu,
+  l'activation des preuves et les seuils avant d'appliquer la matrice.
+- L'Edge Function d'execution cree un snapshot approuve non nul avant la mise
+  en file, ce qui respecte le contrat strict du worker.
+- Le rollout est protege par `FORM_TESTER_AI_BRANCHING_V2`; la valeur `false`
+  restaure le chemin historique.
+- Tests executor : `21 passed`.
+- Tests browser pool : `9 passed`.
+- Tests frontend cibles : `28 passed`.
+- Build frontend Vite valide.
+
+### Phase 6 - Resultats, logs, IA et debug
+
+- [ ] Refaire page resultats.
+- [ ] Ajouter timeline, logs, captures, assertions, reseau.
+- [ ] Ajouter comparaison d'executions.
+- [ ] Ajouter IA explicative.
+- [ ] Enregistrer suggestions et messages IA.
+- [ ] Interdire toute application automatique par l'IA.
+
+Tests Phase 6 :
+
+- [ ] Timeline.
+- [ ] Logs filtres.
+- [ ] Artefacts signes.
+- [ ] Suggestions IA accept/reject.
+- [ ] Donnees sensibles masquees.
+
+Validation Phase 6 :
+
+- [ ] Un echec est diagnostiquable sans JSON brut.
+
+### Phase 7 - Exports, Redmine et planning
+
+- [ ] Ajouter PDF Form Tester.
+- [ ] Ajouter CSV.
+- [ ] Ajouter adaptateur Redmine.
+- [x] Ajouter `workflow_schedules`.
+- [x] Ajouter dispatcher planifie.
+- [x] Ajouter notifications planning.
+- [x] Rendre la creation workflow + scenario atomique.
+- [x] Separer `Mes workflows` de la `File de validation`.
+- [x] Ajouter les snapshots approuves et epingles par planning.
+- [x] Ajouter le panneau planning dans le builder.
+- [x] Ajouter les executions Form Tester au calendrier global.
+- [x] Configurer Gemini cote serveur avec fallback heuristique.
+- [x] Ajouter un diagnostic Gemini sans exposition du secret.
+
+Tests Phase 7 :
+
+- [ ] PDF redacted.
+- [ ] CSV complet.
+- [ ] Redmine refuse sans projet.
+- [x] Planning refuse version non approuvee.
+- [x] Planning execute version epinglee.
+
+Validation Phase 7 :
+
+- [ ] Export client utilisable.
+- [ ] Ticket Redmine actionnable.
+- [x] Planning fiable.
+
+Checkpoint local Phase 7 - Persistance, planning et Gemini - 2026-06-12 :
+
+- Migration `20260612020000_form_tester_persistence_scheduling.sql` appliquee localement.
+- `supabase db lint --local --level warning` : aucune erreur de schema.
+- Smoke test transactionnel : workflow + scenario crees atomiquement, puis rollback.
+- Smoke test transactionnel : planning quotidien avec snapshot approuve epingle, puis rollback.
+- Smoke test end-to-end : execution planifiee reclamee par Chromium et terminee `passed`.
+- Run de planning synchronise en `completed` et notification creee.
+- Suppression du workflow fixture validee apres correction du guard de versions approuvees.
+- Recurrences quotidienne et mensuelle verifiees avec timezone `Europe/Paris`.
+- Cron `form-tester-schedule-dispatch` actif chaque minute.
+- Tests frontend cibles : `27 passed`.
+- Tests executor contractuels : `8 passed`.
+- Build frontend production : valide.
+- Suite executor hors CAPTCHA : valide.
+- Suite CAPTCHA utilisateur : 14 tests async non executes car `pytest-asyncio` manque dans l'environnement local; aucune modification CAPTCHA effectuee.
+
+### Phase 8 - Durcissement, monitoring et rollout
+
+- [ ] Ajouter metriques executor.
+- [ ] Ajouter alertes.
+- [ ] Ajouter quotas.
+- [ ] Ajouter limites max steps/duration/artifacts.
+- [ ] Ajouter rollback documente.
+- [ ] Ajouter feature flag par groupe.
+- [ ] Verifier aucune modification KPI audit.
+- [ ] Rediger guide utilisateur.
+
+Tests Phase 8 :
+
+- [ ] Quotas.
+- [ ] Timeout global.
+- [ ] Limite artefacts.
+- [ ] Rollback flag.
+- [ ] Monitoring endpoint.
+
+Validation Phase 8 :
+
+- [ ] Deploiement progressif possible.
+- [ ] Monitoring disponible.
+- [ ] Aucun faux succes.

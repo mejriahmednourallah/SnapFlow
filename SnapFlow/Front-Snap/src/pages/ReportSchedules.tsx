@@ -10,6 +10,9 @@ import {
 import { format, addDays, addWeeks, addMonths, startOfWeek, setDay } from 'date-fns';
 import { fr } from 'date-fns/locale';
 import ScheduleCalendarView from '@/components/schedules/ScheduleCalendarView';
+import type { CalendarSchedule } from '@/components/schedules/ScheduleCalendarView';
+import { formTesterApi } from '@/lib/form-tester/api';
+import type { WorkflowSchedule } from '@/lib/form-tester/types';
 
 interface Schedule {
   id: string;
@@ -86,6 +89,7 @@ const ReportSchedules = () => {
   const { toast } = useToast();
 
   const [schedules, setSchedules] = useState<Schedule[]>([]);
+  const [formSchedules, setFormSchedules] = useState<WorkflowSchedule[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [assignments, setAssignments] = useState<{ project_id: string; user_id: string }[]>([]);
@@ -109,16 +113,18 @@ const ReportSchedules = () => {
     if (!user) return;
 
     // Now fetch data (projects for non-admin will be filtered via availableProjects)
-    const [schedRes, projRes, profRes, assignRes] = await Promise.all([
+    const [schedRes, projRes, profRes, assignRes, formScheduleRes] = await Promise.all([
       supabase.from('report_schedules').select('*').order('next_run_at', { ascending: true }),
       supabase.from('projects').select('*'),
       isAdmin ? supabase.from('profiles').select('id, email, full_name') : Promise.resolve({ data: [] }),
       supabase.from('project_assignments').select('project_id, user_id'),
+      formTesterApi.listSchedules().catch(() => ({ schedules: [], runs: [] })),
     ]);
     setSchedules((schedRes.data as Schedule[]) || []);
     setProjects(projRes.data || []);
     setProfiles(profRes.data || []);
     setAssignments(assignRes.data || []);
+    setFormSchedules(formScheduleRes.schedules);
     setLoadingData(false);
   };
 
@@ -150,6 +156,27 @@ const ReportSchedules = () => {
   }, [filteredSchedules]);
 
   const getProjectName = (id: string) => projects.find(p => p.id === id)?.site_name ?? '—';
+  const calendarSchedules = useMemo<CalendarSchedule[]>(() => [
+    ...filteredSchedules.map((schedule) => ({
+      id: schedule.id,
+      title: getProjectName(schedule.project_id),
+      kind: schedule.report_type === 'audit' ? 'audit' as const : 'activity' as const,
+      frequency: schedule.frequency,
+      next_run_at: schedule.next_run_at,
+      is_active: schedule.is_active,
+    })),
+    ...formSchedules
+      .filter((schedule) => Boolean(schedule.next_run_at))
+      .map((schedule) => ({
+        id: schedule.id,
+        title: schedule.form_workflows?.name ?? schedule.name,
+        kind: 'form_tester' as const,
+        frequency: schedule.frequency,
+        next_run_at: schedule.next_run_at as string,
+        is_active: schedule.is_active,
+      })),
+  ], [filteredSchedules, formSchedules, projects]);
+
   const getProfileName = (id: string) => {
     const p = profiles.find(p => p.id === id);
     return p ? (p.full_name || p.email) : '—';
@@ -256,7 +283,9 @@ const ReportSchedules = () => {
           <CalendarClock className="w-6 h-6 text-primary" />
           <div>
             <h1 className="text-2xl font-bold">Planning</h1>
-            <p className="text-sm text-muted-foreground">{filteredSchedules.length} planification(s)</p>
+            <p className="text-sm text-muted-foreground">
+              {filteredSchedules.length + formSchedules.length} planification(s)
+            </p>
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -369,7 +398,7 @@ const ReportSchedules = () => {
 
       {/* Calendar View */}
       {viewMode === 'calendar' && (
-        <ScheduleCalendarView schedules={filteredSchedules} getProjectName={getProjectName} />
+        <ScheduleCalendarView schedules={calendarSchedules} />
       )}
 
       {/* List View */}

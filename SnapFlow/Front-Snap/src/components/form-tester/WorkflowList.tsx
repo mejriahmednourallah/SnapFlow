@@ -1,10 +1,10 @@
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, SquareArrowOutUpRight } from 'lucide-react';
+import { ClipboardCheck, FolderKanban, Plus, SquareArrowOutUpRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useFormTester } from '@/hooks/useFormTester';
-import type { WorkflowStatus } from '@/lib/form-tester/types';
+import type { WorkflowListView, WorkflowStatus } from '@/lib/form-tester/types';
 import { StatusBadge } from './StatusBadge';
 
 interface WorkflowListProps {
@@ -18,6 +18,7 @@ export function WorkflowList({ isOperator }: WorkflowListProps) {
   const [newName, setNewName] = useState('');
   const [newUrl, setNewUrl] = useState('');
   const [statusFilter, setStatusFilter] = useState<WorkflowStatus | 'all'>('all');
+  const [listView, setListView] = useState<WorkflowListView>('mine');
 
   const filteredWorkflows = useMemo(
     () => (statusFilter === 'all' ? workflows : workflows.filter((item) => item.status === statusFilter)),
@@ -33,7 +34,13 @@ export function WorkflowList({ isOperator }: WorkflowListProps) {
   };
 
   const handleRefresh = async (): Promise<void> => {
-    await reload(statusFilter === 'all' ? undefined : statusFilter);
+    await reload(statusFilter === 'all' ? undefined : statusFilter, listView);
+  };
+
+  const changeView = async (view: WorkflowListView): Promise<void> => {
+    setListView(view);
+    setStatusFilter('all');
+    await reload(undefined, view);
   };
 
   return (
@@ -46,14 +53,38 @@ export function WorkflowList({ isOperator }: WorkflowListProps) {
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex rounded-lg border border-border bg-muted/30 p-1">
+            <button
+              type="button"
+              onClick={() => void changeView('mine')}
+              className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-semibold transition ${
+                listView === 'mine' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground'
+              }`}
+            >
+              <FolderKanban className="h-3.5 w-3.5" />
+              Mes workflows
+            </button>
+            {isOperator ? (
+              <button
+                type="button"
+                onClick={() => void changeView('review_queue')}
+                className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-semibold transition ${
+                  listView === 'review_queue' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground'
+                }`}
+              >
+                <ClipboardCheck className="h-3.5 w-3.5" />
+                File de validation
+              </button>
+            ) : null}
+          </div>
           <select
             value={statusFilter}
             onChange={(event) => setStatusFilter(event.target.value as WorkflowStatus | 'all')}
             className="h-9 rounded-md border border-input bg-background px-3 text-sm"
           >
             <option value="all">Tous les statuts</option>
-            <option value="draft">Brouillon</option>
+            {listView !== 'review_queue' ? <option value="draft">Brouillon</option> : null}
             <option value="needs_review">A valider</option>
             <option value="pending">En attente</option>
             <option value="approved">Approuvé</option>
@@ -66,7 +97,7 @@ export function WorkflowList({ isOperator }: WorkflowListProps) {
         </div>
       </header>
 
-      {!isOperator ? (
+      {listView === 'mine' ? (
         <section className="glass-card p-4 space-y-3">
           <p className="text-sm font-medium">Nouveau workflow</p>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-2">

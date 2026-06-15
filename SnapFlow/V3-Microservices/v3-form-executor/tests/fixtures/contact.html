@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Contact fixture</title>
+  </head>
+  <body>
+    <main>
+      <h1>Contact us</h1>
+      <form id="contact-form">
+        <input type="hidden" name="form_build_id" value="dynamic-build-12053">
+        <input type="hidden" name="captcha_sid" value="12053">
+        <label>Name <input name="name" required></label>
+        <label>Email <input name="email" type="email" required></label>
+        <label>Message <textarea name="message" required></textarea></label>
+        <label>
+          <input name="consent" type="checkbox" required>
+          I accept the privacy policy
+        </label>
+        <button type="submit">Send</button>
+      </form>
+      <p id="result" aria-live="polite"></p>
+    </main>
+    <script>
+      document.querySelector("#contact-form").addEventListener("submit", (event) => {
+        event.preventDefault();
+        document.querySelector("#result").textContent = "Contact request received";
+      });
+    </script>
+  </body>
+</html>

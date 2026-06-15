@@ -33,7 +33,28 @@ verify_jwt = false
 [functions.form-workflows-execute]
 verify_jwt = false
 
+[functions.form-executions]
+verify_jwt = false
+
+[functions.cleanup-form-test-artifacts]
+verify_jwt = false
+
+[functions.form-execution-control]
+verify_jwt = false
+
 [functions.form-workflows-suggest]
+verify_jwt = false
+
+[functions.form-workflow-schedules]
+verify_jwt = false
+
+[functions.execute-scheduled-form-workflows]
+verify_jwt = false
+
+[functions.form-tester-ai-status]
+verify_jwt = false
+
+[functions.form-test-campaigns]
 verify_jwt = false
 
 [functions.generate-audit]

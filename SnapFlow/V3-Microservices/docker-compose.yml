@@ -119,6 +119,46 @@ services:
       timeout: 5s
       retries: 5
 
+  # Real browser worker for approved Form Tester scenario versions.
+  # The queue is stored in Supabase PostgreSQL, not in the scan database above.
+  v3-form-executor:
+    build:
+      context: ./v3-form-executor
+      dockerfile: Dockerfile
+    container_name: v3-form-executor
+    profiles: ["form-tester"]
+    ports:
+      - "8085:8085"
+    environment:
+      FORM_EXECUTOR_DATABASE_URL: ${FORM_EXECUTOR_DATABASE_URL:-postgresql://postgres:postgres@host.docker.internal:54322/postgres}
+      SUPABASE_URL: ${FORM_EXECUTOR_SUPABASE_URL:-http://host.docker.internal:54321}
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:-}
+      FORM_EXECUTOR_ARTIFACT_BUCKET: ${FORM_EXECUTOR_ARTIFACT_BUCKET:-form-test-artifacts}
+      FORM_EXECUTOR_CONCURRENCY: ${FORM_EXECUTOR_CONCURRENCY:-3}
+      FORM_EXECUTOR_ARTIFACT_RETENTION_DAYS: ${FORM_EXECUTOR_ARTIFACT_RETENTION_DAYS:-30}
+      FORM_EXECUTOR_ARTIFACT_CLEANUP_INTERVAL_SECONDS: ${FORM_EXECUTOR_ARTIFACT_CLEANUP_INTERVAL_SECONDS:-3600}
+      FORM_EXECUTOR_POLL_INTERVAL: "1"
+      FORM_EXECUTOR_TIMEOUT_MS: "90000"
+      FORM_EXECUTOR_TIMEOUT_MAX_MS: "240000"
+      FORM_EXECUTOR_NODE_TIMEOUT_MS: "15000"
+      FORM_EXECUTOR_NAVIGATION_TIMEOUT_MS: "30000"
+      FORM_EXECUTOR_SETTLE_MS: "500"
+      FORM_EXECUTOR_HEADLESS: "true"
+      CHROME_NO_SANDBOX: "true"
+      FORM_EXECUTOR_2CAPTCHA_API_KEY: ${FORM_EXECUTOR_2CAPTCHA_API_KEY:-}
+      FORM_EXECUTOR_CAPTCHA_TIMEOUT_S: "120"
+      FORM_EXECUTOR_CAPTCHA_POLL_INTERVAL_S: "5"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - form_test_artifacts:/tmp/form-test-artifacts
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8085/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
   obscura:
     image: ${OBSCURA_IMAGE:-h4ckf0r0day/obscura:latest}
     profiles: ["obscura"]
@@ -150,4 +190,4 @@ services:
 
 volumes:
   pgdata:
-
+  form_test_artifacts:

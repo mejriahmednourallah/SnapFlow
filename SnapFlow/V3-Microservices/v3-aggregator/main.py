@@ -1342,16 +1342,22 @@ def build_ux_checklist(site_metrics: dict, pages_count: int) -> list:
     ux   = site_metrics.get("ux", {})
     perf = site_metrics.get("performance", {})
 
-    missing_product_imgs  = ux.get("pages_with_missing_product_images", 0)
-    low_text_pages        = ux.get("pages_with_low_text_density", 0)
+    missing_product_imgs  = _safe_int(ux.get("pages_with_missing_product_images"))
+    low_text_pages        = _safe_int(ux.get("pages_with_low_text_density"))
     raw_ip_kpi            = ux.get("raw_ip_link_kpi", {})
     email_kpi             = ux.get("plain_email_kpi", {})
-    missing_links         = ux.get("pages_missing_contextual_links", 0)
-    maps                  = ux.get("pages_with_maps", 0)
-    simulators            = ux.get("simulator_count", 0)
-    funnels               = ux.get("pages_with_conversion_funnels", 0)
-    button_kpi            = perf.get("button_kpi", {})
-    console_kpi           = perf.get("console_error_kpi", {})
+    missing_links         = _safe_int(ux.get("pages_missing_contextual_links"))
+    maps                  = _safe_int(ux.get("pages_with_maps"))
+    simulators            = _safe_int(ux.get("simulator_count"))
+    funnels               = _safe_int(ux.get("pages_with_conversion_funnels"))
+    button_kpi            = _safe_dict(perf.get("button_kpi"))
+    console_kpi           = _safe_dict(perf.get("console_error_kpi"))
+    homepage_console_error_count = _safe_int(
+        console_kpi.get("homepage_console_error_count")
+    )
+    homepage_console_errors = _safe_list(
+        console_kpi.get("homepage_console_errors")
+    )
 
     checklist = [
         {
@@ -1418,10 +1424,10 @@ def build_ux_checklist(site_metrics: dict, pages_count: int) -> list:
         },
         {
             "item":     "No JavaScript console errors on homepage",
-            "passed":   console_kpi.get("homepage_console_error_count", 0) == 0,
-            "evidence": f"{console_kpi.get('homepage_console_error_count', 0)} console error(s): "
-                        f"{console_kpi.get('homepage_console_errors', [])[:3]}"
-                        if console_kpi.get("homepage_console_error_count", 0) > 0
+            "passed":   homepage_console_error_count == 0,
+            "evidence": f"{homepage_console_error_count} console error(s): "
+                        f"{homepage_console_errors[:3]}"
+                        if homepage_console_error_count > 0
                         else "Homepage has no console errors",
         },
     ]
@@ -2788,7 +2794,7 @@ def build_report(scan_id: str, enrichment_artifacts: Optional[dict] = None) -> d
         if not seo_meta.get("title"):
             seo_missing_title += 1
             seo_missing_title_pages.append(page_url)
-        seo_missing_alt_count = seo.get("images_no_alt", 0)
+        seo_missing_alt_count = _safe_int(seo.get("images_no_alt"))
         seo_missing_alt  += seo_missing_alt_count
         if seo_missing_alt_count > 0:
             seo_missing_alt_pages.append(page_url)
@@ -2804,7 +2810,7 @@ def build_report(scan_id: str, enrichment_artifacts: Optional[dict] = None) -> d
             })
         if not seo.get("has_lazy_images", True):
             seo_without_lazy += 1
-        seo_node_style_url_count += seo.get("node_style_url_count", 0)
+        seo_node_style_url_count += _safe_int(seo.get("node_style_url_count"))
         links = _safe_dict(seo.get("links"))
         seo_internal_links_recount += int(links.get("internal_links", 0) or 0)
         seo_external_links_recount += int(links.get("external_links", 0) or 0)
@@ -2869,7 +2875,7 @@ def build_report(scan_id: str, enrichment_artifacts: Optional[dict] = None) -> d
                 "internal_links": int(links.get("internal_links", 0) or 0),
                 "contextual_links": int(ux.get("contextual_internal_links", 0) or 0),
             })
-        if ux.get("simulator_count", 0) > 0:
+        if _safe_int(ux.get("simulator_count")) > 0:
             ux_simulators += 1
         if ux.get("is_funnel_step"):
             ux_funnels += 1
@@ -2881,7 +2887,7 @@ def build_report(scan_id: str, enrichment_artifacts: Optional[dict] = None) -> d
             for issue in menu_issues[:2]:
                 menu_issue_samples.append(f"{page_url}: {issue}")
         # Phase E: aggregate raw IP and plain email KPIs
-        ip_count = ux.get("raw_ip_link_count", 0)
+        ip_count = _safe_int(ux.get("raw_ip_link_count"))
         if ip_count > 0:
             ux_raw_ip_link_total += ip_count
             ux_pages_with_raw_ip += 1
@@ -2914,8 +2920,9 @@ def build_report(scan_id: str, enrichment_artifacts: Optional[dict] = None) -> d
                 headless_speed.append(speed_index_ms)
             if headless_available and _positive_float_or_none(headless.get("eco_index")) is not None:
                 headless_eco.append(headless["eco_index"])
-            if headless.get("invisible_links", 0) > 0:
-                ux_invisible_links_total += headless["invisible_links"]
+            invisible_link_count = _safe_int(headless.get("invisible_links"))
+            if invisible_link_count > 0:
+                ux_invisible_links_total += invisible_link_count
             mobile_overflow = headless.get("mobile_overflow")
             if mobile_overflow is not None:
                 ux_mobile_checked_pages += 1
@@ -2961,7 +2968,8 @@ def build_report(scan_id: str, enrichment_artifacts: Optional[dict] = None) -> d
                         "source": tracker.get("source") or "runtime_network",
                     })
             # Phase G: console errors + non-functional buttons
-            if headless.get("console_error_count", 0) > 0:
+            console_error_count = _safe_int(headless.get("console_error_count"))
+            if console_error_count > 0:
                 perf_console_error_pages += 1
                 perf_console_error_page_urls.append(page_url)
                 messages = _safe_list(headless.get("console_errors"))
@@ -2980,9 +2988,12 @@ def build_report(scan_id: str, enrichment_artifacts: Optional[dict] = None) -> d
                         "message": "Console errors detected but messages were not retained",
                         "source": "browser_console",
                         "line": None,
-                        "count": int(headless.get("console_error_count", 0) or 0),
+                        "count": console_error_count,
                     })
-            if headless.get("non_functional_button_count", 0) > 0:
+            non_functional_button_count = _safe_int(
+                headless.get("non_functional_button_count")
+            )
+            if non_functional_button_count > 0:
                 perf_nonfunc_button_pages += 1
                 perf_nonfunc_button_page_urls.append(page_url)
                 details = headless.get("non_functional_button_details") or []
@@ -3022,10 +3033,10 @@ def build_report(scan_id: str, enrichment_artifacts: Optional[dict] = None) -> d
                             "onclick": None,
                             "form_action": None,
                         })
-                perf_nonfunc_button_total += int(headless.get("non_functional_button_count", 0) or 0)
+                perf_nonfunc_button_total += non_functional_button_count
             # Phase M-4: capture homepage console errors list
             if page_url.rstrip("/") == scan_start_url:
-                homepage_console_error_count = headless.get("console_error_count", 0)
+                homepage_console_error_count = console_error_count
                 homepage_console_errors = headless.get("console_errors") or []
             # Phase H: mobile metrics (only present on homepage result)
             # Use is not None to distinguish missing (None) from a valid empty/zero result

@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useState } from 'react';
 import { formTesterApi } from '@/lib/form-tester/api';
-import type { FormWorkflow, WorkflowListItem, WorkflowStatus } from '@/lib/form-tester/types';
+import type { FormWorkflow, WorkflowListItem, WorkflowListView, WorkflowStatus } from '@/lib/form-tester/types';
 
 interface UseFormTesterReturn {
   workflows: WorkflowListItem[];
   isLoading: boolean;
   isCreating: boolean;
   error: string | null;
-  reload: (status?: WorkflowStatus) => Promise<void>;
+  reload: (status?: WorkflowStatus, view?: WorkflowListView) => Promise<void>;
   createWorkflow: (name: string, targetUrl: string) => Promise<FormWorkflow>;
 }
 
@@ -17,13 +17,13 @@ export function useFormTester(isOperator: boolean): UseFormTesterReturn {
   const [isCreating, setIsCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const reload = useCallback(async (status?: WorkflowStatus): Promise<void> => {
+  const reload = useCallback(async (status?: WorkflowStatus, view: WorkflowListView = 'mine'): Promise<void> => {
     setIsLoading(true);
     setError(null);
     try {
       const data = await formTesterApi.listWorkflows({
         status,
-        operatorView: isOperator,
+        view,
       });
       setWorkflows(data);
     } catch (loadError) {
@@ -39,6 +39,10 @@ export function useFormTester(isOperator: boolean): UseFormTesterReturn {
     setError(null);
     try {
       const workflow = await formTesterApi.createWorkflow(name, targetUrl);
+      setWorkflows((current) => [
+        { ...workflow, latest_result: null },
+        ...current.filter((item) => item.id !== workflow.id),
+      ]);
       return workflow;
     } catch (createError) {
       const message = createError instanceof Error ? createError.message : 'Impossible de créer le workflow';
@@ -50,7 +54,7 @@ export function useFormTester(isOperator: boolean): UseFormTesterReturn {
   }, []);
 
   useEffect(() => {
-    void reload();
+    void reload(undefined, 'mine');
   }, [reload]);
 
   return {

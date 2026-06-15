@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Image CAPTCHA fixture</title>
+  </head>
+  <body>
+    <h1>Image CAPTCHA Protected Form</h1>
+    <form action="/submit" method="POST">
+      <label>Username <input name="username" type="text"></label>
+      <img src="/captcha-image.png" class="captcha-img" alt="CAPTCHA image">
+      <label>Enter the text above: <input name="captcha_input" type="text"></label>
+      <button type="submit">Submit</button>
+    </form>
+  </body>
+</html>

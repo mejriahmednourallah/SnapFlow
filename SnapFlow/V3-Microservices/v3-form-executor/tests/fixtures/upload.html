@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Upload fixture</title>
+  </head>
+  <body>
+    <main>
+      <h1>Upload a document</h1>
+      <form id="upload-form">
+        <label>Document <input name="document" type="file" required></label>
+        <button type="submit">Upload</button>
+      </form>
+      <p id="result" aria-live="polite"></p>
+    </main>
+    <script>
+      document.querySelector("#upload-form").addEventListener("submit", (event) => {
+        event.preventDefault();
+        const file = event.currentTarget.elements.document.files[0];
+        document.querySelector("#result").textContent =
+          file ? `Uploaded ${file.name}` : "No file selected";
+      });
+    </script>
+  </body>
+</html>

@@ -13,50 +13,63 @@ type DetectResult = {
 };
 
 const COMMON_PATHS = [
-  "/logo.svg",
   "/logo.png",
   "/logo.jpg",
   "/logo.jpeg",
   "/static/logo.png",
-  "/static/logo.svg",
   "/assets/logo.png",
-  "/assets/logo.svg",
   "/images/logo.png",
-  "/images/logo.svg",
   "/img/logo.png",
-  "/img/logo.svg",
   "/favicon.png",
-  "/favicon.ico",
   "/favicons/favicon-32x32.png",
   "/favicons/favicon-192x192.png",
   "/apple-touch-icon.png",
   "/apple-touch-icon-precomposed.png",
   "/branding/logo.png",
-  "/branding/logo.svg",
   "/brand/logo.png",
-  "/brand/logo.svg",
   "/media/logo.png",
+  "/favicon.ico",
+  "/logo.svg",
+  "/static/logo.svg",
+  "/assets/logo.svg",
+  "/images/logo.svg",
+  "/img/logo.svg",
+  "/branding/logo.svg",
+  "/brand/logo.svg",
   "/media/logo.svg",
 ];
 
 function absoluteUrl(src: string, base: URL): string | null {
   try {
-    return new URL(src, base).href;
+    const parsed = new URL(src, base);
+    return ["http:", "https:"].includes(parsed.protocol) ? parsed.href : null;
   } catch {
     return null;
   }
 }
 
-async function isReachable(url: string): Promise<boolean> {
+function fetchWithTimeout(url: string, init: RequestInit = {}, timeoutMs = 8_000): Promise<Response> {
+  return fetch(url, {
+    ...init,
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+}
+
+function isImageResponse(response: Response, url: string): boolean {
+  const contentType = (response.headers.get("content-type") || "").toLowerCase();
+  if (contentType.startsWith("image/")) return true;
+  if (contentType.includes("text/html") || contentType.includes("application/json")) return false;
+  return /\.(png|jpe?g|gif|webp|ico|svg)(?:[?#]|$)/i.test(url);
+}
+
+async function isReachableImage(url: string): Promise<boolean> {
   try {
-    const res = await fetch(url, { method: "HEAD" });
-    if (res.ok) return true;
-    // fallback GET for servers that block HEAD
-    if (res.status === 405 || res.status === 501) {
-      const getRes = await fetch(url, { method: "GET" });
-      return getRes.ok;
-    }
-    return false;
+    const res = await fetchWithTimeout(url, {
+      method: "GET",
+      headers: { Accept: "image/avif,image/webp,image/png,image/svg+xml,image/*,*/*;q=0.5" },
+      redirect: "follow",
+    }, 5_000);
+    return res.ok && isImageResponse(res, res.url || url);
   } catch {
     return false;
   }
@@ -64,10 +77,22 @@ async function isReachable(url: string): Promise<boolean> {
 
 async function toDataUrl(url: string): Promise<string | null> {
   try {
-    const res = await fetch(url);
-    if (!res.ok) return null;
+    const res = await fetchWithTimeout(url, {
+      headers: { Accept: "image/png,image/jpeg,image/*;q=0.7,*/*;q=0.2" },
+      redirect: "follow",
+    }, 8_000);
+    if (!res.ok || !isImageResponse(res, res.url || url)) return null;
     const buf = new Uint8Array(await res.arrayBuffer());
-    const ct = res.headers.get("content-type") || "image/png";
+    if (buf.length === 0 || buf.length > 5_000_000) return null;
+    const rawContentType = (res.headers.get("content-type") || "").split(";")[0].toLowerCase();
+    const extensionMatch = (res.url || url).match(/\.(png|jpe?g)(?:[?#]|$)/i);
+    const inferredContentType = extensionMatch?.[1]?.toLowerCase() === "png" ? "image/png" : "image/jpeg";
+    const ct = ["image/png", "image/jpeg"].includes(rawContentType)
+      ? rawContentType
+      : extensionMatch
+        ? inferredContentType
+        : "";
+    if (!ct) return null;
     
     // Use a safer base64 encoding for large images to avoid "Maximum call stack size exceeded"
     let base64 = '';
@@ -84,21 +109,39 @@ async function toDataUrl(url: string): Promise<string | null> {
   }
 }
 
-function extractOgImage(html: string): string | null {
-  const ogMatch = html.match(/<meta[^>]+property=["']og:image["'][^>]*content=["']([^"']+)["']/i);
-  if (ogMatch?.[1]) return ogMatch[1];
-  const twitterMatch = html.match(/<meta[^>]+name=["']twitter:image["'][^>]*content=["']([^"']+)["']/i);
-  return twitterMatch?.[1] ?? null;
+function attributesOf(tag: string): Record<string, string> {
+  const attributes: Record<string, string> = {};
+  const attributeRegex = /([:\w-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+))/g;
+  let match;
+  while ((match = attributeRegex.exec(tag)) !== null) {
+    attributes[match[1].toLowerCase()] = match[2] ?? match[3] ?? match[4] ?? "";
+  }
+  return attributes;
+}
+
+function extractSocialImages(html: string): string[] {
+  const results: string[] = [];
+  const tagRegex = /<meta\b[^>]*>/gi;
+  let match;
+  while ((match = tagRegex.exec(html)) !== null) {
+    const attrs = attributesOf(match[0]);
+    const key = (attrs.property || attrs.name || "").toLowerCase();
+    if (["og:logo", "og:image", "twitter:image"].includes(key) && attrs.content) {
+      results.push(attrs.content);
+    }
+  }
+  return results;
 }
 
 function extractFavicons(html: string): string[] {
   const results: string[] = [];
-  const linkRegex = /<link[^>]+rel=["']([^"']*)["'][^>]*href=["']([^"']+)["'][^>]*>/gi;
+  const linkRegex = /<link\b[^>]*>/gi;
   let match;
   while ((match = linkRegex.exec(html)) !== null) {
-    const rel = match[1].toLowerCase();
-    if (rel.includes("icon") || rel.includes("apple-touch-icon") || rel.includes("mask-icon")) {
-      results.push(match[2]);
+    const attrs = attributesOf(match[0]);
+    const rel = (attrs.rel || "").toLowerCase();
+    if (attrs.href && (rel.includes("icon") || rel.includes("apple-touch-icon") || rel.includes("mask-icon"))) {
+      results.push(attrs.href);
     }
   }
   return results;
@@ -106,11 +149,15 @@ function extractFavicons(html: string): string[] {
 
 function extractLogoImgs(html: string): string[] {
   const results: string[] = [];
-  const imgRegex = /<img[^>]*src=["']([^"']+)["'][^>]*>/gi;
+  const imgRegex = /<img\b[^>]*>/gi;
   let match;
   while ((match = imgRegex.exec(html)) !== null) {
-    const src = match[1];
-    if (/logo|brand|logotype|mark/i.test(src)) {
+    const attrs = attributesOf(match[0]);
+    const src = attrs.src || attrs["data-src"] || attrs["data-lazy-src"];
+    const identity = [src, attrs.class, attrs.id, attrs.alt, attrs["aria-label"]]
+      .filter(Boolean)
+      .join(" ");
+    if (src && /logo|logotype|brand(?:mark)?|site-?identity/i.test(identity)) {
       results.push(src);
     }
   }
@@ -123,8 +170,8 @@ serve(async (req) => {
   }
 
   try {
-    const { siteUrl, logoUrl, returnDataUrl } = await req.json();
-    const targetUrl = (logoUrl || siteUrl) as string | undefined;
+    const { siteUrl, logoUrl, fallbackLogoUrl, returnDataUrl } = await req.json();
+    const targetUrl = (siteUrl || logoUrl || fallbackLogoUrl) as string | undefined;
 
     if (!targetUrl || typeof targetUrl !== "string") {
       return new Response(JSON.stringify({ error: "siteUrl or logoUrl is required" }), {
@@ -143,8 +190,8 @@ serve(async (req) => {
       });
     }
 
-    // If logoUrl provided, short-circuit to data fetch/return
-    if (logoUrl) {
+    // Explicit manual logo URLs remain supported, but report generation uses siteUrl first.
+    if (logoUrl && !siteUrl) {
       const dataUrl = returnDataUrl ? await toDataUrl(logoUrl) : null;
       const payload: DetectResult = {
         logo_url: logoUrl,
@@ -158,38 +205,54 @@ serve(async (req) => {
       });
     }
 
-    const htmlRes = await fetch(target.href, {
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123 Safari/537.36",
-        Accept: "text/html,application/xhtml+xml",
-      },
-    });
-
-    const html = htmlRes.ok ? await htmlRes.text() : "";
-
-    // Layer 1: OG / logo-ish tags / favicons
-    const candidates: Array<{ url: string; source: string; confidence: number }> = [];
-
-    const og = extractOgImage(html);
-    if (og) {
-      const url = absoluteUrl(og, target);
-      if (url) candidates.push({ url, source: "og:image", confidence: 0.9 });
+    if (!["http:", "https:"].includes(target.protocol)) {
+      return new Response(JSON.stringify({ error: "Only HTTP(S) URLs are supported" }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
 
+    let html = "";
+    let documentBase = target;
+    try {
+      const htmlRes = await fetchWithTimeout(target.href, {
+        headers: {
+          "User-Agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/123 Safari/537.36",
+          Accept: "text/html,application/xhtml+xml",
+        },
+        redirect: "follow",
+      }, 10_000);
+      if (htmlRes.url) documentBase = new URL(htmlRes.url);
+      if (htmlRes.ok) html = await htmlRes.text();
+    } catch (error) {
+      console.warn("[detect-logo] audited page fetch failed, continuing with fallbacks", error);
+    }
+
+    // Layer 1: logo elements from the audited page, then icons, then social images.
+    const candidates: Array<{ url: string; source: string; confidence: number }> = [];
+
     extractLogoImgs(html).forEach((src) => {
-      const url = absoluteUrl(src, target);
-      if (url) candidates.push({ url, source: "img[logo]", confidence: 0.8 });
+      const url = absoluteUrl(src, documentBase);
+      if (url) candidates.push({ url, source: "page-logo", confidence: 0.95 });
     });
 
     extractFavicons(html).forEach((src) => {
-      const url = absoluteUrl(src, target);
-      if (url) candidates.push({ url, source: "link[icon]", confidence: 0.7 });
+      const url = absoluteUrl(src, documentBase);
+      if (url) candidates.push({ url, source: "page-icon", confidence: 0.75 });
     });
 
-    for (const cand of candidates) {
-      if (await isReachable(cand.url)) {
-        const dataUrl = returnDataUrl ? await toDataUrl(cand.url) : null;
+    extractSocialImages(html).forEach((src) => {
+      const url = absoluteUrl(src, documentBase);
+      if (url) candidates.push({ url, source: "social-image", confidence: 0.55 });
+    });
+
+    const uniqueCandidates = candidates.filter(
+      (candidate, index, all) => all.findIndex((item) => item.url === candidate.url) === index,
+    );
+    for (const cand of uniqueCandidates) {
+      const dataUrl = returnDataUrl ? await toDataUrl(cand.url) : null;
+      if (dataUrl || (!returnDataUrl && await isReachableImage(cand.url))) {
         const payload: DetectResult = {
           logo_url: cand.url,
           source: cand.source,
@@ -204,11 +267,11 @@ serve(async (req) => {
     }
 
     // Layer 2: common paths
-    const origin = `${target.protocol}//${target.host}`;
+    const origin = documentBase.origin;
     const probes = await Promise.allSettled(
       COMMON_PATHS.map(async (path) => {
         const url = origin + path;
-        const ok = await isReachable(url);
+        const ok = await isReachableImage(url);
         return { url, ok };
       }),
     );
@@ -216,16 +279,35 @@ serve(async (req) => {
     const found = probes.find((p) => p.status === "fulfilled" && p.value.ok);
     if (found && found.status === "fulfilled" && found.value.ok) {
       const dataUrl = returnDataUrl ? await toDataUrl(found.value.url) : null;
-      const payload: DetectResult = {
-        logo_url: found.value.url,
-        source: "common-path",
-        confidence: 0.6,
-        data_url: dataUrl || undefined,
-      };
-      return new Response(JSON.stringify(payload), {
-        status: 200,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      if (dataUrl || !returnDataUrl) {
+        const payload: DetectResult = {
+          logo_url: found.value.url,
+          source: "common-path",
+          confidence: 0.6,
+          data_url: dataUrl || undefined,
+        };
+        return new Response(JSON.stringify(payload), {
+          status: 200,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+    }
+
+    const storedFallback = typeof fallbackLogoUrl === "string" ? fallbackLogoUrl.trim() : "";
+    if (storedFallback) {
+      const dataUrl = returnDataUrl ? await toDataUrl(storedFallback) : null;
+      if (dataUrl || (!returnDataUrl && await isReachableImage(storedFallback))) {
+        const fallback: DetectResult = {
+          logo_url: storedFallback,
+          source: "stored-fallback",
+          confidence: 0.5,
+          data_url: dataUrl || undefined,
+        };
+        return new Response(JSON.stringify(fallback), {
+          status: 200,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
     }
 
     const fallback: DetectResult = { logo_url: null, source: "not_found", confidence: 0 };

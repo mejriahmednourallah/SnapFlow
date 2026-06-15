@@ -21,6 +21,7 @@ import WorkflowsPage from "./pages/WorkflowsPage";
 import FormTesterPage from "./pages/FormTesterPage";
 import FormTesterBuilderPage from "./pages/FormTesterBuilderPage";
 import FormTesterResultsPage from "./pages/FormTesterResultsPage";
+import FormTesterCampaignPlanPage from "./pages/FormTesterCampaignPlanPage";
 import ProjectShell from "./pages/project/ProjectShell";
 import ProjectFiche from "./pages/project/ProjectFiche";
 import ProjectAudits from "./pages/project/ProjectAudits";
@@ -57,6 +58,7 @@ const App = () => (
                 <Route path="workflows" element={<WorkflowsPage />} />
                 <Route path="workflows/form-tester" element={<FormTesterPage />} />
                 <Route path="workflows/form-tester/:id" element={<FormTesterBuilderPage />} />
+                <Route path="workflows/form-tester/:id/plan" element={<FormTesterCampaignPlanPage />} />
                 <Route path="workflows/form-tester/:id/results" element={<FormTesterResultsPage />} />
                 <Route path="users" element={<AdminUsers />} />
               </Route>

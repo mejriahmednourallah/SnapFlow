@@ -4,6 +4,7 @@ import {
   corsHeaders,
   createServiceClient,
   ensureAdmin,
+  getScenarioForWorkflow,
   getAuthUserId,
   HttpError,
   toJson,
@@ -11,6 +12,8 @@ import {
 
 interface ApproveBody {
   workflow_id?: string;
+  scenario_id?: string;
+  scenario_version_id?: string;
   action?: 'approve' | 'reject';
   note?: string;
 }
@@ -37,6 +40,77 @@ serve(async (req) => {
     if (action === 'reject' && !note) {
       throw new HttpError(400, 'Une note est obligatoire pour rejeter le workflow');
     }
+
+    const { data: currentWorkflow, error: workflowLoadError } = await serviceClient
+      .from('form_workflows')
+      .select('*')
+      .eq('id', workflowId)
+      .maybeSingle();
+
+    if (workflowLoadError) throw new HttpError(500, workflowLoadError.message);
+    if (!currentWorkflow) throw new HttpError(404, 'Workflow introuvable');
+
+    const scenario = await getScenarioForWorkflow(serviceClient, currentWorkflow, body.scenario_id);
+
+    let versionQuery = serviceClient
+      .from('form_scenario_versions')
+      .select('*')
+      .eq('scenario_id', scenario.id)
+      .eq('status', 'pending');
+
+    if (body.scenario_version_id) {
+      versionQuery = versionQuery.eq('id', body.scenario_version_id);
+    } else {
+      versionQuery = versionQuery.order('version_number', { ascending: false }).limit(1);
+    }
+
+    const { data: versionRows, error: versionLoadError } = await versionQuery;
+    if (versionLoadError) throw new HttpError(500, versionLoadError.message);
+
+    const scenarioVersion = Array.isArray(versionRows) ? versionRows[0] : versionRows;
+    if (!scenarioVersion) {
+      throw new HttpError(400, 'Aucune version en attente pour ce scenario');
+    }
+
+    const versionUpdate =
+      action === 'approve'
+        ? {
+            status: 'approved',
+            approved_by: userId,
+            approved_at: new Date().toISOString(),
+            approval_note: note ?? null,
+            rejection_note: null,
+            rejected_at: null,
+          }
+        : {
+            status: 'rejected',
+            approved_by: null,
+            approved_at: null,
+            approval_note: null,
+            rejection_note: note,
+            rejected_at: new Date().toISOString(),
+          };
+
+    const { data: approvedVersion, error: versionUpdateError } = await serviceClient
+      .from('form_scenario_versions')
+      .update(versionUpdate)
+      .eq('id', scenarioVersion.id)
+      .eq('status', 'pending')
+      .select('*')
+      .maybeSingle();
+
+    if (versionUpdateError) throw new HttpError(500, versionUpdateError.message);
+    if (!approvedVersion) throw new HttpError(400, 'Version deja traitee ou introuvable');
+
+    const { error: scenarioUpdateError } = await serviceClient
+      .from('form_test_scenarios')
+      .update({
+        status: action === 'approve' ? 'approved' : 'rejected',
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', scenario.id);
+
+    if (scenarioUpdateError) throw new HttpError(500, scenarioUpdateError.message);
 
     const updatePayload =
       action === 'approve'
@@ -71,7 +145,13 @@ serve(async (req) => {
       throw new HttpError(400, 'Workflow introuvable ou non soumis');
     }
 
-    return toJson({ success: true, workflow, action });
+    return toJson({
+      success: true,
+      workflow,
+      scenario,
+      scenario_version: approvedVersion,
+      action,
+    });
   } catch (error) {
     if (error instanceof HttpError) {
       return toJson({ error: error.message }, error.status);

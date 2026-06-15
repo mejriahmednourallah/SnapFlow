@@ -13,6 +13,8 @@ import snapflowLogo from '@/assets/snapflow-logo.png';
 const AppLayout = () => {
   const { user, loading, isAdmin, displayName, signOut } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
+  const isFormBuilderRoute = /^\/app\/workflows\/form-tester\/[^/]+(?:\/(?:plan|results))?\/?$/.test(location.pathname);
 
   useEffect(() => {
     if (!loading && !user) navigate('/auth');
@@ -55,8 +57,8 @@ const AppLayout = () => {
           </header>
 
           {/* Main content */}
-          <main className="flex-1 p-6">
-            <div className="max-w-7xl mx-auto">
+          <main className={isFormBuilderRoute ? 'min-h-0 flex-1 overflow-hidden p-2 sm:p-3' : 'flex-1 p-6'}>
+            <div className={isFormBuilderRoute ? 'h-full w-full max-w-none min-w-0' : 'mx-auto max-w-7xl'}>
               <Outlet />
             </div>
           </main>

@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from main import BatchScreenshotRequest, RenderRequest, ScreenshotRequest
 from pool import (
     BrowserPool,
@@ -8,6 +10,15 @@ from pool import (
     _normalize_wait_until,
     _rewrite_obscura_ws_url,
 )
+
+
+def test_form_discovery_exploration_is_bounded_and_never_submits():
+    source = (Path(__file__).resolve().parents[1] / "pool.py").read_text(encoding="utf-8")
+    assert 'exploration["paths_explored"] < 8' in source
+    assert 'exploration["interactions"] < 24' in source
+    assert "for interaction in path[:6]" in source
+    assert 'type === "submit"' in source
+    assert "form_exploration=payload.get" in source
 
 
 def test_screenshot_requests_default_to_domcontentloaded():

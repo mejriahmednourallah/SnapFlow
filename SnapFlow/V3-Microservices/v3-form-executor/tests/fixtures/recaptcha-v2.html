@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>reCAPTCHA v2 fixture</title>
+    <script src="https://www.google.com/recaptcha/api.js" async defer></script>
+  </head>
+  <body>
+    <h1>reCAPTCHA v2 Protected Form</h1>
+    <form action="/submit" method="POST">
+      <label>Name <input name="name" type="text"></label>
+      <div class="g-recaptcha" data-sitekey="6LeIxAcTAAAAAJcZVRqyHh71UMIEGNQ_MXjiZKhI"></div>
+      <button type="submit">Submit</button>
+    </form>
+    <textarea class="g-recaptcha-response" style="display:none"></textarea>
+  </body>
+</html>

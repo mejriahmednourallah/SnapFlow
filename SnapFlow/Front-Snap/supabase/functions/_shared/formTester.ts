@@ -108,3 +108,92 @@ export function isWorkflowStatus(value: string): value is WorkflowStatus {
     value === 'blocked'
   );
 }
+
+export type ScenarioVersionStatus = 'draft' | 'pending' | 'approved' | 'rejected';
+
+export interface FormTestScenarioRow {
+  id: string;
+  workflow_id: string;
+  org_id: string;
+  created_by: string;
+  name: string;
+  status: ScenarioVersionStatus;
+  is_default: boolean;
+}
+
+export async function ensureDefaultScenario(
+  serviceClient: ReturnType<typeof createServiceClient>,
+  workflow: {
+    id: string;
+    org_id: string;
+    created_by: string;
+    name?: string;
+  },
+): Promise<FormTestScenarioRow> {
+  const { data: existing, error: existingError } = await serviceClient
+    .from('form_test_scenarios')
+    .select('*')
+    .eq('workflow_id', workflow.id)
+    .eq('is_default', true)
+    .maybeSingle();
+
+  if (existingError) {
+    throw new HttpError(500, `Erreur chargement scenario: ${existingError.message}`);
+  }
+
+  if (existing) return existing as FormTestScenarioRow;
+
+  const { data: created, error: createError } = await serviceClient
+    .from('form_test_scenarios')
+    .insert({
+      workflow_id: workflow.id,
+      org_id: workflow.org_id,
+      created_by: workflow.created_by,
+      name: 'Scenario principal',
+      description: `Scenario principal pour ${workflow.name ?? 'le workflow'}`,
+      status: 'draft',
+      is_default: true,
+    })
+    .select('*')
+    .single();
+
+  if (createError) {
+    const { data: racedScenario, error: racedError } = await serviceClient
+      .from('form_test_scenarios')
+      .select('*')
+      .eq('workflow_id', workflow.id)
+      .eq('is_default', true)
+      .maybeSingle();
+
+    if (racedError || !racedScenario) {
+      throw new HttpError(500, `Erreur creation scenario: ${createError.message}`);
+    }
+    return racedScenario as FormTestScenarioRow;
+  }
+
+  return created as FormTestScenarioRow;
+}
+
+export async function getScenarioForWorkflow(
+  serviceClient: ReturnType<typeof createServiceClient>,
+  workflow: {
+    id: string;
+    org_id: string;
+    created_by: string;
+    name?: string;
+  },
+  scenarioId?: string | null,
+): Promise<FormTestScenarioRow> {
+  if (!scenarioId) return ensureDefaultScenario(serviceClient, workflow);
+
+  const { data: scenario, error } = await serviceClient
+    .from('form_test_scenarios')
+    .select('*')
+    .eq('id', scenarioId)
+    .eq('workflow_id', workflow.id)
+    .maybeSingle();
+
+  if (error) throw new HttpError(500, `Erreur chargement scenario: ${error.message}`);
+  if (!scenario) throw new HttpError(404, 'Scenario introuvable pour ce workflow');
+  return scenario as FormTestScenarioRow;
+}

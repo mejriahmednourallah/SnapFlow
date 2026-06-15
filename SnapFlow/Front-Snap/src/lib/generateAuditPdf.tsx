@@ -1,49 +1,11 @@
 import { Buffer } from 'buffer';
 import type { AuditReport } from '@/data/mockAuditData';
 import type { PdfTheme } from '@/components/pdf/theme';
+import { resolveSiteLogoDataUrl } from '@/lib/siteLogoResolver';
 
 export interface PdfBrandingOptions {
   clientLogoUrl?: string | null;
-}
-
-function blobToDataUrl(blob: Blob): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      if (typeof reader.result === 'string') {
-        resolve(reader.result);
-        return;
-      }
-      reject(new Error('Unable to convert logo to data URL'));
-    };
-    reader.onerror = () => reject(reader.error ?? new Error('Unable to read logo blob'));
-    reader.readAsDataURL(blob);
-  });
-}
-
-async function resolveClientLogoSource(url?: string | null): Promise<string | undefined> {
-  if (!url) return undefined;
-  if (/^(data:|blob:)/i.test(url)) {
-    console.log('[generateAuditPdf] Using data URL directly');
-    return url;
-  }
-
-  try {
-    console.log('[generateAuditPdf] Fetching logo from URL:', url);
-    const response = await fetch(url);
-    if (!response.ok) {
-      throw new Error(`Client logo fetch failed with status ${response.status}`);
-    }
-    const blob = await response.blob();
-    const dataUrl = await blobToDataUrl(blob);
-    console.log('[generateAuditPdf] Successfully converted logo to data URL');
-    return dataUrl;
-  } catch (error) {
-    console.error('[generateAuditPdf] Logo fetch failed; falling back to direct URL:', error);
-    // Fall back to the original URL (may still succeed if react-pdf can fetch it)
-    console.log('[generateAuditPdf] Attempting with original URL as fallback:', url);
-    return url;
-  }
+  siteUrl?: string | null;
 }
 
 export async function generateAuditPdf(
@@ -60,7 +22,10 @@ export async function generateAuditPdf(
     import('@/components/pdf/AuditDocument'),
   ]);
 
-  const clientLogoSrc = await resolveClientLogoSource(branding?.clientLogoUrl);
+  const clientLogoSrc = await resolveSiteLogoDataUrl({
+    siteUrl: branding?.siteUrl ?? audit.url,
+    storedLogoUrl: branding?.clientLogoUrl,
+  });
   const blob = await pdf(<AuditDocument audit={audit} theme={theme} clientLogoSrc={clientLogoSrc} />).toBlob();
 
   const filename = `audit-${audit.siteName

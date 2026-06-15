@@ -1,5 +1,6 @@
 import { Buffer } from 'buffer';
 import type { DashboardProject, RedmineIssue, ActivityPdfOptions } from '@/components/activity/pdf/pdfTypes';
+import { resolveSiteLogoDataUrl } from '@/lib/siteLogoResolver';
 
 export interface GenerateActivityPdfParams {
   project: DashboardProject;
@@ -27,38 +28,11 @@ function slugify(value: string) {
     .replace(/^-|-$/g, '');
 }
 
-function blobToDataUrl(blob: Blob): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      if (typeof reader.result === 'string') {
-        resolve(reader.result);
-        return;
-      }
-      reject(new Error('Unable to convert activity logo to data URL'));
-    };
-    reader.onerror = () => reject(reader.error ?? new Error('Unable to read activity logo blob'));
-    reader.readAsDataURL(blob);
-  });
-}
-
-async function fetchLogoAsDataUrl(url?: string | null, fallbackToDirect = true): Promise<string | undefined> {
-  if (!url) return undefined;
-  if (/^(data:|blob:)/i.test(url)) return url;
-
-  try {
-    const response = await fetch(url);
-    if (!response.ok) return fallbackToDirect ? url : undefined;
-    return await blobToDataUrl(await response.blob());
-  } catch {
-    return fallbackToDirect ? url : undefined;
-  }
-}
-
 async function resolveActivityLogoSource(project: DashboardProject): Promise<string | undefined> {
-  const storedLogo = project.logo_url?.trim();
-  if (storedLogo) return fetchLogoAsDataUrl(storedLogo);
-  return undefined;
+  return resolveSiteLogoDataUrl({
+    siteUrl: project.url,
+    storedLogoUrl: project.logo_url,
+  });
 }
 
 export async function generateActivityPdf(params: GenerateActivityPdfParams): Promise<void> {

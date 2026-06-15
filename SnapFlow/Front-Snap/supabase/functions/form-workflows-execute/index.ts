@@ -3,6 +3,7 @@ import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import {
   corsHeaders,
   createServiceClient,
+  getScenarioForWorkflow,
   getAuthUserId,
   HttpError,
   toJson,
@@ -10,7 +11,12 @@ import {
 
 interface ExecuteBody {
   workflow_id?: string;
+  scenario_id?: string;
+  scenario_version_id?: string;
   audit_run_id?: string;
+  execution_mode?: 'full' | 'step' | 'from_step' | 'scheduled';
+  start_node_id?: string;
+  environment?: string;
 }
 
 interface WorkflowRow {
@@ -21,46 +27,15 @@ interface WorkflowRow {
   target_url: string;
 }
 
-interface WorkflowNodeRow {
+interface ScenarioVersionRow {
   id: string;
-  type: 'trigger' | 'form_fill' | 'submit' | 'assert';
-  order_index: number;
-  config: Record<string, unknown>;
-}
-
-interface WorkflowFieldRow {
-  id: string;
-  node_id: string;
-  field_selector: string;
-  field_type: string;
-  required: boolean;
-  is_sensitive: boolean;
-  user_value: string | null;
-  ai_suggestion: string | null;
-}
-
-interface AssertionResult {
-  label: string;
-  expected: string;
-  actual: string;
-  passed: boolean;
-}
-
-interface ExecutionResultPayload {
-  status: 'pass' | 'fail' | 'error' | 'blocked' | 'needs_review';
-  duration_ms: number;
-  assertions: AssertionResult[];
-  screenshot_url: string | null;
-  error_message: string | null;
-  step_trace: Record<string, unknown>[];
-  final_url: string | null;
-  network_summary: Record<string, unknown>;
-  execution_source: 'chromium';
+  version_number: number;
+  checksum: string;
+  snapshot: Record<string, unknown>;
 }
 
 function canAccessWorkflow(workflow: WorkflowRow, userId: string, isAdmin: boolean): boolean {
-  if (isAdmin) return true;
-  return workflow.created_by === userId || workflow.org_id === userId;
+  return isAdmin || workflow.created_by === userId || workflow.org_id === userId;
 }
 
 async function getIsAdmin(serviceClient: ReturnType<typeof createServiceClient>, userId: string): Promise<boolean> {
@@ -68,170 +43,8 @@ async function getIsAdmin(serviceClient: ReturnType<typeof createServiceClient>,
     _user_id: userId,
     _role: 'admin',
   });
-
-  if (error) {
-    throw new HttpError(500, `Erreur de vérification de rôle: ${error.message}`);
-  }
-
+  if (error) throw new HttpError(500, `Erreur de verification de role: ${error.message}`);
   return Boolean(isAdmin);
-}
-
-function resolveFieldValue(field: WorkflowFieldRow): string {
-  if (field.user_value && field.user_value.trim()) return field.user_value.trim();
-  if (field.ai_suggestion && field.ai_suggestion.trim()) return field.ai_suggestion.trim();
-  if (field.is_sensitive && field.field_type === 'password') return 'Test@1234';
-  return '';
-}
-
-function maskFieldValue(field: WorkflowFieldRow, value: string): string {
-  if (!value) return '';
-  if (field.is_sensitive || ['password', 'tel', 'email'].includes(field.field_type)) return '***';
-  return value.length > 80 ? `${value.slice(0, 77)}...` : value;
-}
-
-function simulateExecution(nodes: WorkflowNodeRow[], fields: WorkflowFieldRow[]): ExecutionResultPayload {
-  const startedAt = Date.now();
-  const assertions: AssertionResult[] = [];
-  const stepTrace: Record<string, unknown>[] = [];
-
-  const orderedNodes = [...nodes].sort((a, b) => a.order_index - b.order_index);
-
-  for (const node of orderedNodes) {
-    if (node.type === 'trigger') {
-      stepTrace.push({ step: node.order_index, type: 'trigger', status: 'pass', source: 'simulated' });
-    }
-
-    if (node.type === 'form_fill') {
-      const field = fields.find((item) => item.node_id === node.id);
-      if (!field) continue;
-
-      const value = resolveFieldValue(field);
-      stepTrace.push({
-        step: node.order_index,
-        type: 'form_fill',
-        selector: field.field_selector,
-        value: maskFieldValue(field, value),
-        status: field.required && !value ? 'fail' : 'pass',
-        source: 'simulated',
-      });
-      if (field.required && !value) {
-        assertions.push({
-          label: `Champ requis: ${field.field_selector}`,
-          expected: 'Une valeur non vide',
-          actual: 'Valeur vide',
-          passed: false,
-        });
-      }
-    }
-
-    if (node.type === 'assert') {
-      const label = typeof node.config.label === 'string' && node.config.label.trim() ? node.config.label.trim() : 'Assertion';
-      const value = typeof node.config.value === 'string' ? node.config.value.trim() : '';
-      const assertType = typeof node.config.type === 'string' ? node.config.type : 'text_present';
-
-      if (!value) {
-        stepTrace.push({ step: node.order_index, type: 'assert', label, status: 'fail', source: 'simulated' });
-        assertions.push({
-          label,
-          expected: 'Valeur d assertion configurée',
-          actual: 'Valeur manquante',
-          passed: false,
-        });
-      } else {
-        stepTrace.push({ step: node.order_index, type: 'assert', label, status: 'pass', source: 'simulated' });
-        assertions.push({
-          label,
-          expected: `${assertType} = ${value}`,
-          actual: `${assertType} = ${value}`,
-          passed: true,
-        });
-      }
-    }
-  }
-
-  if (assertions.length === 0) {
-    assertions.push({
-      label: 'Validation minimale du workflow',
-      expected: 'Au moins un nœud exécutable',
-      actual: 'Exécution simulée',
-      passed: true,
-    });
-  }
-
-  const hasFailure = assertions.some((item) => !item.passed);
-  const elapsed = Date.now() - startedAt;
-  const duration = Math.max(700, elapsed + 400 + orderedNodes.length * 120);
-
-  return {
-    status: hasFailure ? 'fail' : 'pass',
-    duration_ms: duration,
-    assertions,
-    screenshot_url: null,
-    error_message: null,
-    step_trace: stepTrace,
-    final_url: null,
-    network_summary: { mode: 'simulated', requests: 0, failures: 0 },
-    execution_source: 'chromium',
-  };
-}
-
-async function executeLiveIfEnabled(workflow: WorkflowRow, nodes: WorkflowNodeRow[], fields: WorkflowFieldRow[]): Promise<ExecutionResultPayload | null> {
-  const mode = Deno.env.get('FORM_TESTER_EXECUTION_MODE') ?? 'simulated';
-  if (mode !== 'live') return null;
-
-  const executorUrl = Deno.env.get('EXECUTOR_INTERNAL_URL');
-  if (!executorUrl) return null;
-
-  const steps = nodes
-    .sort((a, b) => a.order_index - b.order_index)
-    .map((node) => {
-      if (node.type !== 'form_fill') {
-        return { type: node.type, ...node.config };
-      }
-
-      const field = fields.find((item) => item.node_id === node.id);
-      return {
-        type: 'form_fill',
-        selector: field?.field_selector ?? '',
-        value: field ? resolveFieldValue(field) : '',
-        field_type: field?.field_type ?? 'text',
-      };
-    });
-
-  const response = await fetch(`${executorUrl}/execute`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      workflow_id: workflow.id,
-      target_url: workflow.target_url,
-      steps,
-    }),
-    signal: AbortSignal.timeout(35000),
-  });
-
-  if (!response.ok) {
-    throw new Error(`Executor HTTP ${response.status}`);
-  }
-
-  const payload = (await response.json()) as Record<string, unknown>;
-
-  return {
-    status:
-      payload.status === 'pass' || payload.status === 'fail' || payload.status === 'error' || payload.status === 'blocked'
-        ? payload.status
-        : 'error',
-    duration_ms: typeof payload.duration_ms === 'number' ? payload.duration_ms : 0,
-    assertions: Array.isArray(payload.assertions) ? (payload.assertions as AssertionResult[]) : [],
-    screenshot_url: typeof payload.screenshot_url === 'string' ? payload.screenshot_url : null,
-    error_message: typeof payload.error === 'string' ? payload.error : null,
-    step_trace: Array.isArray(payload.step_trace) ? (payload.step_trace as Record<string, unknown>[]) : [],
-    final_url: typeof payload.final_url === 'string' ? payload.final_url : null,
-    network_summary:
-      payload.network_summary && typeof payload.network_summary === 'object'
-        ? (payload.network_summary as Record<string, unknown>)
-        : {},
-    execution_source: 'chromium',
-  };
 }
 
 serve(async (req) => {
@@ -243,12 +56,10 @@ serve(async (req) => {
     const serviceClient = createServiceClient();
     const userId = await getAuthUserId(req);
     const isAdmin = await getIsAdmin(serviceClient, userId);
-
     const body = (await req.json()) as ExecuteBody;
     const workflowId = body.workflow_id;
-    if (!workflowId) {
-      throw new HttpError(400, 'workflow_id requis');
-    }
+
+    if (!workflowId) throw new HttpError(400, 'workflow_id requis');
 
     const { data: workflow, error: workflowError } = await serviceClient
       .from('form_workflows')
@@ -257,104 +68,103 @@ serve(async (req) => {
       .maybeSingle();
 
     if (workflowError) throw new HttpError(500, workflowError.message);
-    if (!workflow) throw new HttpError(404, 'Workflow non trouvé');
+    if (!workflow) throw new HttpError(404, 'Workflow non trouve');
 
     const workflowRow = workflow as WorkflowRow;
     if (!canAccessWorkflow(workflowRow, userId, isAdmin)) {
-      throw new HttpError(403, 'Accès refusé');
+      throw new HttpError(403, 'Acces refuse');
+    }
+    const scenario = await getScenarioForWorkflow(serviceClient, workflowRow, body.scenario_id);
+    const executionMode = body.execution_mode ?? 'full';
+    if ((executionMode === 'step' || executionMode === 'from_step') && !body.start_node_id) {
+      throw new HttpError(400, 'start_node_id requis pour ce mode d execution');
     }
 
-    if (workflowRow.status !== 'approved') {
-      throw new HttpError(400, 'Le workflow doit être approuvé avant exécution');
+    const { data: enqueuePayload, error: enqueueError } = await serviceClient.rpc(
+      'form_test_enqueue_manual_execution',
+      {
+        p_workflow_id: workflowId,
+        p_scenario_id: scenario.id,
+        p_scenario_version_id: body.scenario_version_id ?? null,
+        p_requested_by: userId,
+        p_execution_mode: executionMode,
+        p_start_node_id: body.start_node_id ?? null,
+        p_environment: body.environment?.trim() || 'default',
+        p_audit_run_id: body.audit_run_id ?? null,
+      },
+    );
+    if (enqueueError) throw new HttpError(500, `Erreur mise en file: ${enqueueError.message}`);
+
+    const enqueue =
+      enqueuePayload && typeof enqueuePayload === 'object'
+        ? (enqueuePayload as Record<string, unknown>)
+        : {};
+    const savedResult =
+      enqueue.execution && typeof enqueue.execution === 'object'
+        ? (enqueue.execution as Record<string, unknown>)
+        : null;
+    const scenarioVersion =
+      enqueue.scenario_version && typeof enqueue.scenario_version === 'object'
+        ? (enqueue.scenario_version as unknown as ScenarioVersionRow)
+        : null;
+    const deduplicated = Boolean(enqueue.deduplicated);
+    if (!savedResult || !scenarioVersion) {
+      throw new HttpError(500, 'La mise en file n a retourne aucune execution exploitable');
     }
 
-    const [{ data: nodes, error: nodesError }, { data: fields, error: fieldsError }] = await Promise.all([
-      serviceClient.from('workflow_nodes').select('*').eq('workflow_id', workflowId).order('order_index', { ascending: true }),
-      serviceClient.from('workflow_form_fields').select('*').eq('workflow_id', workflowId),
-    ]);
+    if (!deduplicated) {
+      const { error: logError } = await serviceClient.from('workflow_logs').insert({
+        execution_id: savedResult.id,
+        level: 'info',
+        event_type: 'execution_queued',
+        message: 'Execution ajoutee a la file d attente.',
+        details_redacted: {
+          execution_mode: executionMode,
+          environment: body.environment?.trim() || 'default',
+          step_count: savedResult.progress_total,
+          scenario_version_id: scenarioVersion.id,
+          runtime_snapshot: !body.scenario_version_id,
+        },
+      });
+      if (logError) throw new HttpError(500, logError.message);
 
-    if (nodesError) throw new HttpError(500, nodesError.message);
-    if (fieldsError) throw new HttpError(500, fieldsError.message);
+      await serviceClient.from('notifications').insert({
+        user_id: workflowRow.created_by,
+        title: 'Test de formulaire mis en file',
+        message: `Le scenario ${scenarioVersion.version_number} attend un moteur d execution disponible.`,
+        type: 'info',
+        category: 'system',
+        reference_id: savedResult.id,
+        reference_type: 'form_execution',
+      });
+    }
 
-    const nodeRows = (nodes ?? []) as WorkflowNodeRow[];
-    const fieldRows = (fields ?? []) as WorkflowFieldRow[];
-
-    let executionPayload: ExecutionResultPayload;
-
-    try {
-      const livePayload = await executeLiveIfEnabled(workflowRow, nodeRows, fieldRows);
-      executionPayload = livePayload ?? simulateExecution(nodeRows, fieldRows);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Erreur d exécution';
-      executionPayload = {
-        status: 'error',
+    return toJson(
+      {
+        success: true,
+        result_id: savedResult.id,
+        execution_id: savedResult.id,
+        deduplicated,
+        execution: savedResult,
+        status: savedResult.status,
         duration_ms: 0,
         assertions: [],
         screenshot_url: null,
-        error_message: `Moteur indisponible: ${message}`,
         step_trace: [],
         final_url: null,
-        network_summary: { mode: 'unavailable', error: message },
-        execution_source: 'chromium',
-      };
-    }
-
-    const { data: savedResult, error: saveError } = await serviceClient
-      .from('workflow_results')
-      .insert({
-        workflow_id: workflowId,
-        executed_by: userId,
-        status: executionPayload.status,
-        duration_ms: executionPayload.duration_ms,
-        assertions: executionPayload.assertions,
-        screenshot_url: executionPayload.screenshot_url,
-        error_message: executionPayload.error_message,
-        step_trace: executionPayload.step_trace,
-        final_url: executionPayload.final_url,
-        network_summary: executionPayload.network_summary,
-        execution_source: executionPayload.execution_source,
-        audit_run_id: body.audit_run_id ?? null,
-      })
-      .select('*')
-      .single();
-
-    if (saveError) throw new HttpError(500, saveError.message);
-
-    const { error: updateWorkflowError } = await serviceClient
-      .from('form_workflows')
-      .update({ status: 'executed', executed_at: new Date().toISOString() })
-      .eq('id', workflowId);
-
-    if (updateWorkflowError) throw new HttpError(500, updateWorkflowError.message);
-
-    await serviceClient.from('notifications').insert({
-      user_id: workflowRow.created_by,
-      title: executionPayload.status === 'pass' ? 'Workflow reussi' : 'Workflow termine',
-      message: `Execution Form Tester terminee avec le statut ${executionPayload.status}.`,
-      type: executionPayload.status === 'pass' ? 'success' : executionPayload.status === 'fail' ? 'warning' : 'error',
-      category: 'system',
-      reference_id: workflowId,
-      reference_type: 'form_workflow',
-    });
-
-    return toJson({
-      success: executionPayload.status !== 'error',
-      result_id: savedResult.id,
-      status: executionPayload.status,
-      duration_ms: executionPayload.duration_ms,
-      assertions: executionPayload.assertions,
-      screenshot_url: executionPayload.screenshot_url,
-      step_trace: executionPayload.step_trace,
-      final_url: executionPayload.final_url,
-      network_summary: executionPayload.network_summary,
-      execution_source: executionPayload.execution_source,
-      error: executionPayload.error_message,
-    });
+        network_summary: {},
+        execution_source: savedResult.execution_source,
+        scenario_id: scenario.id,
+        scenario_version_id: scenarioVersion.id,
+        scenario_version_number: scenarioVersion.version_number,
+        scenario_checksum: scenarioVersion.checksum,
+      },
+      202,
+    );
   } catch (error) {
     if (error instanceof HttpError) {
       return toJson({ error: error.message }, error.status);
     }
-
     const message = error instanceof Error ? error.message : 'Erreur serveur';
     return toJson({ error: message }, 500);
   }
