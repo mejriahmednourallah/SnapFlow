@@ -12,6 +12,7 @@ export interface ProjectContext {
   projectId: string;
   project: ProjectInfo | null;
   loadingProject: boolean;
+  setProjectLogoUrl: (logoUrl: string | null) => void;
 }
 
 interface ProjectInfo {
@@ -74,7 +75,11 @@ const ProjectShell = () => {
     navigate(`/app/projects/${projectId}${tab.path ? '/' + tab.path : ''}`, { replace: true });
   };
 
-  const context: ProjectContext = { projectId: projectId!, project, loadingProject };
+  const setProjectLogoUrl = (logoUrl: string | null) => {
+    setProject(prev => prev ? { ...prev, logo_url: logoUrl } : prev);
+  };
+
+  const context: ProjectContext = { projectId: projectId!, project, loadingProject, setProjectLogoUrl };
 
   return (
     <div className="space-y-6 fade-in">

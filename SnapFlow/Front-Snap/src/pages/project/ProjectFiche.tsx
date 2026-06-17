@@ -26,7 +26,7 @@ interface RedmineProjectDetail {
 // ══════════════════════════════════════════════════════════════════════════════
 
 const ProjectFiche = () => {
-  const { projectId, project } = useOutletContext<ProjectContext>();
+  const { projectId, project, setProjectLogoUrl } = useOutletContext<ProjectContext>();
   const { toast } = useToast();
 
   const [showProjectCard, setShowProjectCard] = useState(true);
@@ -194,7 +194,10 @@ const ProjectFiche = () => {
                 siteUrl={resolveLogoTargetUrl()}
                 projectId={project.id}
                 currentUrl={project.logo_url}
-                onApply={url => { setLogoUrlInput(url ?? ''); }}
+                onApply={url => {
+                  setLogoUrlInput(url ?? '');
+                  setProjectLogoUrl(url || null);
+                }}
               />
             </div>
           )}

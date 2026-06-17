@@ -26,8 +26,15 @@ describe('PDF site logo contract', () => {
   it('detects page logos independently from HTML attribute order and validates image responses', () => {
     expect(detector).toContain('function attributesOf');
     expect(detector).toContain('attrs["aria-label"]');
+    expect(detector).toContain('extractSrcsetCandidates');
+    expect(detector).toContain('extractJsonLdLogos');
+    expect(detector).toContain('extractBackgroundImages');
+    expect(detector).toContain('source: "jsonld-logo"');
+    expect(detector).toContain('source: "background-logo"');
     expect(detector).toContain('isImageResponse');
     expect(detector).toContain('source: "page-logo"');
     expect(detector).toContain('source: "stored-fallback"');
+    expect(detector).toContain('candidates: publicCandidates');
+    expect(detector).toContain('detection_errors');
   });
 });
