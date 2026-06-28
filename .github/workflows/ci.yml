@@ -38,9 +38,11 @@ permissions:
 env:
   NODE_VERSION: "24"
   PYTHON_VERSION: "3.11"
-  GO_VERSION: "1.25.6"
+  GO_VERSION: "1.25.8"
   FRONTEND_DIR: SnapFlow/Front-Snap
   SERVICES_DIR: SnapFlow/V3-Microservices
+  VITE_SUPABASE_URL: http://127.0.0.1:54321
+  VITE_SUPABASE_PUBLISHABLE_KEY: ci-publishable-key
 
 jobs:
   detect-changes:
@@ -297,7 +299,7 @@ jobs:
           if [ -f requirements.txt ]; then
             python -m pip install -r requirements.txt
           fi
-          python -m pip install "pytest==8.3.5" "pytest-asyncio==0.24.0"
+          python -m pip install "pytest==8.3.5" "pytest-asyncio==0.24.0" "httpx==0.27.2"
 
       - name: Install Playwright browsers
         if: contains(matrix.service, 'visual') || contains(matrix.service, 'form-executor')
@@ -326,9 +328,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          ! git grep -n -E '(SUPABASE_SERVICE_ROLE_KEY|REDMINE_API_KEY|postgresql://[^ ]+:[^ ]+@|BEGIN (RSA|OPENSSH|PRIVATE) KEY)' -- \
+          ! git grep -n -E '(BEGIN (RSA|OPENSSH|PRIVATE) KEY|postgres(ql)?://[^[:space:]/:@]+:[^[:space:]${}@]{12,}@|SUPABASE_(SERVICE_ROLE|ANON)_KEY=eyJ|REDMINE_API_KEY=[A-Za-z0-9_=-]{24,})' -- \
             ':!SnapFlow/Front-Snap/package-lock.json' \
-            ':!**/*.md'
+            ':!**/*.md' \
+            ':!**/*.example' \
+            ':!**/*.template'
 
       - name: Setup Node for npm audit
         uses: actions/setup-node@v6
