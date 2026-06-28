@@ -1,0 +1,129 @@
+name: SnapFlow Containers
+
+on:
+  workflow_dispatch:
+    inputs:
+      image:
+        description: "Image to build and scan"
+        required: true
+        default: "all"
+        type: choice
+        options:
+          - all
+          - frontend
+          - scanner
+          - aggregator
+          - nlp-worker
+          - visual-regression
+          - form-executor
+          - browser-pool
+  schedule:
+    - cron: "43 2 * * *"
+  pull_request:
+    branches: ["**"]
+    paths:
+      - ".github/workflows/containers.yml"
+      - "SnapFlow/Front-Snap/Dockerfile"
+      - "SnapFlow/Front-Snap/package*.json"
+      - "SnapFlow/V3-Microservices/**/Dockerfile"
+      - "SnapFlow/V3-Microservices/**/requirements.txt"
+      - "SnapFlow/V3-Microservices/**/go.mod"
+      - "SnapFlow/V3-Microservices/docker-compose*.yml"
+  push:
+    branches: ["main", "master", "develop"]
+
+concurrency:
+  group: snapflow-containers-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  FAIL_ON_SEVERITY: HIGH,CRITICAL
+
+jobs:
+  detect-changes:
+    name: Detect Image Changes
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.detect.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - id: detect
+        shell: bash
+        run: |
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            base="${{ github.event.pull_request.base.sha }}"
+          else
+            base="$(git rev-parse HEAD^ 2>/dev/null || git rev-parse HEAD)"
+          fi
+          changed="$(git diff --name-only "$base" HEAD || true)"
+          selected="${{ github.event.inputs.image || 'changed' }}"
+          if [[ "${{ github.event_name }}" == "schedule" ]]; then
+            selected="all"
+          fi
+
+          entries=()
+          add() {
+            local key="$1"
+            local regex="$2"
+            local json="$3"
+            if [[ "$selected" == "all" ]] || [[ "$selected" == "$key" ]] || { [[ "$selected" == "changed" ]] && { [[ -z "$changed" ]] || echo "$changed" | grep -Eq "$regex"; }; }; then
+              entries+=("$json")
+            fi
+          }
+
+          add frontend '(^SnapFlow/Front-Snap/Dockerfile|^SnapFlow/Front-Snap/package)' '{"image":"frontend","context":"SnapFlow/Front-Snap","dockerfile":"SnapFlow/Front-Snap/Dockerfile","tag":"snapflow/v3-frontend:ci","fastapi_base":false,"heavy_base":false}'
+          add scanner '(^SnapFlow/V3-Microservices/v3-scanner-go/|^SnapFlow/V3-Microservices/docker-compose)' '{"image":"scanner","context":"SnapFlow/V3-Microservices/v3-scanner-go","dockerfile":"SnapFlow/V3-Microservices/v3-scanner-go/Dockerfile","tag":"snapflow/v3-scanner-go:ci","fastapi_base":false,"heavy_base":false}'
+          add aggregator '(^SnapFlow/V3-Microservices/(v3-aggregator|docker/python-base)/|^SnapFlow/V3-Microservices/docker-compose)' '{"image":"aggregator","context":"SnapFlow/V3-Microservices/v3-aggregator","dockerfile":"SnapFlow/V3-Microservices/v3-aggregator/Dockerfile","tag":"snapflow/v3-aggregator:ci","fastapi_base":true,"heavy_base":false}'
+          add nlp-worker '(^SnapFlow/V3-Microservices/(v3-nlp-worker|docker/python-base)/|^SnapFlow/V3-Microservices/docker-compose)' '{"image":"nlp-worker","context":"SnapFlow/V3-Microservices/v3-nlp-worker","dockerfile":"SnapFlow/V3-Microservices/v3-nlp-worker/Dockerfile","tag":"snapflow/v3-nlp-worker:ci","fastapi_base":true,"heavy_base":true}'
+          add visual-regression '(^SnapFlow/V3-Microservices/(v3-visual-regression|docker/python-base)/|^SnapFlow/V3-Microservices/docker-compose)' '{"image":"visual-regression","context":"SnapFlow/V3-Microservices/v3-visual-regression","dockerfile":"SnapFlow/V3-Microservices/v3-visual-regression/Dockerfile","tag":"snapflow/v3-visual-regression:ci","fastapi_base":true,"heavy_base":true}'
+          add form-executor '(^SnapFlow/V3-Microservices/(v3-form-executor|docker/python-base)/|^SnapFlow/V3-Microservices/docker-compose)' '{"image":"form-executor","context":"SnapFlow/V3-Microservices/v3-form-executor","dockerfile":"SnapFlow/V3-Microservices/v3-form-executor/Dockerfile","tag":"snapflow/v3-form-executor:ci","fastapi_base":true,"heavy_base":true}'
+          add browser-pool '(^SnapFlow/V3-Microservices/(v3-browser-pool|docker/python-base)/|^SnapFlow/V3-Microservices/docker-compose)' '{"image":"browser-pool","context":"SnapFlow/V3-Microservices/v3-browser-pool","dockerfile":"SnapFlow/V3-Microservices/v3-browser-pool/Dockerfile","tag":"snapflow/v3-browser-pool:ci","fastapi_base":true,"heavy_base":true}'
+
+          if [[ ${#entries[@]} -eq 0 ]]; then
+            echo 'matrix={"include":[]}' >> "$GITHUB_OUTPUT"
+          else
+            joined="$(IFS=,; echo "${entries[*]}")"
+            echo "matrix={\"include\":[${joined}]}" >> "$GITHUB_OUTPUT"
+          fi
+
+  build-and-scan:
+    name: Build + Trivy (${{ matrix.image }})
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    if: needs.detect-changes.outputs.matrix != '{"include":[]}'
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.detect-changes.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build FastAPI base image
+        if: matrix.fastapi_base
+        run: docker build --progress=plain -f SnapFlow/V3-Microservices/docker/python-base/Dockerfile.fastapi -t snapflow/v3-python-fastapi-base:latest SnapFlow/V3-Microservices/docker/python-base
+
+      - name: Build heavy Python base image
+        if: matrix.heavy_base
+        run: docker build --progress=plain -f SnapFlow/V3-Microservices/docker/python-base/Dockerfile.heavy -t snapflow/v3-python-heavy-base:latest SnapFlow/V3-Microservices/docker/python-base
+
+      - name: Build image
+        run: docker build --progress=plain -f "${{ matrix.dockerfile }}" -t "${{ matrix.tag }}" "${{ matrix.context }}"
+
+      - name: Trivy image scan
+        run: |
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v "$HOME/.cache/trivy:/root/.cache" \
+            aquasec/trivy:latest image \
+            --severity "$FAIL_ON_SEVERITY" \
+            --exit-code 1 \
+            --ignore-unfixed \
+            "${{ matrix.tag }}"

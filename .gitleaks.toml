@@ -1,0 +1,8 @@
+title = "SnapFlow Gitleaks"
+
+[allowlist]
+description = "Temporary allowlist for tracked deployment placeholders until they are converted to templates."
+paths = [
+  '''^SnapFlow/V3-Microservices/\.env\.preprod$''',
+  '''^SnapFlow/k8s/01-infra/postgres/secret\.yaml$''',
+]

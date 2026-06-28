@@ -139,6 +139,10 @@ jobs:
       - name: TypeScript contract
         run: npx tsc --noEmit
 
+      - name: Lint frontend
+        continue-on-error: true
+        run: npm run lint
+
       - name: Build frontend
         if: needs.detect-changes.outputs.run_build == 'true'
         run: npm run build
@@ -332,7 +336,9 @@ jobs:
             ':!SnapFlow/Front-Snap/package-lock.json' \
             ':!**/*.md' \
             ':!**/*.example' \
-            ':!**/*.template'
+            ':!**/*.template' \
+            ':!SnapFlow/V3-Microservices/.env.preprod' \
+            ':!SnapFlow/k8s/01-infra/postgres/secret.yaml'
 
       - name: Setup Node for npm audit
         uses: actions/setup-node@v6

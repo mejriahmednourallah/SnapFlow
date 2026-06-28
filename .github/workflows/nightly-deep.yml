@@ -1,0 +1,178 @@
+name: SnapFlow Nightly Deep
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_dast:
+        description: "Run warning-only OWASP ZAP baseline against frontend preview"
+        required: true
+        default: false
+        type: boolean
+  schedule:
+    - cron: "31 3 * * *"
+
+concurrency:
+  group: snapflow-nightly-deep-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: "24"
+  PYTHON_VERSION: "3.11"
+  GO_VERSION: "1.25.8"
+  FRONTEND_DIR: SnapFlow/Front-Snap
+  SERVICES_DIR: SnapFlow/V3-Microservices
+  VITE_SUPABASE_URL: ${{ secrets.SNAPFLOW_SUPABASE_URL }}
+  VITE_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.SNAPFLOW_SUPABASE_PUBLISHABLE_KEY }}
+
+jobs:
+  full-frontend:
+    name: Full Frontend Suite
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ env.FRONTEND_DIR }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: SnapFlow/Front-Snap/package-lock.json
+      - run: npm ci
+      - run: npx tsc --noEmit
+      - name: Lint frontend
+        continue-on-error: true
+        run: npm run lint
+      - run: npm test
+      - run: npm run build
+
+  live-project-sync:
+    name: Live Project Sync Integration
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ env.FRONTEND_DIR }}
+    env:
+      LIVE_PROJECT_SYNC: "1"
+      SNAPFLOW_TEST_USER_EMAIL: ${{ secrets.SNAPFLOW_TEST_USER_EMAIL }}
+      SNAPFLOW_TEST_USER_PASSWORD: ${{ secrets.SNAPFLOW_TEST_USER_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: SnapFlow/Front-Snap/package-lock.json
+      - run: npm ci
+      - name: Require live test secrets
+        shell: bash
+        run: |
+          test -n "$VITE_SUPABASE_URL"
+          test -n "$VITE_SUPABASE_PUBLISHABLE_KEY"
+          test -n "$SNAPFLOW_TEST_USER_EMAIL"
+          test -n "$SNAPFLOW_TEST_USER_PASSWORD"
+      - run: npm test -- projectSync.live
+
+  all-containers:
+    name: Full Container Scan (${{ matrix.image }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: frontend
+            context: SnapFlow/Front-Snap
+            dockerfile: SnapFlow/Front-Snap/Dockerfile
+            tag: snapflow/v3-frontend:nightly
+            fastapi_base: false
+            heavy_base: false
+          - image: scanner
+            context: SnapFlow/V3-Microservices/v3-scanner-go
+            dockerfile: SnapFlow/V3-Microservices/v3-scanner-go/Dockerfile
+            tag: snapflow/v3-scanner-go:nightly
+            fastapi_base: false
+            heavy_base: false
+          - image: aggregator
+            context: SnapFlow/V3-Microservices/v3-aggregator
+            dockerfile: SnapFlow/V3-Microservices/v3-aggregator/Dockerfile
+            tag: snapflow/v3-aggregator:nightly
+            fastapi_base: true
+            heavy_base: false
+          - image: nlp-worker
+            context: SnapFlow/V3-Microservices/v3-nlp-worker
+            dockerfile: SnapFlow/V3-Microservices/v3-nlp-worker/Dockerfile
+            tag: snapflow/v3-nlp-worker:nightly
+            fastapi_base: true
+            heavy_base: true
+          - image: visual-regression
+            context: SnapFlow/V3-Microservices/v3-visual-regression
+            dockerfile: SnapFlow/V3-Microservices/v3-visual-regression/Dockerfile
+            tag: snapflow/v3-visual-regression:nightly
+            fastapi_base: true
+            heavy_base: true
+          - image: form-executor
+            context: SnapFlow/V3-Microservices/v3-form-executor
+            dockerfile: SnapFlow/V3-Microservices/v3-form-executor/Dockerfile
+            tag: snapflow/v3-form-executor:nightly
+            fastapi_base: true
+            heavy_base: true
+          - image: browser-pool
+            context: SnapFlow/V3-Microservices/v3-browser-pool
+            dockerfile: SnapFlow/V3-Microservices/v3-browser-pool/Dockerfile
+            tag: snapflow/v3-browser-pool:nightly
+            fastapi_base: true
+            heavy_base: true
+    steps:
+      - uses: actions/checkout@v6
+      - name: Build FastAPI base image
+        if: matrix.fastapi_base
+        run: docker build --progress=plain -f SnapFlow/V3-Microservices/docker/python-base/Dockerfile.fastapi -t snapflow/v3-python-fastapi-base:latest SnapFlow/V3-Microservices/docker/python-base
+      - name: Build heavy Python base image
+        if: matrix.heavy_base
+        run: docker build --progress=plain -f SnapFlow/V3-Microservices/docker/python-base/Dockerfile.heavy -t snapflow/v3-python-heavy-base:latest SnapFlow/V3-Microservices/docker/python-base
+      - name: Build image
+        run: docker build --progress=plain -f "${{ matrix.dockerfile }}" -t "${{ matrix.tag }}" "${{ matrix.context }}"
+      - name: Trivy image scan
+        run: |
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$HOME/.cache/trivy:/root/.cache" aquasec/trivy:latest image \
+            --severity HIGH,CRITICAL \
+            --exit-code 1 \
+            --ignore-unfixed \
+            "${{ matrix.tag }}"
+
+  dast-frontend:
+    name: DAST Frontend Baseline
+    runs-on: ubuntu-latest
+    needs: full-frontend
+    if: github.event.inputs.run_dast == 'true'
+    continue-on-error: true
+    defaults:
+      run:
+        working-directory: ${{ env.FRONTEND_DIR }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: SnapFlow/Front-Snap/package-lock.json
+      - run: npm ci
+      - run: npm run build
+      - name: Start preview
+        run: nohup npm run preview -- --host 0.0.0.0 --port 4173 > /tmp/snapflow-preview.log 2>&1 &
+      - name: Run ZAP baseline
+        working-directory: ${{ github.workspace }}
+        run: |
+          docker run --rm --network host -v "${{ github.workspace }}:/zap/wrk" ghcr.io/zaproxy/zaproxy:stable zap-baseline.py \
+            -t http://127.0.0.1:4173 \
+            -r zap-frontend-report.html \
+            -J zap-frontend-report.json || true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: zap-frontend-report
+          path: |
+            zap-frontend-report.html
+            zap-frontend-report.json

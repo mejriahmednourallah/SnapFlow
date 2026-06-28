@@ -1,0 +1,172 @@
+name: SnapFlow Security
+
+on:
+  workflow_dispatch:
+    inputs:
+      fail_on_severity:
+        description: "Comma-separated severities that should fail security scans"
+        required: true
+        default: "HIGH,CRITICAL"
+        type: string
+  schedule:
+    - cron: "17 2 * * *"
+  pull_request:
+    branches: ["**"]
+    paths:
+      - ".github/workflows/**"
+      - ".gitleaks.toml"
+      - "SnapFlow/Front-Snap/package*.json"
+      - "SnapFlow/V3-Microservices/**/requirements.txt"
+      - "SnapFlow/V3-Microservices/**/go.mod"
+      - "SnapFlow/V3-Microservices/**/go.sum"
+      - "SnapFlow/**/*.ts"
+      - "SnapFlow/**/*.tsx"
+      - "SnapFlow/**/*.py"
+      - "SnapFlow/**/*.go"
+  push:
+    branches: ["main", "master", "develop"]
+
+concurrency:
+  group: snapflow-security-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  security-events: write
+
+env:
+  FRONTEND_DIR: SnapFlow/Front-Snap
+  SERVICES_DIR: SnapFlow/V3-Microservices
+  NODE_VERSION: "24"
+  PYTHON_VERSION: "3.11"
+  GO_VERSION: "1.25.8"
+  FAIL_ON_SEVERITY: ${{ github.event.inputs.fail_on_severity || 'HIGH,CRITICAL' }}
+
+jobs:
+  gitleaks:
+    name: Secrets - Gitleaks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Run Gitleaks
+        run: |
+          docker run --rm \
+            -v "${{ github.workspace }}:/repo" \
+            zricethezav/gitleaks:latest detect \
+            --source /repo \
+            --config /repo/.gitleaks.toml \
+            --redact \
+            --exit-code 1
+
+  codeql:
+    name: CodeQL (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - language: javascript-typescript
+          - language: python
+          - language: go
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v4
+
+      - name: Analyze
+        uses: github/codeql-action/analyze@v4
+
+  dependency-audit:
+    name: Dependency Audit (${{ matrix.ecosystem }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - ecosystem: frontend-npm
+            path: SnapFlow/Front-Snap
+            command: npm audit --audit-level=high
+          - ecosystem: aggregator-pip
+            path: SnapFlow/V3-Microservices/v3-aggregator
+            command: python -m pip_audit -r requirements.txt --severity high
+          - ecosystem: nlp-worker-pip
+            path: SnapFlow/V3-Microservices/v3-nlp-worker
+            command: python -m pip_audit -r requirements.txt --severity high
+          - ecosystem: visual-regression-pip
+            path: SnapFlow/V3-Microservices/v3-visual-regression
+            command: python -m pip_audit -r requirements.txt --severity high
+          - ecosystem: form-executor-pip
+            path: SnapFlow/V3-Microservices/v3-form-executor
+            command: python -m pip_audit -r requirements.txt --severity high
+          - ecosystem: scanner-go
+            path: SnapFlow/V3-Microservices/v3-scanner-go
+            command: govulncheck ./...
+          - ecosystem: cli-go
+            path: SnapFlow/V3-Microservices/v3-cli
+            command: govulncheck ./...
+    defaults:
+      run:
+        working-directory: ${{ matrix.path }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup Node
+        if: contains(matrix.ecosystem, 'npm')
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: SnapFlow/Front-Snap/package-lock.json
+
+      - name: Setup Python
+        if: contains(matrix.ecosystem, 'pip')
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Setup Go
+        if: contains(matrix.ecosystem, 'go')
+        uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: ${{ matrix.path }}/go.sum
+
+      - name: Install audit tooling
+        run: |
+          if [[ "${{ matrix.ecosystem }}" == *npm ]]; then
+            npm ci
+          elif [[ "${{ matrix.ecosystem }}" == *pip ]]; then
+            python -m pip install --upgrade pip pip-audit
+          elif [[ "${{ matrix.ecosystem }}" == *go ]]; then
+            go install golang.org/x/vuln/cmd/govulncheck@latest
+          fi
+
+      - name: Run dependency audit
+        run: ${{ matrix.command }}
+
+  trivy-filesystem:
+    name: Trivy Filesystem
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Run Trivy filesystem scan
+        run: |
+          docker run --rm \
+            -v "${{ github.workspace }}:/repo" \
+            -v "$HOME/.cache/trivy:/root/.cache" \
+            aquasec/trivy:latest fs \
+            --severity "$FAIL_ON_SEVERITY" \
+            --exit-code 1 \
+            --ignore-unfixed \
+            --scanners vuln,secret,misconfig \
+            /repo

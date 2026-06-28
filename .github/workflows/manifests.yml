@@ -1,0 +1,67 @@
+name: SnapFlow Manifests
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "9 3 * * *"
+  pull_request:
+    branches: ["**"]
+    paths:
+      - ".github/workflows/manifests.yml"
+      - "SnapFlow/k8s/**"
+      - "SnapFlow/V3-Microservices/docker-compose*.yml"
+      - "SnapFlow/**/*.sh"
+      - "SnapFlow/**/*.ps1"
+  push:
+    branches: ["main", "master", "develop"]
+
+concurrency:
+  group: snapflow-manifests-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate Manifests And Scripts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Kubernetes schema validation
+        run: |
+          docker run --rm -v "${{ github.workspace }}:/repo" ghcr.io/yannh/kubeconform:latest \
+            -strict \
+            -summary \
+            -ignore-missing-schemas \
+            /repo/SnapFlow/k8s
+
+      - name: Trivy config scan
+        run: |
+          docker run --rm -v "${{ github.workspace }}:/repo" -v "$HOME/.cache/trivy:/root/.cache" aquasec/trivy:latest config \
+            --severity HIGH,CRITICAL \
+            --exit-code 1 \
+            /repo/SnapFlow/k8s /repo/SnapFlow/V3-Microservices
+
+      - name: Bash syntax check
+        shell: bash
+        run: |
+          set -euo pipefail
+          while IFS= read -r script; do
+            bash -n "$script"
+          done < <(find SnapFlow -name '*.sh' -not -path '*/node_modules/*')
+
+      - name: PowerShell syntax check
+        shell: pwsh
+        run: |
+          Get-ChildItem -Path SnapFlow -Recurse -Filter *.ps1 |
+            Where-Object { $_.FullName -notmatch 'node_modules' } |
+            ForEach-Object {
+              $errors = $null
+              [System.Management.Automation.Language.Parser]::ParseFile($_.FullName, [ref]$null, [ref]$errors) | Out-Null
+              if ($errors.Count -gt 0) {
+                $errors | ForEach-Object { Write-Error $_ }
+                exit 1
+              }
+            }
