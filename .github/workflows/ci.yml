@@ -256,7 +256,7 @@ jobs:
 
   python-tests:
     name: Stage 4 - Python Tests (${{ matrix.service }})
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     needs: detect-changes
     if: >
       needs.detect-changes.outputs.scope == 'full' ||
@@ -297,6 +297,7 @@ jobs:
           if [ -f requirements.txt ]; then
             python -m pip install -r requirements.txt
           fi
+          python -m pip install "pytest==8.3.5" "pytest-asyncio==0.24.0"
 
       - name: Install Playwright browsers
         if: contains(matrix.service, 'visual') || contains(matrix.service, 'form-executor')
