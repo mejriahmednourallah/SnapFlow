@@ -20,6 +20,8 @@ interface ProjectInfo {
   site_name: string;
   url: string;
   redmine_url?: string | null;
+  client_id?: string | null;
+  client_name?: string | null;
   logo_url?: string | null;
 }
 
@@ -63,9 +65,26 @@ const ProjectShell = () => {
   // Fetch project
   useEffect(() => {
     if (!projectId) return;
-    supabase.from('projects').select('*').eq('id', projectId).single()
-      .then(({ data }) => { setProject(data || null); })
-      .finally(() => setLoadingProject(false));
+    setLoadingProject(true);
+
+    const loadProject = async () => {
+      const { data } = await supabase.from('projects').select('*').eq('id', projectId).single();
+      if (!data) {
+        setProject(null);
+        return;
+      }
+
+      let clientName: string | null = null;
+      const clientId = (data as any).client_id as string | null | undefined;
+      if (clientId) {
+        const { data: client } = await supabase.from('clients').select('name').eq('id', clientId).maybeSingle();
+        clientName = client?.name ?? null;
+      }
+
+      setProject({ ...(data as ProjectInfo), client_name: clientName });
+    };
+
+    loadProject().finally(() => setLoadingProject(false));
   }, [projectId]);
 
   // Navigate to correct sub-route on tab change

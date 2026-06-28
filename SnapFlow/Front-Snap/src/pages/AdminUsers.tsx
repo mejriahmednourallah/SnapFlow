@@ -9,6 +9,7 @@ import { useToast } from '@/hooks/use-toast';
 import { createUser, updateRole, deleteUser, type UserRole } from '@/services/authService';
 import { fetchRedmineUsers, importRedmineUser, syncRedmineHomepages, type RedmineUser } from '@/services/redmineService';
 import { getProfileDisplayName, isSyntheticRedmineEmail } from '@/lib/userDisplay';
+import { ROLE_OPTIONS, roleLabel } from '@/lib/roleLabels';
 
 interface Profile {
   id: string;
@@ -24,12 +25,6 @@ interface UserRoleRow {
   role: string;
 }
 
-const ROLE_OPTIONS: Array<{ value: UserRole; label: string }> = [
-  { value: 'charge_de_projet', label: 'Chargé de projet' },
-  { value: 'testeur', label: 'Testeur' },
-  { value: 'rapporteur', label: 'Rapporteur' },
-  { value: 'admin', label: 'Admin' },
-];
 
 const AdminUsers = () => {
   const { user, isAdmin } = useAuth();
@@ -138,7 +133,7 @@ const AdminUsers = () => {
     setCreating(true);
     try {
       await createUser({ email: newEmail, password: newPassword, full_name: newName, role: newRole });
-      toast({ title: 'Utilisateur créé', description: `${newEmail} a été ajouté avec le rôle ${newRole}.` });
+      toast({ title: 'Utilisateur créé', description: `${newEmail} a été ajouté avec le rôle ${roleLabel(newRole)}.` });
       setShowNewUser(false);
       setNewEmail(''); setNewPassword(''); setNewName('');
       await fetchData();

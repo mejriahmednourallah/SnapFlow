@@ -23,12 +23,6 @@ export interface Insight {
   text: string;
 }
 
-export interface RadarAxisData {
-  axis: string;
-  value: number;
-  detail: string;
-}
-
 export interface RedmineIssue {
   id: number;
   subject: string;
@@ -99,8 +93,6 @@ export interface PdfData {
   timelineData: { week: string; count: number }[];
   trackerData: { name: string; count: number }[];
   priorityData: { name: string; count: number; color: string }[];
-  radarData: RadarAxisData[];
-
   // Raw issues for tables
   filteredIssues: RedmineIssue[];
 

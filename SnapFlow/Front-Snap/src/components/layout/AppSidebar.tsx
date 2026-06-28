@@ -1,5 +1,5 @@
 import {
-  LayoutDashboard, FolderOpen, FileBarChart, CalendarClock,
+  LayoutDashboard, FolderOpen, FileBarChart, CalendarClock, Building2,
   Bell, Bot, Workflow, Users, Settings,
 } from 'lucide-react';
 import { NavLink } from '@/components/NavLink';
@@ -32,7 +32,9 @@ const mainNav = [
 ];
 
 const adminNav = [
+  { title: 'Clients', url: '/app/clients', icon: Building2 },
   { title: 'Utilisateurs', url: '/app/users', icon: Users },
+  { title: 'Parametres', url: '/app/settings', icon: Settings },
 ];
 
 export function AppSidebar() {

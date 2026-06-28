@@ -60,10 +60,6 @@ function pct(count: number, total: number) {
   return Math.round((count / total) * 100);
 }
 
-function clamp(value: number) {
-  return Math.max(0, Math.min(100, Math.round(value)));
-}
-
 function short(value: string, max = 84) {
   const text = clean(value);
   return text.length > max ? `${text.slice(0, max - 1)}...` : text;
@@ -123,39 +119,33 @@ function paginate<T>(items: T[], size = TABLE_PAGE_SIZE): T[][] {
 }
 
 function buildData(issues: RedmineIssue[], totalCount: number) {
-  const total = issues.length;
   const meetings = issues.filter(issue => isMeeting(issue.tracker.name));
-  const cancelledTickets = issues.filter(issue => isCancelled(issue.status.name));
-  const closedTickets = issues.filter(issue => isClosed(issue.status.name));
-  const openTickets = issues.filter(issue => !isClosed(issue.status.name) && !isCancelled(issue.status.name));
-  const blockedTickets = issues.filter(issue => isBlocked(issue.status.name));
-  const testingTickets = issues.filter(issue => isTesting(issue.status.name) && !isClosed(issue.status.name));
-  const acknowledgedTickets = issues.filter(issue =>
+  const treatmentIssues = issues.filter(issue => !isMeeting(issue.tracker.name));
+  const total = treatmentIssues.length;
+
+  const cancelledTickets = treatmentIssues.filter(issue => isCancelled(issue.status.name));
+  const closedTickets = treatmentIssues.filter(issue => isClosed(issue.status.name));
+  const openTickets = treatmentIssues.filter(issue => !isClosed(issue.status.name) && !isCancelled(issue.status.name));
+  const blockedTickets = treatmentIssues.filter(issue => isBlocked(issue.status.name));
+  const testingTickets = treatmentIssues.filter(issue => isTesting(issue.status.name) && !isClosed(issue.status.name));
+  const acknowledgedTickets = treatmentIssues.filter(issue =>
     isAcknowledged(issue.status.name) &&
     !isClosed(issue.status.name) &&
     !isBlocked(issue.status.name) &&
     !isTesting(issue.status.name)
   );
-  const activeTickets = issues.filter(issue =>
+  const activeTickets = treatmentIssues.filter(issue =>
     isInProgress(issue.status.name) &&
     !isClosed(issue.status.name) &&
     !isBlocked(issue.status.name) &&
     !isTesting(issue.status.name)
   );
-  const criticalIssues = issues.filter(issue => isCritical(issue.priority.name));
-  const pendingValidation = issues.filter(issue => isResolvedOnly(issue.status.name) && differenceInDays(new Date(), new Date(issue.updated_on)) > 2);
+  const criticalIssues = treatmentIssues.filter(issue => isCritical(issue.priority.name));
+  const pendingValidation = treatmentIssues.filter(issue => isResolvedOnly(issue.status.name) && differenceInDays(new Date(), new Date(issue.updated_on)) > 2);
   const avgClosed = avgResolutionDays(closedTickets);
   const avgOpen = avgAgeDays(openTickets);
-  const health = clamp(
-    100 -
-    pct(blockedTickets.length, Math.max(total, 1)) * 0.5 -
-    pct(criticalIssues.length, Math.max(total, 1)) * 0.35 -
-    Math.min(avgOpen || 0, 60) * 0.35
-  );
-  const healthStatus: SeverityStatus = health >= 75 ? 'success' : health >= 50 ? 'warning' : 'danger';
-
   const kpis: ActivityKpi[] = [
-    { key: 'total', label: 'Tickets', value: String(totalCount || total), caption: totalCount !== total ? `${total} chargés dans le PDF` : 'Périmètre complet', status: 'success' },
+    { key: 'total', label: 'Tickets', value: String(totalCount !== undefined && totalCount !== total ? totalCount : total), caption: totalCount !== undefined && totalCount !== total ? `${total} traitement (hors réunions)` : 'Périmètre traitement (hors réunions)', status: 'success' },
     { key: 'meetings', label: 'Réunions', value: String(meetings.length), caption: "Points d'échange", status: meetings.length ? 'success' : 'warning' },
     { key: 'open', label: 'Ouverts', value: String(openTickets.length), caption: `${pct(openTickets.length, total)} % du volume`, status: openTickets.length ? 'warning' : 'success' },
     { key: 'resolved', label: 'Clôturés', value: String(closedTickets.length), caption: `${pct(closedTickets.length, total)} % livrés`, status: 'success' },
@@ -165,7 +155,7 @@ function buildData(issues: RedmineIssue[], totalCount: number) {
   ];
 
   const insights = [
-    blockedTickets.length > 0 ? `${blockedTickets.length} ticket(s) bloques demandent une decision ou une action de deblocage.` : 'Aucun blocage majeur detecte sur la periode.',
+    blockedTickets.length > 0 ? `${blockedTickets.length} ticket(s) de traitement bloques demandent une decision ou une action de deblocage.` : 'Aucun blocage majeur detecte sur la periode.',
     pendingValidation.length > 0 ? `${pendingValidation.length} ticket(s) resolus attendent une validation client prolongee.` : 'Aucun ticket resolu ne semble attendre une validation prolongee.',
     criticalIssues.length > 0 ? `${criticalIssues.length} ticket(s) critiques doivent rester sous surveillance projet.` : 'La selection ne contient pas de ticket critique.',
   ];
@@ -174,6 +164,7 @@ function buildData(issues: RedmineIssue[], totalCount: number) {
     total,
     totalCount,
     meetings,
+    treatmentIssues,
     openTickets,
     closedTickets,
     cancelledTickets,
@@ -185,13 +176,11 @@ function buildData(issues: RedmineIssue[], totalCount: number) {
     pendingValidation,
     avgClosed,
     avgOpen,
-    health,
-    healthStatus,
     kpis,
     insights,
-    statusRows: colorize(countBy(issues, issue => issue.status.name)),
-    trackerRows: colorize(countBy(issues, issue => issue.tracker.name)),
-    priorityRows: colorize(countBy(issues, issue => issue.priority.name)),
+    statusRows: colorize(countBy(treatmentIssues, issue => issue.status.name)),
+    trackerRows: colorize(countBy(treatmentIssues, issue => issue.tracker.name)),
+    priorityRows: colorize(countBy(treatmentIssues, issue => issue.priority.name)),
     closedByType: colorize(countBy(closedTickets, issue => issue.tracker.name)),
     openByType: colorize(countBy(openTickets, issue => issue.tracker.name)),
     cancelledByType: colorize(countBy(cancelledTickets, issue => issue.tracker.name)),
@@ -673,7 +662,7 @@ function CoverPage({ project, filters, options, data, theme, accentColor }: { pr
         ))}
       </View>
       <View style={{ position: 'absolute', bottom: 28, left: 34, right: 34, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-        <Text style={{ color: 'rgba(255,255,255,0.7)', fontSize: 8 }}>Généré le {format(new Date(), 'dd MMMM yyyy à HH:mm', { locale: fr })}</Text>
+        <Text style={{ color: 'rgba(255,255,255,0.7)', fontSize: 8 }}>Généré le {format(new Date(), 'dd/MM/yyyy HH:mm', { locale: fr })}</Text>
         <Image src={snapflowLogo} style={{ width: 86, height: 26, objectFit: 'contain' }} />
       </View>
     </Page>
@@ -828,7 +817,6 @@ export function ActivityDocument({ project, issues, totalCount, filters, options
             <MetricStrip kpis={data.kpis.slice(3)} theme={theme} accentColor={accentColor} />
           </View>
           <View style={{ flex: 0.78, gap: 10 }}>
-            <BigNumberPanel value={`${data.health}`} label="Synthèse activité" caption="Lecture consolidée des tickets ouverts, critiques et bloqués." theme={theme} status={data.healthStatus} accentColor={accentColor} />
             {data.insights.map(insight => <SectionNote key={insight} theme={theme} accentColor={accentColor}>{insight}</SectionNote>)}
           </View>
         </View>

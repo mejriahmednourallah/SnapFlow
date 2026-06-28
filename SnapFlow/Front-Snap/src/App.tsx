@@ -12,7 +12,9 @@ import NotFound from "./pages/NotFound";
 import AppLayout from "./components/layout/AppLayout";
 import Overview from "./pages/Overview";
 import AdminProjects from "./pages/AdminProjects";
+import AdminClients from "./pages/AdminClients";
 import AdminUsers from "./pages/AdminUsers";
+import AdminSettings from "./pages/AdminSettings";
 import ReportSchedules from "./pages/ReportSchedules";
 import ReportsPage from "./pages/ReportsPage";
 import NotificationsPage from "./pages/NotificationsPage";
@@ -45,6 +47,7 @@ const App = () => (
               {/* New unified layout */}
               <Route path="/app" element={<AppLayout />}>
                 <Route index element={<Overview />} />
+                <Route path="clients" element={<AdminClients />} />
                 <Route path="projects" element={<AdminProjects />} />
                 <Route path="projects/:id" element={<ProjectShell />}>
                   <Route index element={<ProjectFiche />} />
@@ -61,13 +64,16 @@ const App = () => (
                 <Route path="workflows/form-tester/:id/plan" element={<FormTesterCampaignPlanPage />} />
                 <Route path="workflows/form-tester/:id/results" element={<FormTesterResultsPage />} />
                 <Route path="users" element={<AdminUsers />} />
+                <Route path="settings" element={<AdminSettings />} />
               </Route>
 
               {/* Legacy routes - redirect to new paths */}
               <Route path="/dashboard" element={<Navigate to="/app" replace />} />
               <Route path="/admin" element={<Navigate to="/app" replace />} />
+              <Route path="/admin/clients" element={<Navigate to="/app/clients" replace />} />
               <Route path="/admin/projects" element={<Navigate to="/app/projects" replace />} />
               <Route path="/admin/users" element={<Navigate to="/app/users" replace />} />
+              <Route path="/admin/settings" element={<Navigate to="/app/settings" replace />} />
               <Route path="/admin/schedules" element={<Navigate to="/app/schedules" replace />} />
               <Route path="/admin/projects/:id" element={<Navigate to="/app/projects/:id" replace />} />
               <Route path="/schedules" element={<Navigate to="/app/schedules" replace />} />

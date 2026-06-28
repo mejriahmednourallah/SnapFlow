@@ -9,6 +9,7 @@ import { EvidenceDetailsDialog } from '@/components/audit/EvidenceDetailsDialog'
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
+import { formatDate } from '@/lib/dateFormat';
 import {
   Dialog,
   DialogContent,
@@ -306,7 +307,7 @@ export function TabDetails({ audit, selectedAxisId, isEditMode = false, onUpdate
                           <div key={i} className="flex items-center justify-between p-2 rounded-lg bg-muted/20">
                             <div>
                               <p className="text-sm font-medium">{n.title}</p>
-                              <p className="text-xs text-muted-foreground">{new Date(n.date).toLocaleDateString('fr-FR')}</p>
+                              <p className="text-xs text-muted-foreground">{formatDate(n.date)}</p>
                             </div>
                             <a href={n.url} target="_blank" rel="noopener noreferrer" className="text-primary"><ExternalLink className="w-3.5 h-3.5" /></a>
                           </div>

@@ -947,6 +947,35 @@ function privacyTitleForFinding(finding: AuditFinding): string | undefined {
   return undefined;
 }
 
+function rgpdBusinessIssue(finding: AuditFinding): string {
+  const source = normalizeForComparison(`${finding.id} ${finding.sourceKpi ?? ''} ${finding.title}`);
+  if (source.includes('cookie') || source.includes('consent')) {
+    return 'Les visiteurs ne disposent pas d un choix clair avant le depot de cookies ou traceurs.';
+  }
+  if (source.includes('privacy_policy') || source.includes('policy_score') || source.includes('privacy_score')) {
+    return 'La page qui explique l utilisation des donnees personnelles est absente, difficile a trouver ou incomplete.';
+  }
+  if (source.includes('retention')) {
+    return 'La duree de conservation des donnees n est pas indiquee clairement aux visiteurs.';
+  }
+  if (source.includes('minimization')) {
+    return 'Le site peut demander plus de donnees que necessaire pour le service rendu.';
+  }
+  if (source.includes('legal_notice') || source.includes('mentions')) {
+    return 'Les informations legales permettant d identifier le responsable du site sont incompletes.';
+  }
+  if (source.includes('user_rights') || source.includes('rights_coverage')) {
+    return 'Les visiteurs ne voient pas clairement comment exercer leurs droits sur leurs donnees.';
+  }
+  if (source.includes('declared_purpose') || source.includes('purpose')) {
+    return 'La raison de collecte des donnees n est pas expliquee assez clairement.';
+  }
+  if (source.includes('tracker')) {
+    return 'Des traceurs semblent actifs avant que le visiteur ait donne son accord.';
+  }
+  return 'Une information attendue sur la protection des donnees est absente ou incomplete.';
+}
+
 function cleanFindingTitle(finding: AuditFinding): string {
   if (isServerVersionFinding(finding)) return 'Version serveur';
   if (isProgrammingLanguageFinding(finding)) return 'Version du langage de programmation';
@@ -995,7 +1024,7 @@ function fallbackImpactByFamily(finding: AuditFinding): string {
     case 'ai':
       return 'Le contenu peut etre moins facilement compris, extrait ou cite par les moteurs generatifs.';
     case 'rgpd':
-      return 'Les visiteurs peuvent manquer d informations claires sur l utilisation de leurs donnees.';
+      return 'Le visiteur peut ne pas comprendre quelles donnees sont collectees, pourquoi, ni comment agir.';
     case 'content':
       return 'Le message peut etre moins clair pour les visiteurs et moins convaincant pour passer a l action.';
     case 'ux':
@@ -1022,7 +1051,7 @@ function fallbackRiskByFamily(finding: AuditFinding): string {
     case 'ai':
       return 'Le risque est de limiter la presence du site dans les reponses generees par les assistants et moteurs IA.';
     case 'rgpd':
-      return 'Le risque est de manquer de clarte sur l usage des donnees personnelles.';
+      return 'Le risque est de creer une zone de doute pour le visiteur et de devoir corriger les informations publiees.';
     case 'content':
       return 'Le risque est de proposer un contenu moins convaincant ou incomplet.';
     case 'ux':
@@ -1058,7 +1087,7 @@ function fallbackRecommendationByFamily(finding: AuditFinding): string {
     case 'ai':
       return 'Rendre les contenus publics plus faciles a explorer et a comprendre par les moteurs generatifs.';
     case 'rgpd':
-      return 'Rendre les informations de protection des donnees plus visibles et plus completes.';
+      return 'Clarifier les informations visibles, expliquer les choix du visiteur et corriger les pages ou bandeaux concernes.';
     case 'content':
       return 'Completer le contenu, clarifier les appels a l action et supprimer les zones trop faibles.';
     case 'ux':
@@ -1149,7 +1178,7 @@ function fallbackIssueByFamily(finding: AuditFinding): string {
       return 'Un signal AI Friendly a ete mesure pour evaluer la facilite d exploration et de comprehension par les moteurs generatifs.';
     }
     case 'rgpd':
-      return 'Une information attendue sur la protection des donnees est absente ou incomplete.';
+      return rgpdBusinessIssue(finding);
     case 'content':
       return 'Une partie du contenu manque de clarte, de profondeur ou d action proposee.';
     case 'ux':
@@ -2000,32 +2029,95 @@ function extractScannerKpiAffectedCount(kpiNode: any, urls: string[]): number | 
   return urls.length > 0 ? urls.length : undefined;
 }
 
+// ─── Eco wording simplifier (Ticket 16 — frontend-only, no backend changes) ──
+
+const ECO_TECH_TERMS: Array<[RegExp, string]> = [
+  [/\bEco[\s-]?Index\b/gi, 'impact environnemental'],
+  [/\bEcoIndex\b/gi, 'impact environnemental'],
+  [/\bKOE\b/gi, 'indicateur environnemental'],
+  [/\bscore Eco[\s-]?Index\b/gi, 'note environnementale'],
+  [/\bAnalyse du Cycle de Vie\b/gi, 'évaluation des ressources'],
+  [/\bACV\b/g, 'évaluation des ressources'],
+  [/\bempreinte carbone numérique\b/gi, 'consommation de ressources'],
+  [/\bémissions de CO2\b/gi, 'impact des ressources'],
+  [/\brequêtes HTTP\b/gi, 'appels au serveur'],
+  [/\btaille des pages\b/gi, 'poids des pages'],
+  [/\bpoids des ressources\b/gi, 'poids des médias et scripts'],
+  [/\bgaspillage de bande passante\b/gi, 'consommation réseau'],
+];
+
+export function simplifyEcoWording(text: string): string {
+  let result = text;
+  for (const [pattern, replacement] of ECO_TECH_TERMS) {
+    result = result.replace(pattern, replacement);
+  }
+  return result;
+}
+
+function simplifyEcoWordingIfNeeded(text: string, kpiId: string): string {
+  if (kpiId !== 'eco_index_score') return text;
+  return simplifyEcoWording(text);
+}
+
+/**
+ * Build a plain-French default description for Eco Index KPI
+ * that avoids backend-only jargon and explains the metric in business terms.
+ */
+export function simplifyEcoStatut(kpiNode: any): string {
+  const status = String(kpiNode?.status ?? '').toLowerCase();
+  const score = kpiNode?.score ?? kpiNode?.data?.eco_index_score ?? kpiNode?.data?.score;
+  const scoreText = score !== undefined && score !== null ? ` (note ${score}/100)` : '';
+
+  if (status === 'passing') {
+    return `Le site a un bon impact environnemental${scoreText}. Le poids des pages, le nombre de scripts et le volume de médias sont maîtrisés, ce qui réduit la consommation d'énergie et de ressources serveur.`;
+  }
+  if (status === 'failing' || status === 'warning') {
+    return `Le site présente un impact environnemental élevé${scoreText}. Le poids des pages, les médias non optimisés ou les scripts superflus augmentent la consommation de ressources. Optimisez les images, réduisez les scripts inutiles et améliorez la vitesse de chargement.`;
+  }
+  if (status === 'not_available') {
+    return "L'impact environnemental n'a pas pu être mesuré sur ce site. Vérifiez que les pages sont accessibles pour permettre l'évaluation de la consommation de ressources.";
+  }
+  return "Évalue l'impact du site sur l'environnement : poids des pages, vitesse de chargement, optimisation des médias et consommation des ressources serveur.";
+}
+
 function extractScannerKpiDescription(kpiNode: any, fallbackName: string): string {
+  const kpiId = typeof kpiNode?.kpi_name === 'string' ? kpiNode.kpi_name.toLowerCase() : '';
+
   if (typeof kpiNode?.constat === 'string' && kpiNode.constat.trim().length > 0) {
-    return kpiNode.constat;
+    return simplifyEcoWordingIfNeeded(kpiNode.constat, kpiId);
   }
   if (typeof kpiNode?.client_summary === 'string' && kpiNode.client_summary.trim().length > 0) {
-    return kpiNode.client_summary;
+    return simplifyEcoWordingIfNeeded(kpiNode.client_summary, kpiId);
   }
   if (typeof kpiNode?.info === 'string' && kpiNode.info.trim().length > 0) {
-    return kpiNode.info;
+    return simplifyEcoWordingIfNeeded(kpiNode.info, kpiId);
   }
   if (typeof kpiNode?.name === 'string' && kpiNode.name.trim().length > 0) {
-    return kpiNode.name;
+    return simplifyEcoWordingIfNeeded(kpiNode.name, kpiId);
+  }
+  // Eco default: avoid backend-only jargon when no structured text is available
+  if (kpiId === 'eco_index_score') {
+    return simplifyEcoStatut(kpiNode);
   }
   return fallbackName || 'Aucune description fournie.';
 }
 
 function extractScannerKpiImpact(kpiNode: any): string | undefined {
-  if (typeof kpiNode?.business_impact === 'string' && kpiNode.business_impact.trim().length > 0) {
-    return kpiNode.business_impact;
+  const kpiId = typeof kpiNode?.kpi_name === 'string' ? kpiNode.kpi_name.toLowerCase() : '';
+  const rawImpact = typeof kpiNode?.business_impact === 'string' && kpiNode.business_impact.trim().length > 0
+    ? kpiNode.business_impact
+    : typeof kpiNode?.impact === 'string' && kpiNode.impact.trim().length > 0
+      ? kpiNode.impact
+      : undefined;
+
+  if (rawImpact) {
+    return simplifyEcoWordingIfNeeded(rawImpact, kpiId);
   }
-  if (typeof kpiNode?.impact === 'string' && kpiNode.impact.trim().length > 0) {
-    return kpiNode.impact;
+
+  if (kpiId === 'eco_index_score') {
+    return 'Un site plus léger et mieux optimisé consomme moins de ressources serveur, se charge plus vite pour vos visiteurs, et réduit son empreinte environnementale. Cela améliore aussi votre référencement et votre image de marque.';
   }
-  if (typeof kpiNode?.metrics?.impact === 'string' && kpiNode.metrics.impact.trim().length > 0) {
-    return kpiNode.metrics.impact;
-  }
+
   return undefined;
 }
 
@@ -3135,7 +3227,7 @@ export function mapApiResponseToReport(
   if (smet.performance) {
     const scoreVal = smet.performance.avg_eco_index || 0;
     const passed = scoreVal > 50; 
-    const f1 = createFinding('eco', 'score', 'Bilan Eco Index (Impact CO2)', passed, `Résultat Eco Index : ${scoreVal.toFixed(1)}/100.`, resolveStatus(smet.performance?.eco_kpi ?? { passed }));
+    const f1 = createFinding('eco', 'score', 'Impact environnemental du site', passed, `Note environnementale : ${scoreVal.toFixed(1)}/100. Un score plus élevé signifie des pages plus légères et mieux optimisées.`, resolveStatus(smet.performance?.eco_kpi ?? { passed }));
     if (f1) f1.displayScorePct = scoreVal;
     if (f1) findingsEco.push(f1);
   }

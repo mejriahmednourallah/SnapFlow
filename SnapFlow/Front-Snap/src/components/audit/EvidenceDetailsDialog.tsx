@@ -8,6 +8,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog';
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 
 interface EvidenceDetailsDialogProps {
   finding: AuditFinding;
@@ -159,11 +160,6 @@ export function EvidenceDetailsDialog({
       .slice(0, 20);
   }, [finding.evidenceSummary, finding.evidence, finding.annexes]);
 
-  const uniqueUrls = useMemo(
-    () => Array.from(new Set((finding.exampleUrls ?? []).map((url) => String(url ?? '').trim()).filter(Boolean))).slice(0, 25),
-    [finding.exampleUrls],
-  );
-
   const evidenceRows = useMemo(
     () => (finding.evidenceRows ?? [])
       .map((row) => Object.fromEntries(Object.entries(row).filter(([key]) => shouldShowEvidenceColumn(key))))
@@ -226,31 +222,6 @@ export function EvidenceDetailsDialog({
             </section>
           )}
 
-          <section>
-            <p className="text-sm font-semibold mb-2">Preuves et contexte</p>
-            {summaryLines.length === 0 ? (
-              <p className="text-sm text-muted-foreground">
-                {finding.evidenceMissingReason ?? 'Aucune preuve textuelle resumee.'}
-              </p>
-            ) : (
-              <div className="overflow-hidden rounded border border-border/40">
-                {summaryLines.map((line, index) => {
-                  const split = splitSummaryLine(line);
-                  return split ? (
-                    <div key={`${line}-${index}`} className="grid grid-cols-[160px_1fr] gap-3 border-t first:border-t-0 border-border/30 px-3 py-2 text-sm">
-                      <span className="font-medium text-foreground">{split.label}</span>
-                      <span className="text-muted-foreground break-words">{split.value}</span>
-                    </div>
-                  ) : (
-                    <div key={`${line}-${index}`} className="border-t first:border-t-0 border-border/30 px-3 py-2 text-sm text-muted-foreground">
-                      {line}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </section>
-
           {evidenceRows.length > 0 && (
             <section>
               <div className="flex items-center justify-between gap-3 mb-2">
@@ -297,25 +268,36 @@ export function EvidenceDetailsDialog({
             </section>
           )}
 
-          {uniqueUrls.length > 0 && (
-            <section>
-              <p className="text-sm font-semibold mb-2">Pages concernees ({uniqueUrls.length})</p>
-              <ul className="space-y-1">
-                {uniqueUrls.map((url) => (
-                  <li key={url}>
-                    <a
-                      href={url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-xs text-primary hover:underline break-all"
-                    >
-                      {url}
-                    </a>
-                  </li>
-                ))}
-              </ul>
-            </section>
-          )}
+          <Accordion type="single" collapsible className="rounded border border-border/40 px-3">
+            <AccordionItem value="context" className="border-b-0">
+              <AccordionTrigger className="py-3 text-sm font-semibold hover:no-underline">
+                Preuves et contexte
+              </AccordionTrigger>
+              <AccordionContent>
+                {summaryLines.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">
+                    {finding.evidenceMissingReason ?? 'Aucune preuve textuelle resumee.'}
+                  </p>
+                ) : (
+                  <div className="overflow-hidden rounded border border-border/40">
+                    {summaryLines.map((line, index) => {
+                      const split = splitSummaryLine(line);
+                      return split ? (
+                        <div key={`${line}-${index}`} className="grid grid-cols-[160px_1fr] gap-3 border-t first:border-t-0 border-border/30 px-3 py-2 text-sm">
+                          <span className="font-medium text-foreground">{split.label}</span>
+                          <span className="text-muted-foreground break-words">{split.value}</span>
+                        </div>
+                      ) : (
+                        <div key={`${line}-${index}`} className="border-t first:border-t-0 border-border/30 px-3 py-2 text-sm text-muted-foreground">
+                          {line}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </AccordionContent>
+            </AccordionItem>
+          </Accordion>
         </div>
       </DialogContent>
     </Dialog>

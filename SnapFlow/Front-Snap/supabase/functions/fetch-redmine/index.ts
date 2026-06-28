@@ -751,6 +751,20 @@ serve(async (req) => {
       throw new Error(`Cache table check failed: ${errMsg || "unknown error"}`);
     };
 
+    const ensureClientForProject = async (
+      serviceClient: ReturnType<typeof createClient>,
+      projectName: string
+    ): Promise<string> => {
+      const name = String(projectName || "").trim() || "Client sans nom";
+      const { data, error } = await serviceClient
+        .from("clients")
+        .upsert({ name }, { onConflict: "name" })
+        .select("id")
+        .single();
+      if (error) throw error;
+      return String(data.id);
+    };
+
     const syncAssignmentsFromCache = async (
       serviceClient: ReturnType<typeof createClient>,
       targetUserId?: string
@@ -1002,16 +1016,18 @@ serve(async (req) => {
         }
 
         if (!localProject) {
+          const clientId = await ensureClientForProject(serviceClient, project.name);
           const { data: created, error: createErr } = await serviceClient
             .from("projects")
             .insert({
               site_name: project.name,
+              client_id: clientId,
               url: siteUrl,
               redmine_url: redmineUrl,
               redmine_identifier: project.identifier,
               audit_url_needs_review: !homepage,
             })
-            .select("id, url, redmine_url, redmine_identifier, audit_url_needs_review")
+            .select("id, client_id, url, redmine_url, redmine_identifier, audit_url_needs_review")
             .single();
           if (createErr) throw createErr;
           localProject = created;

@@ -3,10 +3,8 @@ import {
   PieChart, Pie, Cell, Tooltip as ReTooltip,
   AreaChart, Area, XAxis, YAxis, CartesianGrid,
   BarChart, Bar,
-  RadarChart, Radar, PolarGrid, PolarAngleAxis,
 } from 'recharts';
-import { format } from 'date-fns';
-import { fr } from 'date-fns/locale';
+import { formatDate } from '@/lib/dateFormat';
 import type { PdfConfig, PdfData } from './pdfTypes';
 import { GREEN, RED, AMBER, BLUE, TRACKER_COLORS, GOLD_BG, GOLD_BD, GOLD } from './pdfTypes';
 
@@ -220,7 +218,7 @@ function SommaireSlide({ cfg, data }: { cfg: PdfConfig; data: PdfData }) {
     },
     {
       num: '03', title: 'Synthèse et conclusion',
-      items: ['Score de santé global', "Points d'attention et recommandations"],
+      items: ["Points d'attention et recommandations"],
     },
   ];
 
@@ -788,60 +786,6 @@ function PrioritesSlide({ cfg, data }: { cfg: PdfConfig; data: PdfData }) {
   );
 }
 
-// ── SLIDE: Score de santé / Radar — KEPT
-function HealthSlide({ cfg, data }: { cfg: PdfConfig; data: PdfData }) {
-  const { pdfColor } = cfg;
-  const { project, radarData } = data;
-
-  return (
-    <div data-pdf-slide="health" style={SLIDE.base}>
-      <SlideHeader title="Score de santé global" subtitle="Évaluation multi-critères (0 → 100, plus haut = mieux)" projectName={project.site_name} color={pdfColor} />
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'row', padding: '20px 28px', gap: 28 }}>
-        <div style={{ width: 460, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <RadarChart width={440} height={520} data={radarData} margin={{ top: 24, right: 44, bottom: 24, left: 44 }}>
-            <PolarGrid stroke="#e7e5e4" />
-            <PolarAngleAxis dataKey="axis" tick={{ fontSize: 11, fill: '#44403c' }} />
-            <Radar dataKey="value" stroke={pdfColor} fill={pdfColor} fillOpacity={0.2} dot={{ r: 4, fill: pdfColor }} isAnimationActive={false} />
-          </RadarChart>
-        </div>
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 10 }}>
-          <div style={{ fontSize: 13, fontWeight: 700, color: '#1c1917', marginBottom: 4 }}>Décomposition du score</div>
-          {radarData.map(axis => {
-            const score = axis.value;
-            const color = score >= 70 ? GREEN : score >= 40 ? AMBER : RED;
-            const label = score >= 70 ? 'Bien' : score >= 40 ? 'À surveiller' : 'À améliorer';
-            return (
-              <div key={axis.axis} style={{ background: '#fafaf9', border: '1px solid #e7e5e4', borderRadius: 8, padding: '10px 14px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
-                  <div style={{ fontWeight: 600, fontSize: 12, color: '#1c1917' }}>{axis.axis}</div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <span style={{ fontSize: 10, fontWeight: 700, color, background: `${color}22`, borderRadius: 4, padding: '2px 6px' }}>{label}</span>
-                    <span style={{ fontSize: 16, fontWeight: 800, color }}>{score}/100</span>
-                  </div>
-                </div>
-                <div style={{ height: 4, background: '#e7e5e4', borderRadius: 2, overflow: 'hidden' }}>
-                  <div style={{ height: '100%', borderRadius: 2, background: color, width: `${score}%` }} />
-                </div>
-                <div style={{ fontSize: 10, color: '#78716c', marginTop: 4 }}>{axis.detail}</div>
-              </div>
-            );
-          })}
-          {(() => {
-            const avg = Math.round(radarData.reduce((s, a) => s + a.value, 0) / Math.max(radarData.length, 1));
-            const color = avg >= 70 ? GREEN : avg >= 40 ? AMBER : RED;
-            return (
-              <div style={{ background: '#fafaf9', border: `2px solid ${color}`, borderRadius: 10, padding: '12px 14px', marginTop: 4, textAlign: 'center' }}>
-                <div style={{ fontSize: 10, fontWeight: 700, color: '#44403c', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Score de santé global</div>
-                <div style={{ fontSize: 36, fontWeight: 800, color, lineHeight: 1.2 }}>{avg}<span style={{ fontSize: 16, fontWeight: 400, color: '#78716c' }}>/100</span></div>
-              </div>
-            );
-          })()}
-        </div>
-      </div>
-    </div>
-  );
-}
-
 // ── SLIDE: Insights / Recommandations — KEPT
 function InsightsSlide({ cfg, data }: { cfg: PdfConfig; data: PdfData }) {
   const { pdfColor } = cfg;
@@ -1026,9 +970,6 @@ export const PdfSlides = forwardRef<HTMLDivElement, PdfSlidesProps>(
 
         {/* Priorities — KEPT */}
         {pdfSections.priorities && <PrioritesSlide cfg={cfg} data={data} />}
-
-        {/* Health / radar — KEPT */}
-        {pdfSections.health && <HealthSlide cfg={cfg} data={data} />}
 
         {/* Insights / recommendations — KEPT */}
         {pdfSections.insights && <InsightsSlide cfg={cfg} data={data} />}

@@ -8,6 +8,7 @@ import { Zap, LogOut, UserPlus, Trash2, Globe, FileText, Users, Shield, Download
 import { useToast } from '@/hooks/use-toast';
 import { createUser, updateRole, deleteUser, type UserRole } from '@/services/authService';
 import { fetchRedmineUsers, importRedmineUser, type RedmineUser } from '@/services/redmineService';
+import { ROLE_OPTIONS, roleLabel } from '@/lib/roleLabels';
 
 interface Profile {
   id: string;
@@ -21,12 +22,6 @@ interface UserRoleRow {
   role: string;
 }
 
-const ROLE_OPTIONS: Array<{ value: UserRole; label: string }> = [
-  { value: 'charge_de_projet', label: 'Chargé de projet' },
-  { value: 'testeur', label: 'Testeur' },
-  { value: 'rapporteur', label: 'Rapporteur' },
-  { value: 'admin', label: 'Admin' },
-];
 
 const AdminDashboard = () => {
   const { user, userRole, loading, isAdmin, signOut } = useAuth();
@@ -115,7 +110,7 @@ const AdminDashboard = () => {
     setCreating(true);
     try {
       await createUser({ email: newEmail, password: newPassword, full_name: newName, role: newRole });
-      toast({ title: 'Utilisateur créé', description: `${newEmail} a été ajouté avec le rôle ${newRole}.` });
+      toast({ title: 'Utilisateur créé', description: `${newEmail} a été ajouté avec le rôle ${roleLabel(newRole)}.` });
       setShowNewUser(false);
       setNewEmail(''); setNewPassword(''); setNewName('');
       await fetchData();
@@ -158,7 +153,7 @@ const AdminDashboard = () => {
               <Zap className="w-4 h-4 text-primary" />
             </div>
             <span className="text-lg font-bold gradient-text">AuditPro</span>
-            <span className="text-xs bg-primary/20 text-primary px-2 py-0.5 rounded-full ml-2">Admin</span>
+            <span className="text-xs bg-primary/20 text-primary px-2 py-0.5 rounded-full ml-2">Super Admin</span>
           </div>
           <div className="flex items-center gap-2">
             <Button variant="ghost" size="sm" onClick={() => navigate('/admin/projects')}>

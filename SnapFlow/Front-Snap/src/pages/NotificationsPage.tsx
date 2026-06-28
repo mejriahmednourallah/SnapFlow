@@ -3,9 +3,8 @@ import { Bell, Check, CheckCheck, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
-import { format } from 'date-fns';
-import { fr } from 'date-fns/locale';
 import { cn } from '@/lib/utils';
+import { formatDateTime } from '@/lib/dateFormat';
 
 interface Notification {
   id: string;
@@ -107,7 +106,7 @@ const NotificationsPage = () => {
                 <div className="flex items-center justify-between gap-2">
                   <span className="text-sm font-medium">{n.title}</span>
                   <span className="text-xs text-muted-foreground flex-shrink-0">
-                    {format(new Date(n.created_at), 'dd MMM yyyy HH:mm', { locale: fr })}
+                    {formatDateTime(n.created_at)}
                   </span>
                 </div>
                 <p className="text-xs text-muted-foreground mt-0.5">{n.message}</p>

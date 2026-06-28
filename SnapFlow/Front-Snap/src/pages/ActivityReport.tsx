@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/integrations/supabase/client';
@@ -16,8 +16,16 @@ import { PDF_THEMES } from '@/components/pdf/pdfStyles';
 import type { ActivityPdfOptions } from '@/components/activity/pdf/pdfTypes';
 import { format } from 'date-fns';
 import { fr } from 'date-fns/locale';
+import { formatDateTime } from '@/lib/dateFormat';
+import { ACTIVITY_PDF_BRAND_DEFAULTS, fetchActivityPdfBrandDefaults } from '@/lib/appSettings';
 
 import { useRedmineIssues } from '@/hooks/useRedmineIssues';
+
+// ─── Meeting / treatment classification ──────────────────────────────────
+const deAccent = (s: string): string =>
+  s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+const isMeetingTracker = (name: string): boolean =>
+  /reunion|point d[\s']echange|point d echange/.test(deAccent(name));
 import { useRedmineIdentifier } from '@/hooks/useRedmineIdentifier';
 import {
   fetchAllIssuesPaginated,
@@ -71,8 +79,8 @@ const ActivityReport = () => {
   const [showPdfAdvanced, setShowPdfAdvanced] = useState(false);
   const [selectedThemeId, setSelectedThemeId] = useState(PDF_THEMES[0]?.id || 'slate');
   const [pdfColor, setPdfColor] = useState(PDF_THEMES[0]?.primary || '#1E3A5F');
-  const [pdfBrandLeft, setPdfBrandLeft] = useState('MEDIANET RUN SERVICES');
-  const [pdfBrandRight, setPdfBrandRight] = useState('SNAPFLOW');
+  const [pdfBrandLeft, setPdfBrandLeft] = useState(ACTIVITY_PDF_BRAND_DEFAULTS.left);
+  const [pdfBrandRight, setPdfBrandRight] = useState(ACTIVITY_PDF_BRAND_DEFAULTS.right);
   const [pdfContactEmail, setPdfContactEmail] = useState('');
   const [pdfContactWeb, setPdfContactWeb] = useState('');
   const [pdfContactWeb2, setPdfContactWeb2] = useState('');
@@ -96,6 +104,19 @@ const ActivityReport = () => {
     if (!loading && !user) navigate('/auth');
   }, [user, loading, navigate]);
 
+  useEffect(() => {
+    if (!user) return;
+    fetchActivityPdfBrandDefaults()
+      .then((defaults) => {
+        setPdfBrandLeft(defaults.left);
+        setPdfBrandRight(defaults.right);
+      })
+      .catch(() => {
+        setPdfBrandLeft(ACTIVITY_PDF_BRAND_DEFAULTS.left);
+        setPdfBrandRight(ACTIVITY_PDF_BRAND_DEFAULTS.right);
+      });
+  }, [user]);
+
   // Derive Redmine identifier from project URLs
   const redmineIdentifier = useRedmineIdentifier(project?.redmine_url || project?.url);
 
@@ -106,6 +127,10 @@ const ActivityReport = () => {
     filters, setFilters,
     applyFilters, resetFilters, goToPage, refresh,
   } = useRedmineIssues(redmineIdentifier);
+
+  // Split current page into treatment tickets and meetings
+  const treatmentIssues = useMemo(() => issues.filter(i => !isMeetingTracker(i.tracker.name)), [issues]);
+  const meetingIssues = useMemo(() => issues.filter(i => isMeetingTracker(i.tracker.name)), [issues]);
 
   // Fetch project info + filter options on mount
   useEffect(() => {
@@ -300,15 +325,17 @@ const ActivityReport = () => {
 
   if (loading || !user) return null;
 
-  // Use allIssuesForStats for statistics if available, otherwise fall back to current page
+  // Use allIssuesForStats for statistics if available, otherwise fall back to current page.
+  // Only treatment tickets (hors réunions) are counted in treatment stats.
   const statsSource = allIssuesForStats.length > 0 ? allIssuesForStats : issues;
+  const treatmentStatsSource = useMemo(() => statsSource.filter(i => !isMeetingTracker(i.tracker.name)), [statsSource]);
 
-  const statusCounts = statsSource.reduce<Record<string, number>>((acc, i) => {
+  const statusCounts = treatmentStatsSource.reduce<Record<string, number>>((acc, i) => {
     acc[i.status.name] = (acc[i.status.name] || 0) + 1;
     return acc;
   }, {});
 
-  const trackerCounts = statsSource.reduce<Record<string, number>>((acc, i) => {
+  const trackerCounts = treatmentStatsSource.reduce<Record<string, number>>((acc, i) => {
     acc[i.tracker.name] = (acc[i.tracker.name] || 0) + 1;
     return acc;
   }, {});
@@ -414,12 +441,12 @@ const ActivityReport = () => {
             </div>
           </div>
 
-          {/* Stats */}
-          {issues.length > 0 && (
+          {/* Stats (treatment tickets only) */}
+          {treatmentStatsSource.length > 0 && (
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
               <div className="glass-card p-4 text-center">
-                <div className="text-2xl font-bold text-primary">{totalCount}</div>
-                <div className="text-xs text-muted-foreground">Total tickets</div>
+                <div className="text-2xl font-bold text-primary">{treatmentStatsSource.length}</div>
+                <div className="text-xs text-muted-foreground">Tickets traitement{meetingIssues.length > 0 ? ` (hors ${meetingIssues.length} réunion${meetingIssues.length > 1 ? 's' : ''})` : ''}</div>
               </div>
               {Object.entries(statusCounts).slice(0, 3).map(([name, count]) => (
                 <div key={name} className="glass-card p-4 text-center">
@@ -434,8 +461,9 @@ const ActivityReport = () => {
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
             <h3 className="font-semibold text-sm">
               {totalCount > 0
-                ? `${(currentPage - 1) * PAGE_SIZE + 1}–${Math.min(currentPage * PAGE_SIZE, totalCount)} sur ${totalCount} ticket(s)`
-                : '0 ticket(s)'}
+                ? `${(currentPage - 1) * PAGE_SIZE + 1}–${Math.min(currentPage * PAGE_SIZE, totalCount)} sur ${totalCount} demande(s) Redmine`
+                : 'Aucune demande Redmine'}
+              {meetingIssues.length > 0 && <span className="text-xs text-muted-foreground ml-2">(dont {meetingIssues.length} réunion{meetingIssues.length > 1 ? 's' : ''})</span>}
               {lastFetchedKey && issueCache.get(lastFetchedKey) && (
                 <span className="ml-2 text-xs text-muted-foreground font-normal">
                   (mis à jour il y a {Math.floor((Date.now() - issueCache.get(lastFetchedKey)!.ts) / 60000)} min)
@@ -477,13 +505,20 @@ const ActivityReport = () => {
               <Loader2 className="w-8 h-8 animate-spin text-primary mx-auto" />
               <p className="text-muted-foreground mt-2">Chargement des tickets…</p>
             </div>
-          ) : issues.length === 0 ? (
+          ) : treatmentIssues.length === 0 && meetingIssues.length === 0 ? (
             <div className="glass-card p-8 text-center text-muted-foreground">
               Aucun ticket trouvé pour ce projet.
             </div>
           ) : (
-            <div className="glass-card overflow-hidden">
-              <div className="overflow-x-auto">
+            <>
+              {/* Treatment tickets table */}
+              {treatmentIssues.length > 0 && (
+                <div className="glass-card overflow-hidden mb-4">
+                  <div className="px-4 py-2 border-b border-border/30 bg-muted/30">
+                    <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Tickets de traitement — {treatmentIssues.length} élément{treatmentIssues.length > 1 ? 's' : ''}</span>
+                    {meetingIssues.length > 0 && <span className="text-xs text-muted-foreground ml-2">(réunions exclues)</span>}
+                  </div>
+                  <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-border/50 text-muted-foreground">
@@ -498,7 +533,7 @@ const ActivityReport = () => {
                     </tr>
                   </thead>
                   <tbody>
-                    {issues.map(issue => (
+                    {treatmentIssues.map(issue => (
                       <tr key={issue.id} className="border-b border-border/30 hover:bg-muted/20">
                         <td className="p-3">
                           <button
@@ -542,8 +577,59 @@ const ActivityReport = () => {
                     ))}
                   </tbody>
                 </table>
-              </div>
-            </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Meetings table */}
+              {meetingIssues.length > 0 && (
+                <div className="glass-card overflow-hidden">
+                  <div className="px-4 py-2 border-b border-border/30 bg-muted/30">
+                    <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Réunions & Points d'échange — {meetingIssues.length} élément{meetingIssues.length > 1 ? 's' : ''}</span>
+                    <span className="text-xs text-muted-foreground ml-2">(hors métriques de traitement)</span>
+                  </div>
+                  <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-border/50 text-muted-foreground">
+                      <th className="text-left p-3">#</th>
+                      <th className="text-left p-3">Sujet</th>
+                      <th className="text-center p-3">Statut</th>
+                      <th className="text-center p-3">Priorité</th>
+                      <th className="text-left p-3">Assigné à</th>
+                      <th className="text-center p-3">Créé le</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {meetingIssues.map(issue => (
+                      <tr key={issue.id} className="border-b border-border/30 hover:bg-muted/20">
+                        <td className="p-3">
+                          <button
+                            type="button"
+                            onClick={() => setHistoryIssueId(issue.id)}
+                            className="font-mono text-xs text-primary hover:underline hover:text-primary/80 transition-colors"
+                            title="Voir l'historique complet"
+                          >
+                            #{issue.id}
+                          </button>
+                        </td>
+                        <td className="p-3 font-medium max-w-xs truncate">{issue.subject}</td>
+                        <td className="p-3 text-center">
+                          <span className="text-xs bg-muted/50 text-muted-foreground px-2 py-0.5 rounded-full">{issue.status.name}</span>
+                        </td>
+                        <td className="p-3 text-center text-xs">{issue.priority.name}</td>
+                        <td className="p-3 text-sm">{issue.assigned_to?.name || '—'}</td>
+                        <td className="p-3 text-center text-xs text-muted-foreground">
+                          {format(new Date(issue.created_on), 'dd/MM/yyyy')}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                  </div>
+                </div>
+              )}
+            </>
           )}
 
           {/* Pagination */}
@@ -617,7 +703,7 @@ const ActivityReport = () => {
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
                         <span className="font-medium text-sm">
-                          Rapport du {format(new Date(report.created_at), 'dd MMM yyyy à HH:mm', { locale: fr })}
+                          Rapport du {formatDateTime(report.created_at)}
                         </span>
                         <span className="text-xs bg-muted text-muted-foreground px-2 py-0.5 rounded-full">
                           {report.ticket_count} tickets

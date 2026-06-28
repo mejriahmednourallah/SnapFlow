@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useFormTester } from '@/hooks/useFormTester';
 import type { WorkflowListView, WorkflowStatus } from '@/lib/form-tester/types';
+import { formatDate } from '@/lib/dateFormat';
 import { StatusBadge } from './StatusBadge';
 
 interface WorkflowListProps {
@@ -87,7 +88,7 @@ export function WorkflowList({ isOperator }: WorkflowListProps) {
             {listView !== 'review_queue' ? <option value="draft">Brouillon</option> : null}
             <option value="needs_review">A valider</option>
             <option value="pending">En attente</option>
-            <option value="approved">Approuvé</option>
+            <option value="approved">Accepté</option>
             <option value="executed">Exécuté</option>
             <option value="blocked">Bloque</option>
           </select>
@@ -141,7 +142,7 @@ export function WorkflowList({ isOperator }: WorkflowListProps) {
                     </span>
                   ) : null}
                   <span className="text-xs text-muted-foreground">
-                    Modifié le {new Date(workflow.updated_at).toLocaleDateString('fr-FR')}
+                    Modifié le {formatDate(workflow.updated_at)}
                   </span>
                 </div>
               </div>

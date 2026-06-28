@@ -4,6 +4,7 @@ import type { AuditDocumentData } from '../types';
 import type { PdfTheme } from '../theme';
 import { makePageStyles } from '../theme';
 import { ScoreGauge } from '../shared/ScoreGauge';
+import { formatDate } from '@/lib/dateFormat';
 
 interface CoverPageProps {
   report: AuditDocumentData;
@@ -64,7 +65,7 @@ export function CoverPage({ report, theme, clientLogoSrc }: CoverPageProps) {
               Date du rapport
             </Text>
             <Text style={{ fontSize: 13, color: t?.text ?? '#111827', fontFamily: 'DMSans', fontWeight: 700, marginTop: 4 }}>
-              {new Date(report.date).toLocaleDateString('fr-FR')}
+              {formatDate(report.date)}
             </Text>
           </View>
           <View>

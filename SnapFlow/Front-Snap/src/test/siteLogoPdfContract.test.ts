@@ -12,6 +12,7 @@ const detector = readFileSync(resolve(currentDir, '../../supabase/functions/dete
 describe('PDF site logo contract', () => {
   it('uses the audited project URL for activity reports, never the Redmine URL', () => {
     expect(activityPdf).toContain('siteUrl: project.url');
+    expect(activityPdf).toContain('storedLogoUrl: project.logo_url');
     expect(activityPdf).not.toContain('project.redmine_url');
     expect(activityPdf).not.toContain('fetch(url)');
   });

@@ -3,7 +3,6 @@ import {
   PieChart, Pie, Cell, Tooltip as ReTooltip, ResponsiveContainer,
   AreaChart, Area, XAxis, YAxis, CartesianGrid,
   BarChart, Bar,
-  RadarChart, Radar, PolarGrid, PolarAngleAxis,
 } from 'recharts';
 import {
   Download, Loader2, TrendingDown, TrendingUp, Minus, LayoutDashboard,
@@ -13,6 +12,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { format, differenceInDays, startOfWeek } from 'date-fns';
 import { fr } from 'date-fns/locale';
 import { Button } from '@/components/ui/button';
+import { formatDate, formatDateTime } from '@/lib/dateFormat';
 import { cn } from '@/lib/utils';
 import { supabase } from '@/integrations/supabase/client';
 
@@ -87,12 +87,6 @@ interface Insight {
   text: string;
 }
 
-interface RadarAxisData {
-  axis: string;
-  value: number;
-  detail: string;
-}
-
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 // Strip all diacritical marks so é/è/ê all collapse to plain ASCII e.
@@ -113,7 +107,7 @@ const isResolvedOnly = (s: string): boolean => /resolu|resolved/.test(deAccent(s
 const isBlocked  = (s: string): boolean =>
   /bloqu|attente|hold|feedback|suspendu|suspend|en cours de valid/.test(deAccent(s));
 const isCritical = (p: string): boolean => /critique|critical|urgent|immediat|immediate/.test(deAccent(p));
-const isHigh     = (p: string): boolean => /majeur|haut|high/.test(deAccent(p));
+export const isMeeting = (s: string): boolean => /reunion|point d[\s']echange|point d echange/.test(deAccent(s));
 
 function groupByWeek(issues: RedmineIssue[]): { week: string; count: number }[] {
   const sorted = [...issues].sort((a, b) =>
@@ -274,51 +268,56 @@ export function ActivityDashboard({ issues, totalCount, project, dateFrom, dateT
     });
   }, [issues, activeFilter]);
 
-  // ── KPI metrics ──────────────────────────────────────────────────────────
+  // ── Meeting / treatment split ──────────────────────────────────────────
+  const meetingIssues = useMemo(() => filteredIssues.filter(i => isMeeting(i.tracker.name)), [filteredIssues]);
+  const treatmentIssues = useMemo(() => filteredIssues.filter(i => !isMeeting(i.tracker.name)), [filteredIssues]);
+  const meetingCount = meetingIssues.length;
 
-  const total    = filteredIssues.length;
-  const open     = useMemo(() => filteredIssues.filter(i => !isResolved(i.status.name)).length, [filteredIssues]);
-  const blocked  = useMemo(() => filteredIssues.filter(i => isBlocked(i.status.name)).length, [filteredIssues]);
-  const critical = useMemo(() => filteredIssues.filter(i => isCritical(i.priority.name)).length, [filteredIssues]);
+  // ── KPI metrics (treatment tickets only — meetings have their own section) ─
+
+  const total    = treatmentIssues.length;
+  const open     = useMemo(() => treatmentIssues.filter(i => !isResolved(i.status.name)).length, [treatmentIssues]);
+  const blocked  = useMemo(() => treatmentIssues.filter(i => isBlocked(i.status.name)).length, [treatmentIssues]);
+  const critical = useMemo(() => treatmentIssues.filter(i => isCritical(i.priority.name)).length, [treatmentIssues]);
 
   // Tickets that are marked Résolu (team-resolved) but still awaiting client validation, sitting there >2 days
   const pendingValidation = useMemo(
-    () => filteredIssues.filter(i =>
+    () => treatmentIssues.filter(i =>
       isResolvedOnly(i.status.name) &&
       differenceInDays(Date.now(), new Date(i.updated_on).getTime()) > 2,
     ),
-    [filteredIssues],
+    [treatmentIssues],
   );
-  const closedCount = useMemo(() => filteredIssues.filter(i => isClosed(i.status.name)).length, [filteredIssues]);
-  const resolvedOnlyCount = useMemo(() => filteredIssues.filter(i => isResolvedOnly(i.status.name)).length, [filteredIssues]);
+  const closedCount = useMemo(() => treatmentIssues.filter(i => isClosed(i.status.name)).length, [treatmentIssues]);
+  const resolvedOnlyCount = useMemo(() => treatmentIssues.filter(i => isResolvedOnly(i.status.name)).length, [treatmentIssues]);
   const resolved = closedCount + resolvedOnlyCount;
 
   // Average days from creation to team-resolved (not yet client-validated)
   const avgResolutionDays = useMemo((): number | null => {
-    const cl = filteredIssues.filter(i => isResolvedOnly(i.status.name));
+    const cl = treatmentIssues.filter(i => isResolvedOnly(i.status.name));
     if (!cl.length) return null;
     return Math.max(0, Math.round(
       cl.reduce((s, i) => s + differenceInDays(new Date(i.updated_on), new Date(i.created_on)), 0) / cl.length,
     ));
-  }, [filteredIssues]);
+  }, [treatmentIssues]);
 
   // Average days from creation to fully closed/validated by client
   const avgClosureDays = useMemo((): number | null => {
-    const cl = filteredIssues.filter(i => isClosed(i.status.name));
+    const cl = treatmentIssues.filter(i => isClosed(i.status.name));
     if (!cl.length) return null;
     return Math.max(0, Math.round(
       cl.reduce((s, i) => s + differenceInDays(new Date(i.updated_on), new Date(i.created_on)), 0) / cl.length,
     ));
-  }, [filteredIssues]);
+  }, [treatmentIssues]);
 
   const avgDaysOpen = useMemo((): number | null => {
-    const op = filteredIssues.filter(i => !isResolved(i.status.name));
+    const op = treatmentIssues.filter(i => !isResolved(i.status.name));
     if (!op.length) return null;
     const now = Date.now();
     return Math.max(0, Math.round(
       op.reduce((s, i) => s + differenceInDays(now, new Date(i.created_on).getTime()), 0) / op.length,
     ));
-  }, [filteredIssues]);
+  }, [treatmentIssues]);
 
   // ── Chart datasets ────────────────────────────────────────────────────────
 
@@ -329,19 +328,19 @@ export function ActivityDashboard({ issues, totalCount, project, dateFrom, dateT
     return names;
   }, [issues]);
 
-  const statusData  = useMemo(() => countBy(filteredIssues, i => i.status.name).filter(d => !hiddenItems.has(d.name)), [filteredIssues, hiddenItems]);
-  const trackerData = useMemo(() => countBy(filteredIssues, i => i.tracker.name).filter(d => !hiddenItems.has(d.name)), [filteredIssues, hiddenItems]);
+  const statusData  = useMemo(() => countBy(treatmentIssues, i => i.status.name).filter(d => !hiddenItems.has(d.name)), [treatmentIssues, hiddenItems]);
+  const trackerData = useMemo(() => countBy(treatmentIssues, i => i.tracker.name).filter(d => !hiddenItems.has(d.name)), [treatmentIssues, hiddenItems]);
   const priorityData = useMemo(
-    () => countBy(filteredIssues, i => i.priority.name)
+    () => countBy(treatmentIssues, i => i.priority.name)
       .map(d => ({ ...d, color: PRIORITY_COLOR(d.name) }))
       .filter(d => !hiddenItems.has(d.name)),
-    [filteredIssues, hiddenItems],
+    [treatmentIssues, hiddenItems],
   );
   const blockedByTracker = useMemo(
-    () => countBy(filteredIssues.filter(i => isBlocked(i.status.name)), i => i.tracker.name),
-    [filteredIssues],
+    () => countBy(treatmentIssues.filter(i => isBlocked(i.status.name)), i => i.tracker.name),
+    [treatmentIssues],
   );
-  const timelineData = useMemo(() => groupByWeek(filteredIssues), [filteredIssues]);
+  const timelineData = useMemo(() => groupByWeek(treatmentIssues), [treatmentIssues]);
   const maxTracker   = trackerData[0]?.count ?? 1;
 
   const statusColorOf = (name: string, idx: number): string => {
@@ -349,29 +348,6 @@ export function ActivityDashboard({ issues, totalCount, project, dateFrom, dateT
     const key = name.normalize('NFC');
     return STATUS_COLOR[key] ?? STATUS_FALLBACK[idx % STATUS_FALLBACK.length];
   };
-
-  // ── Radar axes ────────────────────────────────────────────────────────────
-
-  const radarData = useMemo((): RadarAxisData[] => {
-    const safeTotal = Math.max(total, 1);
-    const resolutionRate = Math.round((resolved / safeTotal) * 100);
-    const trackerBalance = Math.round(Math.max(0, 100 - (maxTracker / safeTotal) * 100));
-    const highCount = filteredIssues.filter(i => isHigh(i.priority.name)).length;
-    const priorityControl = Math.round(Math.max(0, 100 - ((critical + highCount) / safeTotal) * 100));
-    const assigneeCounts = countBy(filteredIssues.filter(i => i.assigned_to), i => i.assigned_to!.name);
-    const topAssignee = assigneeCounts[0]?.count ?? 0;
-    const topAssigneeName = assigneeCounts[0]?.name;
-    const blockedCount = filteredIssues.filter(i => isBlocked(i.status.name)).length;
-    const fluencyScore = Math.round(Math.max(0, 100 - (blockedCount / safeTotal) * 100));
-    const velocityScore = avgClosureDays === null ? 50 : Math.max(0, 100 - Math.min(avgClosureDays * 3, 100));
-    return [
-      { axis: 'Résolution',          value: resolutionRate,  detail: `${resolutionRate}% résolus` },
-      { axis: 'Équilibre trackers',   value: trackerBalance,  detail: `Dominant: ${trackerData[0]?.name ?? '—'} (${trackerData[0]?.count ?? 0})` },
-      { axis: 'Maîtrise priorités',   value: priorityControl, detail: `${critical} critiques` },
-      { axis: 'Fluidité',             value: fluencyScore,    detail: blockedCount === 0 ? 'Aucun blocage' : `${blockedCount} bloqué${blockedCount > 1 ? 's' : ''}` },
-      { axis: 'Vélocité résolution',  value: velocityScore,   detail: avgClosureDays !== null ? `Clôture moy. ${avgClosureDays}j` : 'N/A' },
-    ];
-  }, [total, resolved, critical, maxTracker, filteredIssues, trackerData, avgResolutionDays, avgClosureDays]);
 
   // ── Rule-based insights ───────────────────────────────────────────────────
 
@@ -523,13 +499,16 @@ export function ActivityDashboard({ issues, totalCount, project, dateFrom, dateT
         report_data: {
           type: 'dashboard_snapshot',
           issues: filteredIssues,
+          treatmentIssues,
+          meetingIssues,
           totalCount,
-          kpis: { total, open, resolved, blocked, critical, avgResolutionDays, avgClosureDays, avgDaysOpen },
+          kpis: { total, open, resolved, closedCount, blocked, critical, meetingCount, avgResolutionDays, avgClosureDays, avgDaysOpen },
           insights: insights.map(i => i.text),
           generatedAt: new Date().toISOString(),
         },
         filters: activeFilter ?? {},
-        ticket_count: filteredIssues.length,
+        ticket_count: total,
+        meeting_count: meetingCount,
       } as never);
       onSnapshotSaved?.();
     } catch (err) { console.error('Snapshot save failed', err); }
@@ -574,11 +553,11 @@ export function ActivityDashboard({ issues, totalCount, project, dateFrom, dateT
               {dateFrom || dateTo
                 ? <> pour la période du{' '}
                     <span className="font-medium text-stone-800">
-                      {dateFrom ? format(new Date(dateFrom), 'dd MMMM yyyy', { locale: fr }) : '—'}
+                      {dateFrom ? formatDate(dateFrom) : '—'}
                     </span>
                     {' '}au{' '}
                     <span className="font-medium text-stone-800">
-                      {dateTo ? format(new Date(dateTo), 'dd MMMM yyyy', { locale: fr }) : '—'}
+                      {dateTo ? formatDate(dateTo) : '—'}
                     </span>
                   </>
                 : <> sur l'ensemble des périodes disponibles</>
@@ -599,7 +578,7 @@ export function ActivityDashboard({ issues, totalCount, project, dateFrom, dateT
             <p className="text-[11px] text-stone-400 leading-relaxed">
               Généré le<br />
               <span className="font-medium text-stone-600">
-                {format(new Date(), 'dd MMMM yyyy', { locale: fr })} à {format(new Date(), 'HH:mm')}
+                {formatDateTime(new Date())}
               </span>
             </p>
           </div>
@@ -667,20 +646,28 @@ export function ActivityDashboard({ issues, totalCount, project, dateFrom, dateT
         <p className="text-xs text-stone-500 leading-relaxed border-l-2 pl-3" style={{ borderColor: BRAND }}>
           Ce rapport présente une synthèse de l'activité des demandes enregistrées
           {dateFrom && dateTo
-            ? ` du ${format(new Date(dateFrom), 'dd MMMM yyyy', { locale: fr })} au ${format(new Date(dateTo), 'dd MMMM yyyy', { locale: fr })}`
+            ? ` du ${formatDate(dateFrom)} au ${formatDate(dateTo)}`
             : dataMinDate && dataMaxDate
-              ? ` du ${format(dataMinDate, 'dd MMMM yyyy', { locale: fr })} au ${format(dataMaxDate, 'dd MMMM yyyy', { locale: fr })}`
+              ? ` du ${formatDate(dataMinDate)} au ${formatDate(dataMaxDate)}`
               : ' sur l\u2019ensemble des p\u00e9riodes disponibles'}.
           {' '}Il porte sur <span className="font-semibold text-stone-700">{totalCount} demande{totalCount !== 1 ? 's' : ''}</span> enregistrée{totalCount !== 1 ? 's' : ''} dans le système de suivi.
+          {meetingCount > 0 && (
+            <> dont <span className="font-semibold text-stone-700">{meetingCount} réunion{meetingCount > 1 ? 's' : ''}</span> (exclue{meetingCount > 1 ? 's' : ''} des métriques de traitement)</>
+          )}.
           {total !== totalCount && (
             <> La vue courante inclut <span className="font-semibold text-stone-700">{total} demande{total !== 1 ? 's' : ''}</span> après application des filtres.</>
           )}
         </p>
 
-        {/* ── Row 1: KPI strip ── */}
-        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
-          <KpiCard label="Total" value={totalCount} sub="scope complet"
-            tooltip="Nombre total de demandes enregistrées dans le système de suivi." />
+        {/* ── Row 1: KPI strip (treatment only) ── */}
+        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3">
+          <KpiCard label="Tickets" value={total} sub="traitement (hors réunions)"
+            tooltip="Nombre de tickets de traitement (hors réunions)." />
+          <KpiCard label="Réunions" value={meetingCount}
+            sub={meetingCount > 0 ? "Points d'échange" : 'Aucune'}
+            trend={meetingCount > 0 ? 'neutral' : 'positive'}
+            accentClass={meetingCount > 0 ? 'text-[#0e9fb0]' : undefined}
+            tooltip="Réunions et points d'échange exclus des métriques de tickets de traitement." />
           <KpiCard label="Ouverts" value={open}
             sub={`${Math.round((open / Math.max(total, 1)) * 100)} % de la vue`}
             trend={open > resolved ? 'negative' : 'neutral'}
@@ -794,7 +781,7 @@ export function ActivityDashboard({ issues, totalCount, project, dateFrom, dateT
               </ResponsiveContainer>
             </div>
             <div className="mt-2 flex flex-col gap-0.5">
-              {countBy(filteredIssues, i => i.status.name).map((entry, idx) => (
+              {countBy(treatmentIssues, i => i.status.name).map((entry, idx) => (
                 <LegendDot key={entry.name} color={statusColorOf(entry.name, idx)}
                   label={entry.name} count={entry.count}
                   active={activeFilter?.dimension === 'status' && activeFilter.value === entry.name}
@@ -844,7 +831,7 @@ export function ActivityDashboard({ issues, totalCount, project, dateFrom, dateT
               <div className="text-stone-400 text-sm text-center py-8">Aucune donnée</div>
             ) : (
               <div className="space-y-2.5">
-                {countBy(filteredIssues, i => i.tracker.name).map((t, idx) => {
+                {countBy(treatmentIssues, i => i.tracker.name).map((t, idx) => {
                   const isActive = activeFilter?.dimension === 'tracker' && activeFilter.value === t.name;
                   const isHid = hiddenItems.has(t.name);
                   const pct = Math.round((t.count / Math.max(total, 1)) * 100);
@@ -894,7 +881,7 @@ export function ActivityDashboard({ issues, totalCount, project, dateFrom, dateT
                   </BarChart>
                 </ResponsiveContainer>
                 <div className="mt-2 flex flex-wrap gap-x-2 gap-y-0.5">
-                  {countBy(filteredIssues, i => i.priority.name).map(p => (
+                  {countBy(treatmentIssues, i => i.priority.name).map(p => (
                     <LegendDot key={p.name} color={PRIORITY_COLOR(p.name)} label={p.name} count={p.count}
                       active={activeFilter?.dimension === 'priority' && activeFilter.value === p.name}
                       hidden={hiddenItems.has(p.name)}
@@ -907,82 +894,43 @@ export function ActivityDashboard({ issues, totalCount, project, dateFrom, dateT
           </div>
         </div>
 
-        {/* ── Row 4: Blocked breakdown + Radar ── */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-
-          {/* Blocked by tracker */}
-          <div className="bg-white border border-stone-200 rounded-xl p-5">
-            <SectionHeading>Tickets bloqués par tracker</SectionHeading>
-            {!blockedByTracker.length ? (
-              <div className="flex flex-col items-center justify-center gap-2 h-28 text-sm">
-                <div className="flex items-center gap-2 text-green-600">
-                  <CheckCircle className="w-4 h-4" /> Aucun ticket bloqué/en attente
-                </div>
-                {uniqueStatuses.length > 0 && (
-                  <p className="text-[10px] text-stone-400 text-center max-w-xs">
-                    Statuts dans les données :{' '}
-                    <span className="font-medium text-stone-500">{uniqueStatuses.join(', ')}</span>
-                  </p>
-                )}
+        {/* ── Row 4: Blocked breakdown ── */}
+        <div className="bg-white border border-stone-200 rounded-xl p-5">
+          <SectionHeading>Tickets bloqués par tracker</SectionHeading>
+          {!blockedByTracker.length ? (
+            <div className="flex flex-col items-center justify-center gap-2 h-28 text-sm">
+              <div className="flex items-center gap-2 text-green-600">
+                <CheckCircle className="w-4 h-4" /> Aucun ticket bloqué/en attente
               </div>
-            ) : blockedByTracker.length === 1 ? (
-              <div className="flex flex-col items-center justify-center gap-0.5 py-3">
-                <span className="text-4xl font-bold tabular-nums text-red-600">{blockedByTracker[0].count}</span>
-                <span className="text-sm font-medium text-stone-600">{blockedByTracker[0].name}</span>
-                <span className="text-[10px] text-stone-400">ticket{blockedByTracker[0].count !== 1 ? 's' : ''} bloqué{blockedByTracker[0].count !== 1 ? 's' : ''}</span>
-              </div>
-            ) : (
-              <div className="space-y-2.5">
-                {blockedByTracker.map(t => (
-                  <div key={t.name} className="space-y-1">
-                    <div className="flex items-center justify-between text-xs">
-                      <span className="font-medium text-stone-700">{t.name}</span>
-                      <span className="tabular-nums font-semibold text-red-600">{t.count}</span>
-                    </div>
-                    <div className="h-1.5 bg-red-50 rounded-full overflow-hidden">
-                      <div className="h-full rounded-full transition-all duration-500"
-                        style={{ width: `${(t.count / Math.max(blockedByTracker[0].count, 1)) * 100}%`, background: RED }} />
-                    </div>
+              {uniqueStatuses.length > 0 && (
+                <p className="text-[10px] text-stone-400 text-center max-w-xs">
+                  Statuts dans les données :{' '}
+                  <span className="font-medium text-stone-500">{uniqueStatuses.join(', ')}</span>
+                </p>
+              )}
+            </div>
+          ) : blockedByTracker.length === 1 ? (
+            <div className="flex flex-col items-center justify-center gap-0.5 py-3">
+              <span className="text-4xl font-bold tabular-nums text-red-600">{blockedByTracker[0].count}</span>
+              <span className="text-sm font-medium text-stone-600">{blockedByTracker[0].name}</span>
+              <span className="text-[10px] text-stone-400">ticket{blockedByTracker[0].count !== 1 ? 's' : ''} bloqué{blockedByTracker[0].count !== 1 ? 's' : ''}</span>
+            </div>
+          ) : (
+            <div className="space-y-2.5">
+              {blockedByTracker.map(t => (
+                <div key={t.name} className="space-y-1">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="font-medium text-stone-700">{t.name}</span>
+                    <span className="tabular-nums font-semibold text-red-600">{t.count}</span>
                   </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Radar / health chart */}
-          <div className="bg-white border border-stone-200 rounded-xl p-5">
-            <SectionHeading>Profil de santé (0 → 100, plus = mieux)</SectionHeading>
-            <ResponsiveContainer width="100%" height={200}>
-              <RadarChart data={radarData} margin={{ top: 8, right: 28, bottom: 8, left: 28 }}>
-                <PolarGrid stroke="#e7e5e4" />
-                <PolarAngleAxis dataKey="axis" tick={{ fontSize: 10, fill: '#78716c' }} />
-                <ReTooltip
-                  formatter={(v: number, _n: string, props: { payload?: RadarAxisData }) => [
-                    `${v}/100 — ${props.payload?.detail ?? ''}`, '',
-                  ]}
-                  contentStyle={{ background: '#fff', border: '1px solid #e7e5e4', borderRadius: 8, fontSize: 11, fontFamily: 'inherit' }} />
-                <Radar dataKey="value" stroke={BRAND} fill={BRAND} fillOpacity={0.18}
-                  dot={{ r: 3, fill: BRAND }} animationDuration={700} />
-              </RadarChart>
-            </ResponsiveContainer>
-            <div className="mt-3 grid grid-cols-1 gap-1.5">
-              {[
-                { axis: 'Résolution',         desc: '% de tickets fermés ou clôturés' },
-                { axis: 'Équilibre trackers',  desc: 'Diversité des types de demandes' },
-                { axis: 'Maîtrise priorités',  desc: 'Peu de tickets critiques ou urgents' },
-                { axis: 'Fluidité',            desc: 'Peu ou pas de tickets bloqués en attente' },
-                { axis: 'Vélocité résolution', desc: 'Rapidité moyenne de traitement' },
-              ].map(({ axis, desc }) => (
-                <div key={axis} className="flex items-start gap-2">
-                  <span className="mt-0.5 w-2 h-2 rounded-full flex-shrink-0" style={{ background: BRAND }} />
-                  <div className="flex flex-col leading-tight">
-                    <span className="text-[11px] font-semibold text-stone-600">{axis}</span>
-                    <span className="text-[10px] text-stone-400">{desc}</span>
+                  <div className="h-1.5 bg-red-50 rounded-full overflow-hidden">
+                    <div className="h-full rounded-full transition-all duration-500"
+                      style={{ width: `${(t.count / Math.max(blockedByTracker[0].count, 1)) * 100}%`, background: RED }} />
                   </div>
                 </div>
               ))}
             </div>
-          </div>
+          )}
         </div>
 
         {/* ── Row 5: Resolution timing ── */}
@@ -1027,9 +975,48 @@ export function ActivityDashboard({ issues, totalCount, project, dateFrom, dateT
           </div>
         )}
 
+        {/* ── Row 7: Meetings ── */}
+        {meetingCount > 0 && (
+          <div className="bg-white border border-stone-200 rounded-xl p-5">
+            <SectionHeading>
+              <Users className="w-3.5 h-3.5" style={{ color: BRAND }} />
+              Réunions & Points d'échange — {meetingCount} élément{meetingCount > 1 ? 's' : ''}
+            </SectionHeading>
+            <p className="text-xs text-stone-500 mb-3">
+              Les réunions sont exclues des métriques de tickets de traitement. Elles apparaissent ici à titre informatif.
+            </p>
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b border-stone-200 text-stone-400 uppercase tracking-wider text-[10px]">
+                    <th className="text-left p-2">#</th>
+                    <th className="text-left p-2">Sujet</th>
+                    <th className="text-center p-2">Statut</th>
+                    <th className="text-center p-2">Priorité</th>
+                    <th className="text-right p-2">Créé le</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {meetingIssues.map(issue => (
+                    <tr key={issue.id} className="border-b border-stone-100 hover:bg-stone-50">
+                      <td className="p-2 font-mono text-[10px] text-stone-500">#{issue.id}</td>
+                      <td className="p-2 font-medium max-w-xs truncate">{issue.subject}</td>
+                      <td className="p-2 text-center">
+                        <span className="text-[10px] bg-stone-100 text-stone-600 px-2 py-0.5 rounded-full">{issue.status.name}</span>
+                      </td>
+                      <td className="p-2 text-center text-[10px]">{issue.priority.name}</td>
+                      <td className="p-2 text-right text-[10px] text-stone-400">{formatDate(issue.created_on)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
         {/* Footer */}
         <div className="flex items-center justify-between pt-1 border-t border-stone-200 text-[10px] text-stone-400">
-          <span>Généré le {format(new Date(), 'dd MMMM yyyy à HH:mm', { locale: fr })}</span>
+          <span>Généré le {formatDateTime(new Date())}</span>
           <span className="font-semibold tracking-wide">SnapFlow</span>
         </div>
       </div>

@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { format, addDays, addWeeks, addMonths, startOfWeek, setDay } from 'date-fns';
 import { fr } from 'date-fns/locale';
+import { formatDate } from '@/lib/dateFormat';
 import ScheduleCalendarView from '@/components/schedules/ScheduleCalendarView';
 import type { CalendarSchedule } from '@/components/schedules/ScheduleCalendarView';
 import { formTesterApi } from '@/lib/form-tester/api';
@@ -415,7 +416,7 @@ const ReportSchedules = () => {
                 {calendarData.map(([date, items]) => (
                   <div key={date} className="border border-border/50 rounded-lg p-3">
                     <div className="text-sm font-semibold mb-2 text-primary">
-                      {format(new Date(date), 'EEEE dd MMMM yyyy', { locale: fr })}
+                      {formatDate(date)}
                     </div>
                     <div className="space-y-1">
                       {items.map(s => (

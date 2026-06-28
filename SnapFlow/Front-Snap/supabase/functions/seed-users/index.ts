@@ -83,9 +83,15 @@ Deno.serve(async (req) => {
           if (existingProject) {
             projectId = existingProject.id;
           } else {
+            const { data: client } = await supabaseAdmin
+              .from('clients')
+              .upsert({ name: p.site_name }, { onConflict: 'name' })
+              .select('id')
+              .single();
+
             const { data: newProject } = await supabaseAdmin
               .from('projects')
-              .insert({ url: p.url, site_name: p.site_name })
+              .insert({ url: p.url, site_name: p.site_name, client_id: client!.id })
               .select('id')
               .single();
             projectId = newProject!.id;

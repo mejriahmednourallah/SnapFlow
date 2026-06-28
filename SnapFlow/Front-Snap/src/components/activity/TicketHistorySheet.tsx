@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
-import { format } from 'date-fns';
-import { fr } from 'date-fns/locale';
+import { formatDate, formatDateTime } from '@/lib/dateFormat';
 import {
   Clock, Paperclip, User, ArrowRight, MessageSquare,
   Loader2, AlertCircle, ExternalLink,
@@ -162,7 +161,7 @@ function JournalEntry({ journal, isFirst }: JournalEntryProps) {
         <div className="flex items-baseline justify-between gap-2 mb-1.5">
           <span className="text-xs font-semibold text-stone-800">{journal.user.name}</span>
           <time className="text-[10px] text-stone-400 flex-shrink-0">
-            {format(new Date(journal.created_on), 'dd MMM yyyy à HH:mm', { locale: fr })}
+            {formatDateTime(journal.created_on)}
           </time>
         </div>
 
@@ -213,7 +212,7 @@ function CreationEntry({ ticket }: { ticket: TicketDetail }) {
         <div className="flex items-baseline justify-between gap-2 mb-1.5">
           <span className="text-xs font-semibold text-stone-800">{ticket.author.name}</span>
           <time className="text-[10px] text-stone-400 flex-shrink-0">
-            {format(new Date(ticket.created_on), 'dd MMM yyyy à HH:mm', { locale: fr })}
+            {formatDateTime(ticket.created_on)}
           </time>
         </div>
         <div className="text-xs text-stone-500 italic">
@@ -332,9 +331,9 @@ export function TicketHistorySheet({ issueId, redmineBaseUrl, onClose }: TicketH
                 <span>Tracker : <strong className="text-stone-700">{ticket.tracker.name}</strong></span>
                 <span className="flex items-center gap-1">
                   <Clock className="w-3 h-3" />
-                  Créé {format(new Date(ticket.created_on), 'dd MMM yyyy', { locale: fr })}
+                  Créé {formatDate(ticket.created_on)}
                 </span>
-                <span>Mis à jour {format(new Date(ticket.updated_on), 'dd MMM yyyy', { locale: fr })}</span>
+                <span>Mis à jour {formatDate(ticket.updated_on)}</span>
               </div>
 
               {/* Progress bar */}
@@ -418,7 +417,7 @@ export function TicketHistorySheet({ issueId, redmineBaseUrl, onClose }: TicketH
                           <div className="flex-1 min-w-0">
                             <div className="font-medium text-stone-800 truncate">{att.filename}</div>
                             <div className="text-stone-400 text-[10px]">
-                              {formatFileSize(att.filesize)} · {att.author.name} · {format(new Date(att.created_on), 'dd MMM yyyy', { locale: fr })}
+                              {formatFileSize(att.filesize)} · {att.author.name} · {formatDate(att.created_on)}
                             </div>
                           </div>
                           <ExternalLink className="w-3 h-3 text-stone-300 flex-shrink-0" />

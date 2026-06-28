@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { fr } from 'date-fns/locale';
+import { formatDateTime } from '@/lib/dateFormat';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { useAsyncAuditPoll } from '@/hooks/useAsyncAuditPoll';
 import { useProjectAssignments } from '@/hooks/useProjectAssignments';
@@ -603,7 +604,7 @@ const AuditCard = ({ audit, project, onView, onArchive, isArchived, isSelectedFo
         <div className="flex items-center gap-2">
           <FileText className="w-4 h-4 text-primary flex-shrink-0" />
           <span className="font-medium text-sm">
-            Rapport du {format(new Date(audit.created_at), 'dd MMM yyyy à HH:mm', { locale: fr })}
+            Rapport du {formatDateTime(audit.created_at)}
           </span>
           {['pending', 'running', 'generating'].includes(audit.status) && (
             <span className="text-xs bg-warning/20 text-warning px-2 py-0.5 rounded-full">En cours</span>

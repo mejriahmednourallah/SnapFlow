@@ -1,0 +1,399 @@
+name: SnapFlow CI
+
+on:
+  workflow_dispatch:
+    inputs:
+      scope:
+        description: "Which test surface should run?"
+        required: true
+        default: "full"
+        type: choice
+        options:
+          - full
+          - frontend
+          - backend
+          - quick
+      run_security:
+        description: "Run lightweight secret/dependency scanning"
+        required: true
+        default: true
+        type: boolean
+      run_build:
+        description: "Build the frontend production bundle"
+        required: true
+        default: true
+        type: boolean
+  pull_request:
+    branches: ["**"]
+  push:
+    branches: ["main", "master", "develop"]
+
+concurrency:
+  group: snapflow-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: "20"
+  PYTHON_VERSION: "3.11"
+  GO_VERSION: "1.25.6"
+  FRONTEND_DIR: Front-Snap
+  SERVICES_DIR: V3-Microservices
+
+jobs:
+  detect-changes:
+    name: Stage 0 - Detect Changes
+    runs-on: ubuntu-latest
+    outputs:
+      frontend: ${{ steps.filter.outputs.frontend }}
+      backend: ${{ steps.filter.outputs.backend }}
+      ci: ${{ steps.filter.outputs.ci }}
+      scope: ${{ steps.scope.outputs.scope }}
+      run_security: ${{ steps.scope.outputs.run_security }}
+      run_build: ${{ steps.scope.outputs.run_build }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve requested scope
+        id: scope
+        shell: bash
+        run: |
+          echo "scope=${{ github.event.inputs.scope || 'full' }}" >> "$GITHUB_OUTPUT"
+          echo "run_security=${{ github.event.inputs.run_security || 'true' }}" >> "$GITHUB_OUTPUT"
+          echo "run_build=${{ github.event.inputs.run_build || 'true' }}" >> "$GITHUB_OUTPUT"
+
+      - name: Detect changed areas
+        id: filter
+        shell: bash
+        run: |
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            base="${{ github.event.pull_request.base.sha }}"
+          else
+            base="$(git rev-parse HEAD^ 2>/dev/null || git rev-parse HEAD)"
+          fi
+
+          changed="$(git diff --name-only "$base" HEAD || true)"
+          echo "$changed"
+
+          mark() {
+            local name="$1"
+            local regex="$2"
+            if [[ -z "$changed" ]] || echo "$changed" | grep -Eq "$regex"; then
+              echo "$name=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "$name=false" >> "$GITHUB_OUTPUT"
+            fi
+          }
+
+          mark frontend '(^Front-Snap/|^\.github/workflows/)'
+          mark backend '(^V3-Microservices/|^k8s/|^\.github/workflows/)'
+          mark ci '(^\.github/workflows/)'
+
+      - name: Stage summary
+        shell: bash
+        run: |
+          {
+            echo "## SnapFlow CI"
+            echo
+            echo "| Area | Changed |"
+            echo "|---|---:|"
+            echo "| Frontend | ${{ steps.filter.outputs.frontend }} |"
+            echo "| Backend / microservices | ${{ steps.filter.outputs.backend }} |"
+            echo "| CI | ${{ steps.filter.outputs.ci }} |"
+            echo
+            echo "Scope: \`${{ steps.scope.outputs.scope }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  frontend-smoke:
+    name: Stage 1 - Frontend Smoke
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    if: >
+      needs.detect-changes.outputs.scope == 'full' ||
+      needs.detect-changes.outputs.scope == 'frontend' ||
+      needs.detect-changes.outputs.scope == 'quick' ||
+      needs.detect-changes.outputs.frontend == 'true'
+    defaults:
+      run:
+        working-directory: ${{ env.FRONTEND_DIR }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: Front-Snap/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: TypeScript contract
+        run: npx tsc --noEmit
+
+      - name: Build frontend
+        if: needs.detect-changes.outputs.run_build == 'true'
+        run: npm run build
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "| Stage | Status |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|---|---|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Frontend smoke | ${{ job.status }} |" >> "$GITHUB_STEP_SUMMARY"
+
+  frontend-tests:
+    name: Stage 2 - Frontend Tests (${{ matrix.group }})
+    runs-on: ubuntu-latest
+    needs: [detect-changes, frontend-smoke]
+    if: >
+      needs.detect-changes.outputs.scope == 'full' ||
+      needs.detect-changes.outputs.scope == 'frontend' ||
+      needs.detect-changes.outputs.frontend == 'true'
+    defaults:
+      run:
+        working-directory: ${{ env.FRONTEND_DIR }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - group: audit-reporting
+            pattern: "auditMapper.axis auditPdfData auditDetailsCsvEvidenceCleanup activityPdfContract activityReportScoreRemoval activityMeeting remainingTicketsCleanup dateFormat ecoWording clientsProjectGrouping activityPdfBrandingSettings rgpdWording perimeterTerminology siteLogoPdfContract siteLogoResolver clientLogoSidebar"
+          - group: form-workflows
+            pattern: "formTester"
+          - group: project-sync
+            pattern: "projectUrls projectSync example"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: Front-Snap/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run Vitest group
+        run: npm test -- ${{ matrix.pattern }}
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "| Frontend group | Status | Pattern |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|---|---|---|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| ${{ matrix.group }} | ${{ job.status }} | \`${{ matrix.pattern }}\` |" >> "$GITHUB_STEP_SUMMARY"
+
+  frontend-all-tests:
+    name: Stage 2.5 - Frontend Full Vitest
+    runs-on: ubuntu-latest
+    needs: [detect-changes, frontend-tests]
+    if: needs.detect-changes.outputs.scope == 'full'
+    defaults:
+      run:
+        working-directory: ${{ env.FRONTEND_DIR }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: Front-Snap/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run complete Vitest suite
+        run: npm test
+
+  go-tests:
+    name: Stage 3 - Go Tests (${{ matrix.service }})
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    if: >
+      needs.detect-changes.outputs.scope == 'full' ||
+      needs.detect-changes.outputs.scope == 'backend' ||
+      needs.detect-changes.outputs.backend == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - service: v3-scanner-go
+            path: V3-Microservices/v3-scanner-go
+          - service: v3-cli
+            path: V3-Microservices/v3-cli
+    defaults:
+      run:
+        working-directory: ${{ matrix.path }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: ${{ matrix.path }}/go.sum
+
+      - name: Run Go tests
+        run: go test ./...
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "| Go service | Status |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|---|---|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| ${{ matrix.service }} | ${{ job.status }} |" >> "$GITHUB_STEP_SUMMARY"
+
+  python-tests:
+    name: Stage 4 - Python Tests (${{ matrix.service }})
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    if: >
+      needs.detect-changes.outputs.scope == 'full' ||
+      needs.detect-changes.outputs.scope == 'backend' ||
+      needs.detect-changes.outputs.backend == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - service: aggregator
+            path: V3-Microservices/v3-aggregator
+            command: python -m pytest tests -q
+          - service: nlp-worker
+            path: V3-Microservices/v3-nlp-worker
+            command: python -m pytest tests -q
+          - service: visual-regression
+            path: V3-Microservices/v3-visual-regression
+            command: python -m pytest tests -q
+          - service: form-executor
+            path: V3-Microservices/v3-form-executor
+            command: python -m pytest tests -q
+    defaults:
+      run:
+        working-directory: ${{ matrix.path }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: ${{ matrix.path }}/requirements.txt
+
+      - name: Install service dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then
+            python -m pip install -r requirements.txt
+          fi
+
+      - name: Install Playwright browsers
+        if: contains(matrix.service, 'visual') || contains(matrix.service, 'form-executor')
+        run: python -m playwright install --with-deps chromium
+
+      - name: Run pytest
+        run: ${{ matrix.command }}
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "| Python service | Status | Command |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|---|---|---|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| ${{ matrix.service }} | ${{ job.status }} | \`${{ matrix.command }}\` |" >> "$GITHUB_STEP_SUMMARY"
+
+  security-checks:
+    name: Stage 5 - Security Checks
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    if: needs.detect-changes.outputs.run_security == 'true'
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Secret pattern scan
+        shell: bash
+        run: |
+          set -euo pipefail
+          ! git grep -n -E '(SUPABASE_SERVICE_ROLE_KEY|REDMINE_API_KEY|postgresql://[^ ]+:[^ ]+@|BEGIN (RSA|OPENSSH|PRIVATE) KEY)' -- \
+            ':!Front-Snap/package-lock.json' \
+            ':!**/*.md'
+
+      - name: Setup Node for npm audit
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: Front-Snap/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: ${{ env.FRONTEND_DIR }}
+        run: npm ci
+
+      - name: NPM audit
+        working-directory: ${{ env.FRONTEND_DIR }}
+        run: npm audit --audit-level=high
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "| Security check | Status |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|---|---|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Secret/dependency scan | ${{ job.status }} |" >> "$GITHUB_STEP_SUMMARY"
+
+  pipeline-summary:
+    name: Pipeline Summary
+    runs-on: ubuntu-latest
+    needs:
+      - detect-changes
+      - frontend-smoke
+      - frontend-tests
+      - frontend-all-tests
+      - go-tests
+      - python-tests
+      - security-checks
+    if: always()
+    steps:
+      - name: Final test table
+        shell: bash
+        run: |
+          {
+            echo "## Test Results"
+            echo
+            echo "| Stage | Result |"
+            echo "|---|---:|"
+            echo "| Detect Changes | ${{ needs.detect-changes.result }} |"
+            echo "| Frontend Smoke | ${{ needs.frontend-smoke.result }} |"
+            echo "| Frontend Matrix | ${{ needs.frontend-tests.result }} |"
+            echo "| Frontend Full Vitest | ${{ needs.frontend-all-tests.result }} |"
+            echo "| Go Matrix | ${{ needs.go-tests.result }} |"
+            echo "| Python Matrix | ${{ needs.python-tests.result }} |"
+            echo "| Security Checks | ${{ needs.security-checks.result }} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Fail if required stages failed
+        shell: bash
+        run: |
+          failed=0
+          for result in \
+            "${{ needs.detect-changes.result }}" \
+            "${{ needs.frontend-smoke.result }}" \
+            "${{ needs.frontend-tests.result }}" \
+            "${{ needs.frontend-all-tests.result }}" \
+            "${{ needs.go-tests.result }}" \
+            "${{ needs.python-tests.result }}"; do
+            case "$result" in
+              failure|cancelled) failed=1 ;;
+            esac
+          done
+          exit "$failed"

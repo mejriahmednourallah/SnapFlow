@@ -11,7 +11,7 @@ import { LogOut } from 'lucide-react';
 import snapflowLogo from '@/assets/snapflow-logo.png';
 
 const AppLayout = () => {
-  const { user, loading, isAdmin, displayName, signOut } = useAuth();
+  const { user, loading, isAdmin, userRole, displayName, signOut } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const isFormBuilderRoute = /^\/app\/workflows\/form-tester\/[^/]+(?:\/(?:plan|results))?\/?$/.test(location.pathname);
@@ -42,7 +42,7 @@ const AppLayout = () => {
                 {displayName}
               </span>
               <span className="text-[10px] bg-primary/10 text-primary px-2 py-0.5 rounded-full font-medium hidden sm:inline">
-                {isAdmin ? 'Admin' : 'Chargé'}
+                {isAdmin ? 'Super Admin' : userRole === 'rapporteur' ? 'Rapporteur' : userRole === 'testeur' ? 'Testeur' : 'Charge'}
               </span>
               <Button
                 variant="ghost"

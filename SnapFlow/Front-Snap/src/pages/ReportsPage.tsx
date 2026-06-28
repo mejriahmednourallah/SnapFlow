@@ -4,9 +4,8 @@ import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { FileBarChart, Eye, Calendar, Globe } from 'lucide-react';
-import { format } from 'date-fns';
-import { fr } from 'date-fns/locale';
 import { getAuditScoreFromAny } from '@/lib/auditReadUtils';
+import { formatDateTime } from '@/lib/dateFormat';
 
 interface AuditWithProject {
   id: string;
@@ -109,7 +108,7 @@ const ReportsPage = () => {
                   </div>
                   <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
                     <Calendar className="w-3 h-3" />
-                    <span>{format(new Date(audit.created_at), 'dd MMM yyyy à HH:mm', { locale: fr })}</span>
+                    <span>{formatDateTime(audit.created_at)}</span>
                   </div>
                 </div>
                 <Button variant="outline" size="sm" onClick={() => navigate(`/audit/${audit.id}/view`)} className="flex-shrink-0">

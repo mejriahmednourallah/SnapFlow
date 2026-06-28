@@ -14,6 +14,27 @@ export type Database = {
   }
   public: {
     Tables: {
+      app_settings: {
+        Row: {
+          key: string
+          updated_at: string
+          updated_by: string | null
+          value: string
+        }
+        Insert: {
+          key: string
+          updated_at?: string
+          updated_by?: string | null
+          value: string
+        }
+        Update: {
+          key?: string
+          updated_at?: string
+          updated_by?: string | null
+          value?: string
+        }
+        Relationships: []
+      }
       activity_reports: {
         Row: {
           archived_at: string | null
@@ -93,7 +114,27 @@ export type Database = {
           },
         ]
       }
-      notifications: {
+      clients: {
+        Row: {
+          created_at: string
+          id: string
+          name: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          name: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          name?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }      notifications: {
         Row: {
           category: string
           created_at: string
@@ -203,6 +244,7 @@ export type Database = {
       projects: {
         Row: {
           audit_url_needs_review: boolean
+          client_id: string
           created_at: string
           id: string
           logo_url: string | null
@@ -213,6 +255,7 @@ export type Database = {
         }
         Insert: {
           audit_url_needs_review?: boolean
+          client_id: string
           created_at?: string
           id?: string
           logo_url?: string | null
@@ -223,6 +266,7 @@ export type Database = {
         }
         Update: {
           audit_url_needs_review?: boolean
+          client_id?: string
           created_at?: string
           id?: string
           logo_url?: string | null
