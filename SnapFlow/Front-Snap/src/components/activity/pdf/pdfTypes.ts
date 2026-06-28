@@ -1,6 +1,7 @@
 // ─── Shared types + palette for PDF report slides ────────────────────────────
 
 import type { PdfTheme } from '@/components/pdf/theme';
+import type { ProjectPerimeterBlock } from '@/lib/projectPerimeters';
 
 export const BRAND   = '#0e9fb0';
 export const GREEN   = '#16a34a';
@@ -102,4 +103,5 @@ export interface PdfData {
   // Helpers passed from parent (avoid re-implementing)
   statusColorOf: (name: string, idx: number) => string;
   countByFn: <T>(arr: T[], key: (item: T) => string) => { name: string; count: number }[];
+  perimeterBlocks?: ProjectPerimeterBlock[];
 }

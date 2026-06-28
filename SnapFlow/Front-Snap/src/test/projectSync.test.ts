@@ -1,5 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { supabase } from '@/integrations/supabase/client';
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 type Assignment = {
   project_id: string;
@@ -83,6 +82,8 @@ const state = vi.hoisted(() => ({
   callLog: [] as string[],
 }));
 
+let supabase: typeof import('@/integrations/supabase/client')['supabase'];
+
 vi.mock('@/integrations/supabase/client', () => {
   const applyFilters = <T extends Record<string, any>>(rows: T[], filters: Record<string, any>) => {
     let result = rows;
@@ -152,6 +153,10 @@ vi.mock('@/integrations/supabase/client', () => {
       from: vi.fn((table: string) => createQuery(table)),
     },
   };
+});
+
+beforeAll(async () => {
+  ({ supabase } = await import('@/integrations/supabase/client'));
 });
 
 const syncAccountProjects = () => supabase.functions.invoke('fetch-redmine', {

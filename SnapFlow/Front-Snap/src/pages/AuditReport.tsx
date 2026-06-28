@@ -546,6 +546,7 @@ const AuditReport = () => {
             <TabDetails
               audit={audit}
               selectedAxisId={selectedAxisId}
+              projectId={resolvedProjectId}
               isEditMode={isEditMode}
               onUpdateFinding={handleUpdateFinding}
             />

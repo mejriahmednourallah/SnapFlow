@@ -1,5 +1,6 @@
 import { Buffer } from 'buffer';
 import type { DashboardProject, RedmineIssue, ActivityPdfOptions } from '@/components/activity/pdf/pdfTypes';
+import type { ProjectPerimeterBlock } from '@/lib/projectPerimeters';
 import { resolveSiteLogoDataUrl } from '@/lib/siteLogoResolver';
 
 export interface GenerateActivityPdfParams {
@@ -15,6 +16,7 @@ export interface GenerateActivityPdfParams {
     trackerLabel?: string;
   };
   options: ActivityPdfOptions;
+  perimeterBlocks?: ProjectPerimeterBlock[];
 }
 
 function slugify(value: string) {

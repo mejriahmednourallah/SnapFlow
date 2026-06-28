@@ -18,7 +18,7 @@ import { Button } from '@/components/ui/button';
 export interface CalendarSchedule {
   id: string;
   title: string;
-  kind: 'audit' | 'activity' | 'form_tester';
+  kind: 'audit' | 'activity' | 'mystery_visit' | 'form_tester';
   frequency: string;
   next_run_at: string;
   is_active: boolean;

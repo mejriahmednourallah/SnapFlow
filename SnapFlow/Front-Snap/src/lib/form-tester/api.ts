@@ -64,11 +64,12 @@ async function invokeFormTester<TResponse>(
 }
 
 export const formTesterApi = {
-  async listWorkflows(params?: { status?: WorkflowStatus; view?: WorkflowListView }): Promise<WorkflowListItem[]> {
+  async listWorkflows(params?: { status?: WorkflowStatus; view?: WorkflowListView; projectId?: string | null }): Promise<WorkflowListItem[]> {
     const response = await invokeFormTester<{ workflows: WorkflowListItem[] }>('form-workflows', {
       action: 'list',
       status: params?.status,
       view: params?.view ?? 'mine',
+      project_id: params?.projectId ?? undefined,
     });
     return response.workflows ?? [];
   },
@@ -104,11 +105,12 @@ export const formTesterApi = {
     };
   },
 
-  async createWorkflow(name: string, targetUrl: string): Promise<FormWorkflow> {
+  async createWorkflow(name: string, targetUrl: string, projectId?: string | null): Promise<FormWorkflow> {
     const response = await invokeFormTester<{ workflow: FormWorkflow }>('form-workflows', {
       action: 'create',
       name,
       target_url: targetUrl,
+      project_id: projectId ?? null,
     });
     return response.workflow;
   },
@@ -131,6 +133,7 @@ export const formTesterApi = {
     workflowId: string;
     name?: string;
     targetUrl?: string;
+    projectId?: string | null;
     fieldUpdates?: Array<{ field_id: string; user_value: string | null }>;
     nodePositionUpdates?: NodePositionUpdate[];
   }): Promise<void> {
@@ -139,6 +142,7 @@ export const formTesterApi = {
       workflow_id: payload.workflowId,
       name: payload.name,
       target_url: payload.targetUrl,
+      project_id: payload.projectId,
       field_updates: payload.fieldUpdates ?? [],
       node_position_updates: payload.nodePositionUpdates ?? [],
     });

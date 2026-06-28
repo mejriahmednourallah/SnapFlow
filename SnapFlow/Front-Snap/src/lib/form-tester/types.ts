@@ -92,6 +92,8 @@ export interface FormWorkflow {
   id: string;
   org_id: string;
   created_by: string;
+  project_id: string | null;
+  project_name?: string | null;
   name: string;
   target_url: string;
   status: WorkflowStatus;

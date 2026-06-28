@@ -6,6 +6,7 @@ import { ScoreGauge } from '@/components/ScoreGauge';
 import { ExternalLink, ChevronDown, ChevronRight, AlertCircle, Image, FileText, Newspaper, CheckCircle, XCircle, AlertTriangle, ShieldAlert, Paperclip, Bug, Lightbulb, Search, Camera, FlaskConical, Pencil, Save } from 'lucide-react';
 import { AxisIcon } from '@/components/audit/AxisIcon';
 import { EvidenceDetailsDialog } from '@/components/audit/EvidenceDetailsDialog';
+import { AuditWorkflowSummary } from '@/components/audit/AuditWorkflowSummary';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -22,6 +23,7 @@ import {
 interface TabDetailsProps {
   audit: AuditReport;
   selectedAxisId?: string;
+  projectId?: string | null;
   isEditMode?: boolean;
   onUpdateFinding?: (axisId: string, findingId: string, updates: Partial<AuditFinding>) => void;
 }
@@ -40,7 +42,7 @@ function resolveFindingStatus(finding: AuditFinding): FindingStatus {
   return finding.status ?? (finding.type === 'pass' ? 'pass' : finding.type === 'bug' ? 'fail' : 'not_measured');
 }
 
-export function TabDetails({ audit, selectedAxisId, isEditMode = false, onUpdateFinding }: TabDetailsProps) {
+export function TabDetails({ audit, selectedAxisId, projectId, isEditMode = false, onUpdateFinding }: TabDetailsProps) {
   const visibleAxes = audit.axes
     .map((axis) => ({ ...axis, findings: axis.findings.filter(isClientVisibleFinding) }))
     .filter((axis) => axis.findings.length > 0);
@@ -183,6 +185,7 @@ export function TabDetails({ audit, selectedAxisId, isEditMode = false, onUpdate
         });
         const isSeoAxis = ax.id === 'seo';
         const isContentAxis = ax.id === 'content';
+        const isFunctionalAxis = /func|fonction/i.test(`${ax.id} ${ax.name}`);
 
         return (
           <div key={ax.id} className="glass-card overflow-hidden">
@@ -201,6 +204,7 @@ export function TabDetails({ audit, selectedAxisId, isEditMode = false, onUpdate
 
             {isExpanded && (
               <div className="border-t border-border/50 p-4 space-y-3">
+                {isFunctionalAxis ? <AuditWorkflowSummary projectId={projectId} /> : null}
                 <div className="flex items-center gap-4 mb-4">
                   <ScoreGauge score={breakdown.scorePct} size={64} strokeWidth={5} valueText={`${breakdown.x}/${breakdown.y}`} />
                   <div>

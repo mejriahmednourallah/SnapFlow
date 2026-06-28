@@ -18,6 +18,7 @@ import { format } from 'date-fns';
 import { fr } from 'date-fns/locale';
 import { formatDateTime } from '@/lib/dateFormat';
 import { ACTIVITY_PDF_BRAND_DEFAULTS, fetchActivityPdfBrandDefaults } from '@/lib/appSettings';
+import { normalizeProjectPerimeterBlocks, hasProjectPerimeterBlocks, type ProjectPerimeterBlock } from '@/lib/projectPerimeters';
 
 import { useRedmineIssues } from '@/hooks/useRedmineIssues';
 
@@ -90,6 +91,7 @@ const ActivityReport = () => {
   const [activeView, setActiveView] = useState<'tickets' | 'saved' | 'compare' | 'dashboard'>('tickets');
   const [selectedForCompare, setSelectedForCompare] = useState<string[]>([]);
   const [historyIssueId, setHistoryIssueId] = useState<number | null>(null);
+  const [perimeterBlocks, setPerimeterBlocks] = useState<ProjectPerimeterBlock[]>([]);
 
   // Dashboard full-fetch state
   const [dashboardIssues, setDashboardIssues] = useState<RedmineIssue[]>([]);
@@ -136,15 +138,21 @@ const ActivityReport = () => {
   useEffect(() => {
     if (!user || !projectId) return;
     const init = async () => {
-      const [projRes, filterOptions, reports] = await Promise.all([
+      const [projRes, filterOptions, reports, perimeterRes] = await Promise.all([
         supabase.from('projects').select('*').eq('id', projectId).single(),
         fetchIssueFilters(),
         fetchActivityReports(projectId),
+        supabase
+          .from('project_perimeter_blocks')
+          .select('*')
+          .eq('project_id', projectId)
+          .order('display_order', { ascending: true }),
       ]);
       setProject(projRes.data || null);
       setStatuses(filterOptions.statuses);
       setTrackers(filterOptions.trackers);
       setSavedReports(reports);
+      setPerimeterBlocks(normalizeProjectPerimeterBlocks(perimeterRes.data as Array<Record<string, unknown>> | null));
     };
     init();
   }, [user, projectId]);
@@ -292,7 +300,10 @@ const ActivityReport = () => {
         theme: selectedTheme,
         themeId: selectedTheme.id,
         pdfColor,
-        sections: pdfSections,
+        sections: {
+          ...pdfSections,
+          perimetre: pdfSections.perimetre !== false && hasProjectPerimeterBlocks(perimeterBlocks),
+        },
         coverKpis,
         brandLeft: pdfBrandLeft,
         brandRight: pdfBrandRight,
@@ -313,6 +324,7 @@ const ActivityReport = () => {
           trackerLabel: filters.tracker ? trackers.find(t => String(t.id) === filters.tracker)?.name || filters.tracker : undefined,
         },
         options,
+        perimeterBlocks,
       });
       setPdfModalOpen(false);
       toast({ title: 'PDF telecharge', description: `${exportIssues.length} tickets exportes.` });
@@ -375,6 +387,7 @@ const ActivityReport = () => {
         setPdfContactWeb2={setPdfContactWeb2}
         isExporting={isExporting}
         doExportPDF={doExportActivityPDF}
+        hasPerimeterBlocks={hasProjectPerimeterBlocks(perimeterBlocks)}
       />
       {/* View toggle */}
       <div className="flex items-center gap-2 sm:gap-4 overflow-x-auto pb-1">

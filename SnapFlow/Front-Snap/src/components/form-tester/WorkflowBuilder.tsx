@@ -18,6 +18,7 @@ import { NodeInspectorPanel } from './builder/NodeInspectorPanel';
 import { ScenarioSidebar } from './builder/ScenarioSidebar';
 import { WorkflowBuilderShell } from './builder/WorkflowBuilderShell';
 import { WorkflowCanvas } from './builder/WorkflowCanvas';
+import { WorkflowRedmineDraftDialog } from './WorkflowRedmineDraftDialog';
 import { AssertNode } from './nodes/AssertNode';
 import { ConditionNode } from './nodes/ConditionNode';
 import { FormFillNode } from './nodes/FormFillNode';
@@ -345,6 +346,7 @@ export function WorkflowBuilder({ workflowId, isOperator }: WorkflowBuilderProps
               Voir les resultats
             </Button>
           ) : null}
+          <WorkflowRedmineDraftDialog workflow={workflow} />
         </div>
       </div>
     </header>

@@ -134,7 +134,85 @@ export type Database = {
           updated_at?: string
         }
         Relationships: []
-      }      notifications: {
+      }
+      form_workflows: {
+        Row: {
+          approved_at: string | null
+          approved_by: string | null
+          approval_note: string | null
+          blocked_reason: string | null
+          confidence: string
+          created_at: string
+          created_by: string
+          detected_at: string | null
+          detection_evidence: Json
+          detection_sources: string[]
+          executed_at: string | null
+          id: string
+          name: string
+          org_id: string
+          project_id: string | null
+          rejection_note: string | null
+          risk_flags: string[]
+          status: string
+          target_url: string
+          updated_at: string
+        }
+        Insert: {
+          approved_at?: string | null
+          approved_by?: string | null
+          approval_note?: string | null
+          blocked_reason?: string | null
+          confidence?: string
+          created_at?: string
+          created_by: string
+          detected_at?: string | null
+          detection_evidence?: Json
+          detection_sources?: string[]
+          executed_at?: string | null
+          id?: string
+          name: string
+          org_id: string
+          project_id?: string | null
+          rejection_note?: string | null
+          risk_flags?: string[]
+          status?: string
+          target_url: string
+          updated_at?: string
+        }
+        Update: {
+          approved_at?: string | null
+          approved_by?: string | null
+          approval_note?: string | null
+          blocked_reason?: string | null
+          confidence?: string
+          created_at?: string
+          created_by?: string
+          detected_at?: string | null
+          detection_evidence?: Json
+          detection_sources?: string[]
+          executed_at?: string | null
+          id?: string
+          name?: string
+          org_id?: string
+          project_id?: string | null
+          rejection_note?: string | null
+          risk_flags?: string[]
+          status?: string
+          target_url?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "form_workflows_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      notifications: {
         Row: {
           category: string
           created_at: string
@@ -234,6 +312,47 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "project_assignments_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      project_perimeter_blocks: {
+        Row: {
+          created_at: string
+          display_order: number
+          id: string
+          items: Json
+          project_id: string
+          subtitle: string | null
+          title: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          display_order?: number
+          id?: string
+          items?: Json
+          project_id: string
+          subtitle?: string | null
+          title: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          display_order?: number
+          id?: string
+          items?: Json
+          project_id?: string
+          subtitle?: string | null
+          title?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "project_perimeter_blocks_project_id_fkey"
             columns: ["project_id"]
             isOneToOne: false
             referencedRelation: "projects"
@@ -413,10 +532,16 @@ export type Database = {
           day_of_month: number | null
           day_of_week: number | null
           end_date: string | null
+          executed_at: string | null
           frequency: string
           id: string
           is_active: boolean
           last_run_at: string | null
+          mystery_allowed_end_hour: number | null
+          mystery_allowed_start_hour: number | null
+          mystery_randomized_run_at: string | null
+          mystery_window_end: string | null
+          mystery_window_start: string | null
           next_run_at: string
           project_id: string
           report_type: string
@@ -429,10 +554,16 @@ export type Database = {
           day_of_month?: number | null
           day_of_week?: number | null
           end_date?: string | null
+          executed_at?: string | null
           frequency: string
           id?: string
           is_active?: boolean
           last_run_at?: string | null
+          mystery_allowed_end_hour?: number | null
+          mystery_allowed_start_hour?: number | null
+          mystery_randomized_run_at?: string | null
+          mystery_window_end?: string | null
+          mystery_window_start?: string | null
           next_run_at: string
           project_id: string
           report_type: string
@@ -445,10 +576,16 @@ export type Database = {
           day_of_month?: number | null
           day_of_week?: number | null
           end_date?: string | null
+          executed_at?: string | null
           frequency?: string
           id?: string
           is_active?: boolean
           last_run_at?: string | null
+          mystery_allowed_end_hour?: number | null
+          mystery_allowed_start_hour?: number | null
+          mystery_randomized_run_at?: string | null
+          mystery_window_end?: string | null
+          mystery_window_start?: string | null
           next_run_at?: string
           project_id?: string
           report_type?: string

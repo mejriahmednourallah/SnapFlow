@@ -1,9 +1,10 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ClipboardCheck, FolderKanban, Plus, SquareArrowOutUpRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useFormTester } from '@/hooks/useFormTester';
+import { supabase } from '@/integrations/supabase/client';
 import type { WorkflowListView, WorkflowStatus } from '@/lib/form-tester/types';
 import { formatDate } from '@/lib/dateFormat';
 import { StatusBadge } from './StatusBadge';
@@ -16,6 +17,8 @@ export function WorkflowList({ isOperator }: WorkflowListProps) {
   const navigate = useNavigate();
   const { workflows, isLoading, isCreating, error, createWorkflow, reload } = useFormTester(isOperator);
 
+  const [projects, setProjects] = useState<Array<{ id: string; site_name: string }>>([]);
+  const [selectedProjectId, setSelectedProjectId] = useState<string>('all');
   const [newName, setNewName] = useState('');
   const [newUrl, setNewUrl] = useState('');
   const [statusFilter, setStatusFilter] = useState<WorkflowStatus | 'all'>('all');
@@ -28,21 +31,33 @@ export function WorkflowList({ isOperator }: WorkflowListProps) {
 
   const handleCreate = async (): Promise<void> => {
     if (!newName.trim() || !newUrl.trim()) return;
-    const workflow = await createWorkflow(newName, newUrl);
+    const workflow = await createWorkflow(newName, newUrl, selectedProjectId === 'all' ? null : selectedProjectId);
     setNewName('');
     setNewUrl('');
     navigate(`/app/workflows/form-tester/${workflow.id}`);
   };
 
   const handleRefresh = async (): Promise<void> => {
-    await reload(statusFilter === 'all' ? undefined : statusFilter, listView);
+    await reload(statusFilter === 'all' ? undefined : statusFilter, listView, selectedProjectId === 'all' ? null : selectedProjectId);
   };
 
   const changeView = async (view: WorkflowListView): Promise<void> => {
     setListView(view);
     setStatusFilter('all');
-    await reload(undefined, view);
+    await reload(undefined, view, selectedProjectId === 'all' ? null : selectedProjectId);
   };
+
+  useEffect(() => {
+    supabase
+      .from('projects')
+      .select('id, site_name')
+      .order('site_name', { ascending: true })
+      .then(({ data }) => setProjects((data as Array<{ id: string; site_name: string }> | null) ?? []));
+  }, []);
+
+  useEffect(() => {
+    void reload(statusFilter === 'all' ? undefined : statusFilter, listView, selectedProjectId === 'all' ? null : selectedProjectId);
+  }, [selectedProjectId]);
 
   return (
     <div className="space-y-5">
@@ -79,6 +94,16 @@ export function WorkflowList({ isOperator }: WorkflowListProps) {
               </button>
             ) : null}
           </div>
+          <select
+            value={selectedProjectId}
+            onChange={(event) => setSelectedProjectId(event.target.value)}
+            className="h-9 rounded-md border border-input bg-background px-3 text-sm"
+          >
+            <option value="all">Tous les projets</option>
+            {projects.map((project) => (
+              <option key={project.id} value={project.id}>{project.site_name}</option>
+            ))}
+          </select>
           <select
             value={statusFilter}
             onChange={(event) => setStatusFilter(event.target.value as WorkflowStatus | 'all')}
@@ -131,6 +156,9 @@ export function WorkflowList({ isOperator }: WorkflowListProps) {
                 <p className="text-xs text-muted-foreground truncate mt-1">{workflow.target_url}</p>
                 <div className="mt-2 flex items-center gap-2">
                   <StatusBadge status={workflow.status} size="sm" />
+                  <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground">
+                    {workflow.project_name ?? 'Global'}
+                  </span>
                   {workflow.confidence ? (
                     <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground">
                       {workflow.confidence}

@@ -7,8 +7,8 @@ interface UseFormTesterReturn {
   isLoading: boolean;
   isCreating: boolean;
   error: string | null;
-  reload: (status?: WorkflowStatus, view?: WorkflowListView) => Promise<void>;
-  createWorkflow: (name: string, targetUrl: string) => Promise<FormWorkflow>;
+  reload: (status?: WorkflowStatus, view?: WorkflowListView, projectId?: string | null) => Promise<void>;
+  createWorkflow: (name: string, targetUrl: string, projectId?: string | null) => Promise<FormWorkflow>;
 }
 
 export function useFormTester(isOperator: boolean): UseFormTesterReturn {
@@ -17,13 +17,14 @@ export function useFormTester(isOperator: boolean): UseFormTesterReturn {
   const [isCreating, setIsCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const reload = useCallback(async (status?: WorkflowStatus, view: WorkflowListView = 'mine'): Promise<void> => {
+  const reload = useCallback(async (status?: WorkflowStatus, view: WorkflowListView = 'mine', projectId?: string | null): Promise<void> => {
     setIsLoading(true);
     setError(null);
     try {
       const data = await formTesterApi.listWorkflows({
         status,
         view,
+        projectId,
       });
       setWorkflows(data);
     } catch (loadError) {
@@ -34,11 +35,11 @@ export function useFormTester(isOperator: boolean): UseFormTesterReturn {
     }
   }, [isOperator]);
 
-  const createWorkflow = useCallback(async (name: string, targetUrl: string): Promise<FormWorkflow> => {
+  const createWorkflow = useCallback(async (name: string, targetUrl: string, projectId?: string | null): Promise<FormWorkflow> => {
     setIsCreating(true);
     setError(null);
     try {
-      const workflow = await formTesterApi.createWorkflow(name, targetUrl);
+      const workflow = await formTesterApi.createWorkflow(name, targetUrl, projectId);
       setWorkflows((current) => [
         { ...workflow, latest_result: null },
         ...current.filter((item) => item.id !== workflow.id),

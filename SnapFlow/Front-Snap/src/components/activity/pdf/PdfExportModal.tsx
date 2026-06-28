@@ -28,6 +28,7 @@ export interface PdfExportModalProps {
   pdfContactWeb2: string;  setPdfContactWeb2:  (v: string) => void;
   isExporting: boolean;
   doExportPDF: () => void;
+  hasPerimeterBlocks?: boolean;
 }
 
 const COVER_KPI_DEFS = [
@@ -74,6 +75,7 @@ export function PdfExportModal({
   pdfContactWeb, setPdfContactWeb,
   pdfContactWeb2, setPdfContactWeb2,
   isExporting, doExportPDF,
+  hasPerimeterBlocks = true,
 }: PdfExportModalProps) {
   const toggleSection = (key: string) =>
     setPdfSections(prev => ({ ...prev, [key]: !prev[key] }));
@@ -128,16 +130,22 @@ export function PdfExportModal({
 
         <div className="space-y-1">
           <p className="text-sm font-semibold text-stone-700 mb-2">Pages optionnelles</p>
-          {SECTION_DEFS.map(({ key, label }) => (
+          {SECTION_DEFS.map(({ key, label }) => {
+            const disabled = key === 'perimetre' && !hasPerimeterBlocks;
+            return (
             <div key={key} className="flex items-center justify-between py-1">
-              <Label htmlFor={`sec-${key}`} className="text-sm text-stone-600 cursor-pointer">{label}</Label>
+              <Label htmlFor={`sec-${key}`} className={`text-sm ${disabled ? 'text-stone-400' : 'text-stone-600 cursor-pointer'}`}>
+                {label}
+                {disabled ? <span className="ml-2 text-xs text-stone-400">Non configuree</span> : null}
+              </Label>
               <Switch
                 id={`sec-${key}`}
-                checked={pdfSections[key] ?? true}
+                checked={disabled ? false : (pdfSections[key] ?? true)}
+                disabled={disabled}
                 onCheckedChange={() => toggleSection(key)}
               />
             </div>
-          ))}
+          )})}
         </div>
 
         <hr className="my-3 border-stone-200" />

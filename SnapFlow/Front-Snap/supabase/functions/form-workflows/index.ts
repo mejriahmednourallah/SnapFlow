@@ -81,6 +81,7 @@ interface FormWorkflowsBody {
   scenario_reasoning?: string;
   name?: string;
   target_url?: string;
+  project_id?: string | null;
   status?: string;
   view?: 'mine' | 'review_queue' | 'all';
   operator_view?: boolean;
@@ -104,13 +105,35 @@ interface WorkflowRow {
   org_id: string;
   created_by: string;
   name?: string;
+  project_id?: string | null;
   status: string;
   updated_at: string;
 }
 
-function canAccessWorkflow(workflow: WorkflowRow, userId: string, isAdmin: boolean): boolean {
+async function isAssignedToProject(
+  serviceClient: ReturnType<typeof createServiceClient>,
+  projectId: string | null | undefined,
+  userId: string,
+): Promise<boolean> {
+  if (!projectId) return false;
+  const { data, error } = await serviceClient
+    .from('project_assignments')
+    .select('id')
+    .eq('project_id', projectId)
+    .eq('user_id', userId)
+    .limit(1);
+  if (error) throw new HttpError(500, error.message);
+  return Boolean(data?.length);
+}
+
+async function canAccessWorkflow(
+  serviceClient: ReturnType<typeof createServiceClient>,
+  workflow: WorkflowRow,
+  userId: string,
+  isAdmin: boolean,
+): Promise<boolean> {
   if (isAdmin) return true;
-  return workflow.created_by === userId || workflow.org_id === userId;
+  return workflow.created_by === userId || workflow.org_id === userId || await isAssignedToProject(serviceClient, workflow.project_id, userId);
 }
 
 async function getIsAdmin(serviceClient: ReturnType<typeof createServiceClient>, userId: string): Promise<boolean> {
@@ -329,7 +352,7 @@ async function getAccessibleWorkflow(
     .maybeSingle();
   if (error) throw new HttpError(500, error.message);
   if (!workflow) throw new HttpError(404, 'Workflow non trouve');
-  if (!canAccessWorkflow(workflow as WorkflowRow, userId, isAdmin)) {
+  if (!(await canAccessWorkflow(serviceClient, workflow as WorkflowRow, userId, isAdmin))) {
     throw new HttpError(403, 'Acces refuse');
   }
   return workflow as WorkflowRow;
@@ -362,7 +385,21 @@ serve(async (req) => {
         throw new HttpError(403, 'Vue reservee aux administrateurs');
       }
 
+      const projectId = typeof body.project_id === 'string' && body.project_id.trim() ? body.project_id.trim() : null;
+      const { data: assignments, error: assignmentError } = await serviceClient
+        .from('project_assignments')
+        .select('project_id')
+        .eq('user_id', userId);
+      if (assignmentError) throw new HttpError(500, assignmentError.message);
+      const assignedProjectIds = (assignments ?? []).map((assignment) => assignment.project_id).filter(Boolean);
+      if (projectId && !isAdmin && !assignedProjectIds.includes(projectId)) {
+        throw new HttpError(403, 'Projet non assigne');
+      }
+
       let query = serviceClient.from('form_workflows').select('*').order('updated_at', { ascending: false });
+      if (projectId) {
+        query = query.eq('project_id', projectId);
+      }
 
       if (requestedView === 'review_queue') {
         if (status) {
@@ -371,7 +408,11 @@ serve(async (req) => {
           query = query.in('status', ['pending', 'needs_review']);
         }
       } else if (requestedView === 'mine') {
-        query = query.or(`created_by.eq.${userId},org_id.eq.${userId}`);
+        const accessClauses = [`created_by.eq.${userId}`, `org_id.eq.${userId}`];
+        if (assignedProjectIds.length > 0) {
+          accessClauses.push(`project_id.in.(${assignedProjectIds.join(',')})`);
+        }
+        query = query.or(accessClauses.join(','));
         if (status) query = query.eq('status', status);
       } else if (status) {
         query = query.eq('status', status);
@@ -384,6 +425,18 @@ serve(async (req) => {
 
       const workflowList = workflows ?? [];
       const workflowIds = workflowList.map((item) => item.id);
+      const projectIds = [...new Set(workflowList.map((item) => item.project_id).filter(Boolean))];
+      const projectNamesById = new Map<string, string>();
+      if (projectIds.length > 0) {
+        const { data: projects, error: projectsError } = await serviceClient
+          .from('projects')
+          .select('id, site_name')
+          .in('id', projectIds);
+        if (projectsError) throw new HttpError(500, projectsError.message);
+        for (const project of projects ?? []) {
+          projectNamesById.set(project.id, project.site_name);
+        }
+      }
 
       if (workflowIds.length === 0) {
         return toJson({ workflows: [] });
@@ -409,6 +462,7 @@ serve(async (req) => {
       return toJson({
         workflows: workflowList.map((workflow) => ({
           ...workflow,
+          project_name: workflow.project_id ? projectNamesById.get(workflow.project_id) ?? null : null,
           latest_result: latestResultsByWorkflow.get(workflow.id) ?? null,
         })),
       });
@@ -434,7 +488,7 @@ serve(async (req) => {
         throw new HttpError(404, 'Workflow non trouvé');
       }
 
-      if (!canAccessWorkflow(workflow as WorkflowRow, userId, isAdmin)) {
+      if (!(await canAccessWorkflow(serviceClient, workflow as WorkflowRow, userId, isAdmin))) {
         throw new HttpError(403, 'Accès refusé');
       }
 
@@ -523,6 +577,20 @@ serve(async (req) => {
       if (!payload.workflow || !payload.scenario) {
         throw new HttpError(500, 'Creation workflow incomplete');
       }
+      const projectId = typeof body.project_id === 'string' && body.project_id.trim() ? body.project_id.trim() : null;
+      if (projectId) {
+        if (!isAdmin && !(await isAssignedToProject(serviceClient, projectId, userId))) {
+          throw new HttpError(403, 'Projet non assigne');
+        }
+        const { data: linkedWorkflow, error: linkError } = await serviceClient
+          .from('form_workflows')
+          .update({ project_id: projectId })
+          .eq('id', payload.workflow.id)
+          .select('*')
+          .single();
+        if (linkError) throw new HttpError(500, linkError.message);
+        payload.workflow = linkedWorkflow;
+      }
       return toJson(payload, 201);
     }
 
@@ -541,7 +609,7 @@ serve(async (req) => {
 
       if (workflowError) throw new HttpError(500, workflowError.message);
       if (!workflow) throw new HttpError(404, 'Workflow non trouve');
-      if (!canAccessWorkflow(workflow as WorkflowRow, userId, isAdmin)) {
+      if (!(await canAccessWorkflow(serviceClient, workflow as WorkflowRow, userId, isAdmin))) {
         throw new HttpError(403, 'Acces refuse');
       }
 
@@ -1194,6 +1262,13 @@ serve(async (req) => {
       if (typeof body.target_url === 'string' && body.target_url.trim()) {
         updates.target_url = normalizeTargetUrl(body.target_url);
       }
+      if ('project_id' in body) {
+        const nextProjectId = typeof body.project_id === 'string' && body.project_id.trim() ? body.project_id.trim() : null;
+        if (nextProjectId && !isAdmin && !(await isAssignedToProject(serviceClient, nextProjectId, userId))) {
+          throw new HttpError(403, 'Projet non assigne');
+        }
+        updates.project_id = nextProjectId;
+      }
 
       if (Object.keys(updates).length > 0) {
         const { error: updateError } = await serviceClient.from('form_workflows').update(updates).eq('id', workflowId);
@@ -1297,7 +1372,7 @@ serve(async (req) => {
 
       if (workflowError) throw new HttpError(500, workflowError.message);
       if (!workflow) throw new HttpError(404, 'Workflow non trouvé');
-      if (!canAccessWorkflow(workflow as WorkflowRow, userId, isAdmin)) {
+      if (!(await canAccessWorkflow(serviceClient, workflow as WorkflowRow, userId, isAdmin))) {
         throw new HttpError(403, 'Accès refusé');
       }
 

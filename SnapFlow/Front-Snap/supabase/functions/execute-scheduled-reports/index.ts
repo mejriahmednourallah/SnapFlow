@@ -5,6 +5,12 @@ const corsHeaders = {
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
+function scheduleTypeName(reportType: string): string {
+  if (reportType === 'mystery_visit') return 'visite mystere';
+  if (reportType === 'audit') return 'audit';
+  return 'activite';
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -58,6 +64,10 @@ Deno.serve(async (req) => {
           await executeAudit(supabaseUrl, serviceClient, schedule);
         } else if (schedule.report_type === 'activity') {
           await executeActivity(supabaseUrl, anonKey, serviceClient, schedule);
+        } else if (schedule.report_type === 'mystery_visit') {
+          await executeAudit(supabaseUrl, serviceClient, schedule);
+        } else {
+          throw new Error(`Unsupported schedule type: ${schedule.report_type}`);
         }
 
         // Only update 'last_run_at' and compute 'next_normal_run' if we ARE NOT in the middle of a scan
@@ -70,6 +80,20 @@ Deno.serve(async (req) => {
 
         if (updatedSchedule?.is_scanning) {
           results.push({ id: schedule.id, status: 'scanning_in_progress' });
+          continue;
+        }
+
+        if (schedule.report_type === 'mystery_visit') {
+          await serviceClient.from('report_schedules')
+            .update({
+              last_run_at: now,
+              executed_at: now,
+              is_active: false,
+              updated_at: now,
+            })
+            .eq('id', schedule.id);
+          results.push({ id: schedule.id, status: 'executed' });
+          console.log(`Mystery visit schedule ${schedule.id} completed and deactivated.`);
           continue;
         }
 
@@ -114,7 +138,7 @@ Deno.serve(async (req) => {
             .eq('id', schedule.project_id)
             .single();
 
-          const typeName = schedule.report_type === 'audit' ? 'audit' : 'activité';
+          const typeName = scheduleTypeName(schedule.report_type);
           await serviceClient.from('notifications').insert({
             user_id: schedule.created_by,
             title: 'Rapport planifié exécuté',
@@ -409,6 +433,8 @@ function computeNextRun(
   const ref = base > now ? base : now;
 
   switch (frequency) {
+    case 'once':
+      return currentNextRun;
     case 'daily': {
       const next = new Date(ref);
       next.setDate(next.getDate() + 1);

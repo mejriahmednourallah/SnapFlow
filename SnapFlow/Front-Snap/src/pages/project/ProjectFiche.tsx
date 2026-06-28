@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useOutletContext } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
+import { useAuth } from '@/hooks/useAuth';
 import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -9,6 +10,8 @@ import { useRedmineIdentifier } from '@/hooks/useRedmineIdentifier';
 import { fetchProjectDetail } from '@/services/redmineService';
 import { isRedmineProjectUrl, resolveProjectWebsiteUrl, resolveRedmineProjectLink } from '@/lib/projectUrls';
 import { ClientLogoSidebar } from '@/components/projects/ClientLogoSidebar';
+import { ProjectPerimeterEditor } from '@/components/projects/ProjectPerimeterEditor';
+import { ProjectWorkflowSummary } from '@/components/projects/ProjectWorkflowSummary';
 import { Building2, Globe, User, ExternalLink, FileText, ChevronUp, ChevronDown, Loader2 } from 'lucide-react';
 import type { ProjectContext } from './ProjectShell';
 
@@ -28,6 +31,7 @@ interface RedmineProjectDetail {
 const ProjectFiche = () => {
   const { projectId, project, setProjectLogoUrl } = useOutletContext<ProjectContext>();
   const { toast } = useToast();
+  const { isAdmin, userRole } = useAuth();
 
   const [showProjectCard, setShowProjectCard] = useState(true);
   const [redmineDetail, setRedmineDetail] = useState<RedmineProjectDetail | null>(null);
@@ -92,6 +96,7 @@ const ProjectFiche = () => {
   const redmineProjectLink = resolveRedmineProjectLink(project.url, project.redmine_url);
 
   return (
+    <div className="space-y-4">
     <div className="glass-card overflow-hidden">
       <button
         onClick={() => setShowProjectCard(!showProjectCard)}
@@ -212,6 +217,9 @@ const ProjectFiche = () => {
           )}
         </div>
       )}
+    </div>
+    <ProjectWorkflowSummary projectId={projectId} />
+    {(isAdmin || userRole === 'charge_de_projet') ? <ProjectPerimeterEditor projectId={projectId} /> : null}
     </div>
   );
 };
