@@ -8,6 +8,7 @@ const readSupabase = (relativePath: string) => readFileSync(resolve(root, '../su
 
 describe('tickets 1-4 clients and project grouping', () => {
   const migration = readSupabase('migrations/20260627091000_clients_project_grouping.sql');
+  const consolidationMigration = readSupabase('migrations/20260628030000_consolidate_generated_clients.sql');
   const adminProjects = readSource('pages/AdminProjects.tsx');
   const adminClients = readSource('pages/AdminClients.tsx');
   const overview = readSource('pages/Overview.tsx');
@@ -24,11 +25,17 @@ describe('tickets 1-4 clients and project grouping', () => {
     expect(migration).toContain('ON DELETE RESTRICT');
     expect(migration).toContain('public.has_role(auth.uid(), \'admin\')');
     expect(migration).toContain('project_assignments');
+    expect(consolidationMigration).toContain("VALUES ('A classer')");
+    expect(consolidationMigration).toContain('WHERE c.name = p.site_name');
   });
 
   it('wires Super Admin client management and project regrouping in frontend surfaces', () => {
     expect(adminClients).toContain("from('clients')");
-    expect(adminClients).toContain('projectCount');
+    expect(adminClients).toContain('placeholder="Rechercher un client..."');
+    expect(adminClients).toContain('Fiche client');
+    expect(adminClients).toContain('handleAttachProject');
+    expect(adminClients).toContain('handleDetachProject');
+    expect(adminClients).toContain("HOLDING_CLIENT_NAME = 'A classer'");
     expect(adminClients).toContain('charge_de_projet');
     expect(adminProjects).toContain("from('clients')");
     expect(adminProjects).toContain('handleChangeProjectClient');
