@@ -36,11 +36,11 @@ permissions:
   contents: read
 
 env:
-  NODE_VERSION: "20"
+  NODE_VERSION: "24"
   PYTHON_VERSION: "3.11"
   GO_VERSION: "1.25.6"
-  FRONTEND_DIR: Front-Snap
-  SERVICES_DIR: V3-Microservices
+  FRONTEND_DIR: SnapFlow/Front-Snap
+  SERVICES_DIR: SnapFlow/V3-Microservices
 
 jobs:
   detect-changes:
@@ -55,7 +55,7 @@ jobs:
       run_build: ${{ steps.scope.outputs.run_build }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
@@ -90,8 +90,8 @@ jobs:
             fi
           }
 
-          mark frontend '(^Front-Snap/|^\.github/workflows/)'
-          mark backend '(^V3-Microservices/|^k8s/|^\.github/workflows/)'
+          mark frontend '(^SnapFlow/Front-Snap/|^\.github/workflows/)'
+          mark backend '(^SnapFlow/V3-Microservices/|^SnapFlow/k8s/|^\.github/workflows/)'
           mark ci '(^\.github/workflows/)'
 
       - name: Stage summary
@@ -122,14 +122,14 @@ jobs:
       run:
         working-directory: ${{ env.FRONTEND_DIR }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
-          cache-dependency-path: Front-Snap/package-lock.json
+          cache-dependency-path: SnapFlow/Front-Snap/package-lock.json
 
       - name: Install dependencies
         run: npm ci
@@ -170,14 +170,14 @@ jobs:
           - group: project-sync
             pattern: "projectUrls projectSync example"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
-          cache-dependency-path: Front-Snap/package-lock.json
+          cache-dependency-path: SnapFlow/Front-Snap/package-lock.json
 
       - name: Install dependencies
         run: npm ci
@@ -201,14 +201,14 @@ jobs:
       run:
         working-directory: ${{ env.FRONTEND_DIR }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
-          cache-dependency-path: Front-Snap/package-lock.json
+          cache-dependency-path: SnapFlow/Front-Snap/package-lock.json
 
       - name: Install dependencies
         run: npm ci
@@ -229,17 +229,17 @@ jobs:
       matrix:
         include:
           - service: v3-scanner-go
-            path: V3-Microservices/v3-scanner-go
+            path: SnapFlow/V3-Microservices/v3-scanner-go
           - service: v3-cli
-            path: V3-Microservices/v3-cli
+            path: SnapFlow/V3-Microservices/v3-cli
     defaults:
       run:
         working-directory: ${{ matrix.path }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Setup Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version: ${{ env.GO_VERSION }}
           cache-dependency-path: ${{ matrix.path }}/go.sum
@@ -267,25 +267,25 @@ jobs:
       matrix:
         include:
           - service: aggregator
-            path: V3-Microservices/v3-aggregator
+            path: SnapFlow/V3-Microservices/v3-aggregator
             command: python -m pytest tests -q
           - service: nlp-worker
-            path: V3-Microservices/v3-nlp-worker
+            path: SnapFlow/V3-Microservices/v3-nlp-worker
             command: python -m pytest tests -q
           - service: visual-regression
-            path: V3-Microservices/v3-visual-regression
+            path: SnapFlow/V3-Microservices/v3-visual-regression
             command: python -m pytest tests -q
           - service: form-executor
-            path: V3-Microservices/v3-form-executor
+            path: SnapFlow/V3-Microservices/v3-form-executor
             command: python -m pytest tests -q
     defaults:
       run:
         working-directory: ${{ matrix.path }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: pip
@@ -319,22 +319,22 @@ jobs:
     if: needs.detect-changes.outputs.run_security == 'true'
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Secret pattern scan
         shell: bash
         run: |
           set -euo pipefail
           ! git grep -n -E '(SUPABASE_SERVICE_ROLE_KEY|REDMINE_API_KEY|postgresql://[^ ]+:[^ ]+@|BEGIN (RSA|OPENSSH|PRIVATE) KEY)' -- \
-            ':!Front-Snap/package-lock.json' \
+            ':!SnapFlow/Front-Snap/package-lock.json' \
             ':!**/*.md'
 
       - name: Setup Node for npm audit
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
-          cache-dependency-path: Front-Snap/package-lock.json
+          cache-dependency-path: SnapFlow/Front-Snap/package-lock.json
 
       - name: Install frontend dependencies
         working-directory: ${{ env.FRONTEND_DIR }}
