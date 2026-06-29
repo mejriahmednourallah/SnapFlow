@@ -268,13 +268,41 @@ const ActivityReport = () => {
 
   const doExportActivityPDF = async () => {
     if (!project || !redmineIdentifier) return;
+    const exportStartedAt = performance.now();
+    console.groupCollapsed(`[Activity PDF Export ${new Date().toISOString()}] start`);
+    console.log('context', {
+      project: {
+        id: project.id,
+        site_name: project.site_name,
+        url: project.url,
+        hasLogo: Boolean(project.logo_url),
+      },
+      redmineIdentifier,
+      currentPageIssueCount: issues.length,
+      cachedStatsIssueCount: allIssuesForStats.length,
+      totalCount,
+      filters,
+      selectedThemeId,
+      pdfSections,
+      coverKpis,
+      hasPerimeterBlocks: hasProjectPerimeterBlocks(perimeterBlocks),
+      perimeterBlockCount: perimeterBlocks.length,
+    });
     setIsExporting(true);
     try {
       const selectedTheme = PDF_THEMES.find(theme => theme.id === selectedThemeId) || PDF_THEMES[0];
       const currentKey = `${filters.status}|${filters.tracker}|${filters.dateFrom}|${filters.dateTo}`;
       let exportIssues = allIssuesForStats.length > 0 && statsFilterKey === currentKey ? allIssuesForStats : [];
       let exportTotalCount = exportIssues.length || totalCount;
+      console.log('issue source decision', {
+        currentKey,
+        statsFilterKey,
+        usingCachedStats: exportIssues.length > 0,
+        exportIssueCountBeforeFetch: exportIssues.length,
+        exportTotalCountBeforeFetch: exportTotalCount,
+      });
       if (exportIssues.length === 0) {
+        console.time('[Activity PDF Export] fetch all issues');
         const result = await fetchAllIssuesPaginated({
           projectIdentifier: redmineIdentifier,
           statusId: filters.status || undefined,
@@ -283,6 +311,12 @@ const ActivityReport = () => {
           dateTo: filters.dateTo || undefined,
           limit: 500,
           offset: 0,
+        });
+        console.timeEnd('[Activity PDF Export] fetch all issues');
+        console.log('fetch all issues result', {
+          issues: result.issues.length,
+          totalCount: result.totalCount,
+          sampleIds: result.issues.slice(0, 10).map(issue => issue.id),
         });
         exportIssues = result.issues;
         exportTotalCount = result.totalCount || result.issues.length;
@@ -309,6 +343,20 @@ const ActivityReport = () => {
         contactWeb: pdfContactWeb,
         contactWeb2: pdfContactWeb2,
       };
+      console.log('calling generateActivityPdf', {
+        exportIssueCount: exportIssues.length,
+        exportTotalCount,
+        selectedTheme: selectedTheme.id,
+        options,
+        filtersForPdf: {
+          status: filters.status,
+          tracker: filters.tracker,
+          dateFrom: filters.dateFrom,
+          dateTo: filters.dateTo,
+          statusLabel: filters.status ? statuses.find(s => String(s.id) === filters.status)?.name || filters.status : undefined,
+          trackerLabel: filters.tracker ? trackers.find(t => String(t.id) === filters.tracker)?.name || filters.tracker : undefined,
+        },
+      });
       await generateActivityPdf({
         project,
         issues: exportIssues,
@@ -327,8 +375,23 @@ const ActivityReport = () => {
       setPdfModalOpen(false);
       toast({ title: 'PDF telecharge', description: `${exportIssues.length} tickets exportes.` });
     } catch (err) {
-      toast({ title: 'Erreur', description: "Impossible d'exporter le PDF.", variant: 'destructive' });
+      console.error('[Activity PDF Export] failed', err);
+      if (err instanceof Error) {
+        console.error('[Activity PDF Export] error details', {
+          name: err.name,
+          message: err.message,
+          stack: err.stack,
+          cause: (err as Error & { cause?: unknown }).cause,
+        });
+      }
+      toast({
+        title: 'Erreur',
+        description: err instanceof Error && err.message ? `Impossible d'exporter le PDF: ${err.message}` : "Impossible d'exporter le PDF.",
+        variant: 'destructive',
+      });
     } finally {
+      console.log('durationMs', Math.round(performance.now() - exportStartedAt));
+      console.groupEnd();
       setIsExporting(false);
     }
   };
