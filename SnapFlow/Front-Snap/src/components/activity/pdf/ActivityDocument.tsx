@@ -369,14 +369,14 @@ function TableLegend({ rows, total, theme, accentColor, label = 'Libelle', limit
     return <SectionNote theme={theme} accentColor={accentColor}>Aucune donnée disponible pour cette répartition.</SectionNote>;
   }
   return (
-    <View style={{ backgroundColor: MANUAL_YELLOW, borderRadius: 0, padding: 0, minHeight: 286, borderWidth: 1, borderColor: MANUAL_GRID_WHITE }}>
+    <View style={{ backgroundColor: MANUAL_YELLOW, padding: 0, minHeight: 286, borderWidth: 1, borderColor: MANUAL_GRID_WHITE }}>
       <View style={{ flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: MANUAL_GRID_WHITE }}>
         <Text style={{ width: 230, fontSize: 10, fontFamily: 'DMSans', fontWeight: 700, color: '#FFFFFF', padding: 10, borderRightWidth: 1, borderRightColor: MANUAL_GRID_WHITE }}>{label}</Text>
         <Text style={{ width: 70, fontSize: 10, fontFamily: 'DMSans', fontWeight: 700, color: '#FFFFFF', textAlign: 'right', padding: 10 }}>Tickets</Text>
         <Text style={{ width: 54, fontSize: 10, fontFamily: 'DMSans', fontWeight: 700, color: '#FFFFFF', textAlign: 'right', padding: 10, borderLeftWidth: 1, borderLeftColor: MANUAL_GRID_WHITE }}>%</Text>
       </View>
       {visible.map((row, index) => (
-        <View key={`${row.name}-${index}`} style={{ flexDirection: 'row', borderBottomWidth: index === visible.length - 1 ? 0 : 1, borderBottomColor: MANUAL_GRID_WHITE }}>
+        <View key={`${row.name}-${index}`} style={{ flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: index === visible.length - 1 ? 'transparent' : MANUAL_GRID_WHITE }}>
           <Text style={{ width: 230, fontSize: 9.8, color: '#FFFFFF', paddingVertical: 9, paddingHorizontal: 10, borderRightWidth: 1, borderRightColor: MANUAL_GRID_WHITE }}>{short(row.name, 38)}</Text>
           <Text style={{ width: 70, fontSize: 9.8, color: '#FFFFFF', textAlign: 'right', fontFamily: 'DMSans', fontWeight: 700, paddingVertical: 9, paddingHorizontal: 10 }}>{row.count}</Text>
           <Text style={{ width: 54, fontSize: 9.8, color: '#FFFFFF', textAlign: 'right', paddingVertical: 9, paddingHorizontal: 10, borderLeftWidth: 1, borderLeftColor: MANUAL_GRID_WHITE }}>{pct(row.count, total)}%</Text>
@@ -400,8 +400,8 @@ function HorizontalBars({ rows, theme, limit = 8 }: { rows: CountRow[]; theme?: 
             <Text style={{ fontSize: 11, color: t.text }}>{short(row.name, 34)}</Text>
             <Text style={{ fontSize: 11, color: t.text, fontFamily: 'DMSans', fontWeight: 700 }}>{row.count}</Text>
           </View>
-          <View style={{ height: 14, backgroundColor: '#E9EEF5', borderRadius: 0 }}>
-            <View style={{ width: `${Math.max(4, (row.count / max) * 100)}%`, height: 14, backgroundColor: row.color ?? CHART_COLORS[index % CHART_COLORS.length], borderRadius: 0 }} />
+          <View style={{ height: 14, backgroundColor: '#E9EEF5' }}>
+            <View style={{ width: `${Math.max(4, (row.count / max) * 100)}%`, height: 14, backgroundColor: row.color ?? CHART_COLORS[index % CHART_COLORS.length] }} />
           </View>
         </View>
       ))}
@@ -421,7 +421,7 @@ function VerticalBars({ rows, theme, limit = 7 }: { rows: CountRow[]; theme?: Pd
         return (
           <View key={`${row.name}-${index}`} style={{ flex: 1, alignItems: 'center' }}>
             <Text style={{ fontSize: 11, fontFamily: 'DMSans', fontWeight: 700, color: row.color ?? CHART_COLORS[index % CHART_COLORS.length], marginBottom: 6 }}>{row.count}</Text>
-            <View style={{ height, width: '64%', backgroundColor: row.color ?? CHART_COLORS[index % CHART_COLORS.length], borderRadius: 0 }} />
+            <View style={{ height, width: '64%', backgroundColor: row.color ?? CHART_COLORS[index % CHART_COLORS.length] }} />
             <Text style={{ fontSize: 8.2, color: t.muted, textAlign: 'center', marginTop: 7 }}>{short(row.name, 17)}</Text>
           </View>
         );
@@ -500,7 +500,7 @@ function FigureTableLayout({
 }) {
   const t = pageText(theme);
   const chartNode = (
-    <View style={{ flex: 1.35, backgroundColor: t.surface, borderWidth: 0, padding: 22, minHeight: 430, justifyContent: 'center' }}>
+    <View style={{ flex: 1.35, backgroundColor: t.surface, padding: 22, minHeight: 430, justifyContent: 'center' }}>
       {chart === 'donut' && <DonutChart rows={rows} theme={theme} />}
       {chart === 'vertical' && <VerticalBars rows={rows} theme={theme} />}
       {chart === 'horizontal' && <HorizontalBars rows={rows} theme={theme} />}
@@ -544,7 +544,7 @@ function FullWidthTicketTable({
       </View>
       <View style={{ flexDirection: 'row', backgroundColor: MANUAL_CYAN, borderTopWidth: 1, borderTopColor: '#FFFFFF' }}>
         {['Identifiant', 'Sujet', 'Type', 'Priorité', 'Date Ouverture'].map((label, index) => (
-          <Text key={label} style={{ width: widths[index], fontSize: 9.5, color: '#0B0F14', fontFamily: 'DMSans', fontWeight: 700, paddingVertical: 9, paddingHorizontal: 10, borderRightWidth: index === widths.length - 1 ? 0 : 1, borderRightColor: '#FFFFFF' }}>{label}</Text>
+          <Text key={label} style={{ width: widths[index], fontSize: 9.5, color: '#0B0F14', fontFamily: 'DMSans', fontWeight: 700, paddingVertical: 9, paddingHorizontal: 10, borderRightWidth: 1, borderRightColor: index === widths.length - 1 ? 'transparent' : '#FFFFFF' }}>{label}</Text>
         ))}
       </View>
       {issues.map((issue, index) => (
