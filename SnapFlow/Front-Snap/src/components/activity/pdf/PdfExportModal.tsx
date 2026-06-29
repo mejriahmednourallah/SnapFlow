@@ -4,7 +4,7 @@ import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from '@/components/ui/dialog';
 import { PDF_THEMES } from '@/components/pdf/pdfStyles';
 
@@ -21,11 +21,11 @@ export interface PdfExportModalProps {
   setPdfColor: (c: string) => void;
   coverKpis: Record<string, boolean>;
   setCoverKpis: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
-  pdfBrandLeft: string;  setPdfBrandLeft:  (v: string) => void;
+  pdfBrandLeft: string; setPdfBrandLeft: (v: string) => void;
   pdfBrandRight: string; setPdfBrandRight: (v: string) => void;
   pdfContactEmail: string; setPdfContactEmail: (v: string) => void;
-  pdfContactWeb: string;   setPdfContactWeb:   (v: string) => void;
-  pdfContactWeb2: string;  setPdfContactWeb2:  (v: string) => void;
+  pdfContactWeb: string; setPdfContactWeb: (v: string) => void;
+  pdfContactWeb2: string; setPdfContactWeb2: (v: string) => void;
   isExporting: boolean;
   doExportPDF: () => void;
   hasPerimeterBlocks?: boolean;
@@ -56,7 +56,7 @@ const REPORT_STRUCTURE_DEFS = [
   'Détails des tickets clôturés',
   'Détails des tickets ouverts',
   'Tickets annulés si présents',
-  'Tickets en cours de test et pris en charge',
+  'Tickets en cours de validation et pris en charge',
   'Tables actionnables si données',
   'Tickets bloqués si présents',
   "Réunions et points d'échange si présents",
@@ -88,10 +88,13 @@ export function PdfExportModal({
       <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="text-lg font-bold">Exporter le rapport d'activité</DialogTitle>
+          <DialogDescription>
+            Configurez les pages, la couleur et les informations visibles dans le PDF d'activité.
+          </DialogDescription>
         </DialogHeader>
 
         <div>
-          <p className="text-sm font-semibold text-stone-700 mb-2">Theme du rapport</p>
+          <p className="text-sm font-semibold text-stone-700 mb-2">Thème du rapport</p>
           <div className="grid grid-cols-2 gap-2">
             {PDF_THEMES.map(theme => (
               <button
@@ -122,7 +125,7 @@ export function PdfExportModal({
             ))}
           </div>
           <p className="mt-1.5 text-xs text-stone-500">
-            Les pages vides sont fusionnees automatiquement pour produire un rapport plus dense et plus lisible.
+            Les pages vides sont fusionnées automatiquement pour produire un rapport plus dense et plus lisible.
           </p>
         </div>
 
@@ -133,19 +136,20 @@ export function PdfExportModal({
           {SECTION_DEFS.map(({ key, label }) => {
             const disabled = key === 'perimetre' && !hasPerimeterBlocks;
             return (
-            <div key={key} className="flex items-center justify-between py-1">
-              <Label htmlFor={`sec-${key}`} className={`text-sm ${disabled ? 'text-stone-400' : 'text-stone-600 cursor-pointer'}`}>
-                {label}
-                {disabled ? <span className="ml-2 text-xs text-stone-400">Non configuree</span> : null}
-              </Label>
-              <Switch
-                id={`sec-${key}`}
-                checked={disabled ? false : (pdfSections[key] ?? true)}
-                disabled={disabled}
-                onCheckedChange={() => toggleSection(key)}
-              />
-            </div>
-          )})}
+              <div key={key} className="flex items-center justify-between py-1">
+                <Label htmlFor={`sec-${key}`} className={`text-sm ${disabled ? 'text-stone-400' : 'text-stone-600 cursor-pointer'}`}>
+                  {label}
+                  {disabled ? <span className="ml-2 text-xs text-stone-400">Non configurée</span> : null}
+                </Label>
+                <Switch
+                  id={`sec-${key}`}
+                  checked={disabled ? false : (pdfSections[key] ?? true)}
+                  disabled={disabled}
+                  onCheckedChange={() => toggleSection(key)}
+                />
+              </div>
+            );
+          })}
         </div>
 
         <hr className="my-3 border-stone-200" />
@@ -175,7 +179,7 @@ export function PdfExportModal({
           onClick={() => setShowAdvanced(!showAdvanced)}
         >
           <ChevronDown className={`w-4 h-4 transition-transform ${showAdvanced ? 'rotate-180' : ''}`} />
-          Options avancees
+          Options avancées
         </button>
 
         {showAdvanced && (

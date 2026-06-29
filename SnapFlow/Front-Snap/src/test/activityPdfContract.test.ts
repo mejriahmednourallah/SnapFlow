@@ -47,6 +47,12 @@ describe('Activity PDF cover contract', () => {
     expect(source).not.toContain('Documentation et reporting #11379');
   });
 
+  it('does not pass empty string children into React PDF views', () => {
+    expect(source).toContain("const contactLine = [options.contactEmail, options.contactWeb, options.contactWeb2].filter(Boolean).join(' | ')");
+    expect(source).toContain('{contactLine ? (');
+    expect(source).not.toContain('{(options.contactEmail || options.contactWeb || options.contactWeb2) && (');
+  });
+
   it('uses manual-style French headings and captions', () => {
     expect(source).toContain("RAPPORT D'ACTIVITÉ");
     expect(source).toContain('SOMMAIRE');

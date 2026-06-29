@@ -769,6 +769,7 @@ export function ActivityDocument({ project, issues, totalCount, filters, options
   const sections = buildActivitySections(data);
   const t = pageText(theme);
   const accentColor = options.pdfColor || t.accent;
+  const contactLine = [options.contactEmail, options.contactWeb, options.contactWeb2].filter(Boolean).join(' | ');
   const showPerimeter = options.sections.perimetre !== false && hasProjectPerimeterBlocks(perimeterBlocks);
   const generatedSections = [
     showPerimeter ? 'Périmètre' : null,
@@ -981,11 +982,11 @@ export function ActivityDocument({ project, issues, totalCount, filters, options
         <ActivitySlidePage title="Merci" subtitle="Rapport généré automatiquement depuis Redmine" project={project} theme={theme} options={options} tone="brand">
           <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
             <Text style={{ color: '#FFFFFF', fontFamily: 'PlayfairDisplay', fontSize: 44 }}>Merci !</Text>
-            {(options.contactEmail || options.contactWeb || options.contactWeb2) && (
+            {contactLine ? (
               <Text style={{ color: 'rgba(255,255,255,0.78)', fontSize: 10, textAlign: 'center', marginTop: 22 }}>
-                {[options.contactEmail, options.contactWeb, options.contactWeb2].filter(Boolean).join(' | ')}
+                {contactLine}
               </Text>
-            )}
+            ) : null}
           </View>
         </ActivitySlidePage>
       )}
