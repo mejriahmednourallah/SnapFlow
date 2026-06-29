@@ -171,7 +171,9 @@ export function WorkflowBuilder({ workflowId, isOperator }: WorkflowBuilderProps
     isSubmitting,
     isApproving,
     isExecuting,
+    isAiEditing,
     error,
+    aiEditPatch,
     detect,
     updateWorkflowProject,
     updateFieldValue,
@@ -185,6 +187,9 @@ export function WorkflowBuilder({ workflowId, isOperator }: WorkflowBuilderProps
     updateTestCaseSuggestion,
     createSuggestedTestCases,
     executeAllCases,
+    proposeWorkflowEdit,
+    applyWorkflowEditPatch,
+    clearWorkflowEditPatch,
     switchScenario,
     submitForApproval,
     approve,
@@ -329,6 +334,30 @@ export function WorkflowBuilder({ workflowId, isOperator }: WorkflowBuilderProps
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          {canExecute ? (
+            <Button size="sm" variant="default" onClick={() => void execute()} disabled={isExecuting || Boolean(activeExecution)}>
+              <Play className="mr-1 h-4 w-4" />
+              {activeExecution ? 'Execution en cours' : 'Executer ce scenario'}
+            </Button>
+          ) : null}
+
+          {canExecute ? (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => navigate(`/app/workflows/form-tester/${workflow.id}/plan`)}
+            >
+              <FlaskConical className="mr-1 h-4 w-4" />
+              Preparer une campagne
+            </Button>
+          ) : null}
+
+          {workflow.latest_result ? (
+            <Button size="sm" variant="ghost" onClick={() => navigate(`/app/workflows/form-tester/${workflow.id}/results`)}>
+              Voir les resultats
+            </Button>
+          ) : null}
+
           {isDraft ? (
             <Button size="sm" onClick={() => void submitForApproval()} disabled={isSubmitting}>
               <CheckCheck className="mr-1 h-4 w-4" />
@@ -336,7 +365,7 @@ export function WorkflowBuilder({ workflowId, isOperator }: WorkflowBuilderProps
             </Button>
           ) : null}
 
-          {canExecute ? (
+          {false ? (
             <>
               <Button
                 size="sm"
@@ -353,7 +382,7 @@ export function WorkflowBuilder({ workflowId, isOperator }: WorkflowBuilderProps
             </>
           ) : null}
 
-          {workflow.latest_result ? (
+          {false ? (
             <Button size="sm" variant="ghost" onClick={() => navigate(`/app/workflows/form-tester/${workflow.id}/results`)}>
               Voir les resultats
             </Button>
@@ -445,6 +474,11 @@ export function WorkflowBuilder({ workflowId, isOperator }: WorkflowBuilderProps
           onUpdateTestCase={updateTestCaseSuggestion}
           onCreateTestCases={createSuggestedTestCases}
           onExecuteAllCases={executeAllCases}
+          isAiEditing={isAiEditing}
+          aiEditPatch={aiEditPatch}
+          onProposeWorkflowEdit={proposeWorkflowEdit}
+          onApplyWorkflowEditPatch={applyWorkflowEditPatch}
+          onClearWorkflowEditPatch={clearWorkflowEditPatch}
           onStopExecution={stopExecution}
         />
       }

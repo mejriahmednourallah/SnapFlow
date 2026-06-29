@@ -23,7 +23,7 @@ export function TriggerNode({ data }: { data: TriggerNodeData }) {
       </div>
       <p className="mt-2 line-clamp-2 max-w-24 text-[11px] font-semibold leading-tight text-foreground">Ouvrir</p>
       <p className="mt-0.5 max-w-24 truncate text-[9px] uppercase tracking-wide text-muted-foreground">page</p>
-      <Handle id="default" type="source" position={Position.Bottom} className="!bottom-0 !h-2 !w-2 !bg-sky-500" />
+      <Handle id="default" type="source" position={Position.Bottom} className="!bottom-0 !h-3.5 !w-3.5 !border-2 !border-background !bg-sky-500" />
     </div>
   );
 }

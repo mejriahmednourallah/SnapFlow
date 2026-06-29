@@ -56,7 +56,7 @@ export function GenericActionNode({ data }: { data: GenericActionNodeData }) {
 
   return (
     <div className="relative flex w-24 flex-col items-center text-center" title={`${data.label}${data.detail ? ` - ${data.detail}` : ''}`}>
-      <Handle id="default" type="target" position={Position.Top} className="!top-0 !h-2 !w-2 !bg-muted-foreground" />
+      <Handle id="default" type="target" position={Position.Top} className="!top-0 !h-3.5 !w-3.5 !border-2 !border-background !bg-muted-foreground" />
       <div
         className={cn(
           'relative flex h-16 w-16 items-center justify-center rounded-2xl border-2 bg-background shadow-md transition-all',
@@ -69,7 +69,7 @@ export function GenericActionNode({ data }: { data: GenericActionNodeData }) {
       </div>
       <p className="mt-2 line-clamp-2 max-w-24 text-[11px] font-semibold leading-tight text-foreground">{data.label}</p>
       <p className="mt-0.5 max-w-24 truncate text-[9px] uppercase tracking-wide text-muted-foreground">{data.kind}</p>
-      <Handle id="default" type="source" position={Position.Bottom} className="!bottom-0 !h-2 !w-2 !bg-muted-foreground" />
+      <Handle id="default" type="source" position={Position.Bottom} className="!bottom-0 !h-3.5 !w-3.5 !border-2 !border-background !bg-muted-foreground" />
     </div>
   );
 }

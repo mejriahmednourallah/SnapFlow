@@ -6,6 +6,7 @@ import type {
   FormProfile,
   FormProfileType,
   TestCaseSuggestion,
+  WorkflowAiEditPatch,
   WorkflowBranchKey,
   WorkflowExecutionDetail,
   WorkflowFormField,
@@ -28,7 +29,9 @@ interface UseFormWorkflowBuilderReturn {
   isSubmitting: boolean;
   isApproving: boolean;
   isExecuting: boolean;
+  isAiEditing: boolean;
   error: string | null;
+  aiEditPatch: WorkflowAiEditPatch | null;
   reload: () => Promise<void>;
   switchScenario: (scenarioId: string) => Promise<void>;
   loadResults: () => Promise<void>;
@@ -49,6 +52,9 @@ interface UseFormWorkflowBuilderReturn {
     branchKey: WorkflowBranchKey,
   ) => Promise<void>;
   deleteEdge: (edgeId: string) => Promise<void>;
+  proposeWorkflowEdit: (instruction: string) => Promise<void>;
+  applyWorkflowEditPatch: (patch?: WorkflowAiEditPatch) => Promise<void>;
+  clearWorkflowEditPatch: () => void;
   generateTestCases: (formType?: FormProfileType) => Promise<void>;
   updateTestCaseSuggestion: (suggestion: TestCaseSuggestion) => void;
   createSuggestedTestCases: (suggestionIds: string[]) => Promise<void>;
@@ -81,7 +87,9 @@ export function useFormWorkflowBuilder(workflowId: string): UseFormWorkflowBuild
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isApproving, setIsApproving] = useState(false);
   const [isExecuting, setIsExecuting] = useState(false);
+  const [isAiEditing, setIsAiEditing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [aiEditPatch, setAiEditPatch] = useState<WorkflowAiEditPatch | null>(null);
   const executionRequestRef = useRef(false);
 
   useEffect(() => {
@@ -440,6 +448,104 @@ export function useFormWorkflowBuilder(workflowId: string): UseFormWorkflowBuild
     }
   }, [workflow, workflowId]);
 
+  const proposeWorkflowEdit = useCallback(async (instruction: string): Promise<void> => {
+    if (!workflow?.active_scenario?.id || !instruction.trim()) return;
+    setIsAiEditing(true);
+    setError(null);
+    try {
+      const patch = await formTesterApi.proposeWorkflowEdit({
+        workflowId,
+        scenarioId: workflow.active_scenario.id,
+        instruction: instruction.trim(),
+      });
+      setAiEditPatch(patch);
+    } catch (editError) {
+      setError(editError instanceof Error ? editError.message : 'Echec de preparation de la modification IA');
+    } finally {
+      setIsAiEditing(false);
+    }
+  }, [workflow?.active_scenario?.id, workflowId]);
+
+  const applyWorkflowEditPatch = useCallback(async (patch = aiEditPatch ?? undefined): Promise<void> => {
+    if (!workflow?.active_scenario?.id || !patch || patch.operations.length === 0) return;
+    const scenarioId = workflow.active_scenario.id;
+    const tempNodeIds = new Map<string, string>();
+    const resolveNodeId = (nodeId: string): string => tempNodeIds.get(nodeId) ?? nodeId;
+
+    setIsSaving(true);
+    setError(null);
+    try {
+      for (const operation of patch.operations) {
+        if (operation.op === 'add_node') {
+          const node = await formTesterApi.addNode({
+            workflowId,
+            scenarioId,
+            type: operation.type,
+            config: operation.config ?? (operation.label ? { label: operation.label } : {}),
+            positionX: operation.position_x,
+            positionY: operation.position_y,
+          });
+          if (operation.temp_id) tempNodeIds.set(operation.temp_id, node.id);
+          continue;
+        }
+
+        if (operation.op === 'update_node') {
+          await formTesterApi.updateNode({
+            workflowId,
+            scenarioId,
+            nodeId: resolveNodeId(operation.node_id),
+            config: operation.config,
+            positionX: operation.position_x,
+            positionY: operation.position_y,
+          });
+          continue;
+        }
+
+        if (operation.op === 'delete_node') {
+          await formTesterApi.deleteNode(workflowId, scenarioId, resolveNodeId(operation.node_id));
+          continue;
+        }
+
+        if (operation.op === 'upsert_edge') {
+          await formTesterApi.upsertEdge({
+            workflowId,
+            scenarioId,
+            sourceNodeId: resolveNodeId(operation.source_node_id),
+            targetNodeId: resolveNodeId(operation.target_node_id),
+            branchKey: operation.branch_key,
+          });
+          continue;
+        }
+
+        if (operation.op === 'delete_edge') {
+          await formTesterApi.deleteEdge(workflowId, scenarioId, operation.edge_id);
+          continue;
+        }
+
+        if (operation.op === 'update_scenario') {
+          await formTesterApi.updateScenario({
+            workflowId,
+            scenarioId,
+            name: operation.name,
+            description: operation.description,
+            status: operation.status,
+          });
+        }
+      }
+
+      setAiEditPatch(null);
+      await reload();
+    } catch (applyError) {
+      setError(applyError instanceof Error ? applyError.message : 'Echec d application de la modification IA');
+    } finally {
+      setIsSaving(false);
+    }
+  }, [aiEditPatch, reload, workflow?.active_scenario?.id, workflowId]);
+
+  const clearWorkflowEditPatch = useCallback(() => {
+    setAiEditPatch(null);
+  }, []);
+
   const generateTestCases = useCallback(async (formType?: FormProfileType): Promise<void> => {
     if (!workflow?.active_scenario?.id) return;
     setIsSuggesting(true);
@@ -703,7 +809,9 @@ export function useFormWorkflowBuilder(workflowId: string): UseFormWorkflowBuild
     isSubmitting,
     isApproving,
     isExecuting,
+    isAiEditing,
     error,
+    aiEditPatch,
     reload,
     switchScenario,
     loadResults,
@@ -720,6 +828,9 @@ export function useFormWorkflowBuilder(workflowId: string): UseFormWorkflowBuild
     deleteNode,
     connectNodes,
     deleteEdge,
+    proposeWorkflowEdit,
+    applyWorkflowEditPatch,
+    clearWorkflowEditPatch,
     generateTestCases,
     updateTestCaseSuggestion,
     createSuggestedTestCases,

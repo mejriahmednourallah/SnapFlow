@@ -21,7 +21,7 @@ export function WorkflowBuilderShell({ header, notices, sidebar, canvas, inspect
   const [inspectorOpen, setInspectorOpen] = useState(false);
 
   return (
-    <div className="h-[calc(100dvh-5rem)] min-h-[34rem] w-full min-w-0 overflow-hidden rounded-2xl border border-border bg-background shadow-sm">
+    <div className="h-[calc(100dvh-5rem)] min-h-0 w-full min-w-0 overflow-hidden rounded-lg border border-border bg-background shadow-sm">
       <div className="flex h-full flex-col">
         {header}
         {notices}

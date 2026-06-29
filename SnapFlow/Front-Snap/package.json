@@ -11,6 +11,7 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
+    "check:mojibake": "node scripts/check-mojibake.mjs",
     "logo:sites": "node scripts/extract-logo-test-sites.mjs"
   },
   "dependencies": {

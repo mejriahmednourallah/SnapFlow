@@ -379,11 +379,11 @@ export function CampaignPlanWorkspace({ workflowId }: CampaignPlanWorkspaceProps
                 <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Scénario sélectionné</p>
                 <h2 className="mt-2 text-lg font-semibold">{selectedScenario.name}</h2>
                 <p className="mt-1 text-sm leading-6 text-muted-foreground">
-                  {selectedDefinition.reasoning || selectedScenario.description || 'Aucune justification fournie.'}
+                  {selectedDefinition.purpose || selectedScenario.description || 'Aucun detail court pour ce scenario.'}
                 </p>
               </div>
 
-              <div className="grid grid-cols-3 gap-2">
+              <div className="hidden">
                 {(['accept', 'reject', 'explore'] as const).map((behavior) => {
                   const meta = INTENT_META[behavior];
                   return (
@@ -405,7 +405,7 @@ export function CampaignPlanWorkspace({ workflowId }: CampaignPlanWorkspaceProps
                 })}
               </div>
 
-              <div>
+              <div className="hidden">
                 <label className="space-y-1 text-xs">
                   <span className="font-medium">Sévérité potentielle</span>
                   <select
@@ -423,7 +423,7 @@ export function CampaignPlanWorkspace({ workflowId }: CampaignPlanWorkspaceProps
                 </label>
               </div>
 
-              <label className="block space-y-1 text-xs">
+              <label className="hidden">
                 <span className="font-medium">Pourquoi cette attente ?</span>
                 <Textarea
                   value={String(selectedDefinition.reasoning ?? '')}
@@ -434,7 +434,7 @@ export function CampaignPlanWorkspace({ workflowId }: CampaignPlanWorkspaceProps
                 />
               </label>
 
-              <label className="block space-y-1 text-xs">
+              <label className="hidden">
                 <span className="font-medium">Justification de la sévérité potentielle</span>
                 <Textarea
                   value={String(selectedDefinition.suggested_severity_reason ?? '')}

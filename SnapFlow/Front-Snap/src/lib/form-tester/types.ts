@@ -261,13 +261,16 @@ export interface WorkflowScheduleRun {
   completed_at: string | null;
 }
 
+export type FormTesterAiProvider = 'gemini' | 'openai_compatible';
+
 export interface FormTesterAiStatus {
-  provider: 'gemini';
+  provider: FormTesterAiProvider;
   model: string;
   configured: boolean;
   available: boolean;
   fallback: 'heuristic';
   error: string | null;
+  base_url?: string | null;
 }
 
 export interface WorkflowStepResult {
@@ -375,6 +378,53 @@ export interface WorkflowEdge {
   target_node_id: string;
   branch_key: WorkflowBranchKey;
   created_at: string;
+}
+
+export type WorkflowAiEditOperation =
+  | {
+      op: 'add_node';
+      temp_id?: string;
+      type: NodeType;
+      config?: Record<string, unknown>;
+      position_x?: number;
+      position_y?: number;
+      label?: string;
+    }
+  | {
+      op: 'update_node';
+      node_id: string;
+      config?: Record<string, unknown>;
+      position_x?: number;
+      position_y?: number;
+      label?: string;
+    }
+  | {
+      op: 'delete_node';
+      node_id: string;
+    }
+  | {
+      op: 'upsert_edge';
+      source_node_id: string;
+      target_node_id: string;
+      branch_key: WorkflowBranchKey;
+    }
+  | {
+      op: 'delete_edge';
+      edge_id: string;
+    }
+  | {
+      op: 'update_scenario';
+      name?: string;
+      status?: ScenarioVersionStatus;
+      description?: string | null;
+    };
+
+export interface WorkflowAiEditPatch {
+  summary: string;
+  operations: WorkflowAiEditOperation[];
+  warnings?: string[];
+  provider?: FormTesterAiProvider | 'heuristic';
+  model?: string;
 }
 
 export interface WorkflowWithDetails extends FormWorkflow {

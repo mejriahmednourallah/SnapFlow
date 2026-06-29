@@ -22,7 +22,7 @@ export function SubmitNode({ data }: { data: SubmitNodeData }) {
       }`}
       title={data.selector || 'button[type="submit"]'}
     >
-      <Handle id="default" type="target" position={Position.Top} className="!h-2 !w-2 !bg-green-500" />
+      <Handle id="default" type="target" position={Position.Top} className="!h-3.5 !w-3.5 !border-2 !border-background !bg-green-500" />
       <div
         className={`relative flex h-16 w-16 items-center justify-center rounded-2xl border-2 border-green-500 bg-background shadow-md transition-all ${
           data.isSelected ? 'ring-4 ring-primary/20' : 'hover:shadow-lg'
@@ -43,13 +43,13 @@ export function SubmitNode({ data }: { data: SubmitNodeData }) {
         id="failure"
         type="source"
         position={Position.Bottom}
-        className="!bottom-0 !left-5 !h-2.5 !w-2.5 !bg-red-500"
+        className="!bottom-0 !left-5 !h-3.5 !w-3.5 !border-2 !border-background !bg-red-500"
       />
       <Handle
         id="success"
         type="source"
         position={Position.Bottom}
-        className="!bottom-0 !left-auto !right-5 !h-2.5 !w-2.5 !bg-emerald-500"
+        className="!bottom-0 !left-auto !right-5 !h-3.5 !w-3.5 !border-2 !border-background !bg-emerald-500"
       />
     </div>
   );

@@ -10,7 +10,7 @@ import {
   type NodeTypes,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { Loader2 } from 'lucide-react';
+import { Link2, Loader2, Trash2, X } from 'lucide-react';
 import { Progress } from '@/components/ui/progress';
 import type {
   NodePositionUpdate,
@@ -52,6 +52,10 @@ export function WorkflowCanvas({
   onDeleteEdges,
 }: WorkflowCanvasProps) {
   const [localNodes, setLocalNodes] = useState<Node[]>(nodes);
+  const [connectMode, setConnectMode] = useState(false);
+  const [connectSourceId, setConnectSourceId] = useState<string | null>(null);
+  const [connectBranchKey, setConnectBranchKey] = useState<WorkflowBranchKey>('default');
+  const [selectedEdgeIds, setSelectedEdgeIds] = useState<string[]>([]);
   const saveTimerRef = useRef<number | null>(null);
   const progressTotal = activeExecutionDetail?.progress_total ?? activeExecutionDetail?.steps.length ?? 0;
   const progressCompleted =
@@ -106,15 +110,103 @@ export function WorkflowCanvas({
     return false;
   };
 
+  const connectByClick = (nodeId: string): void => {
+    if (!isEditable || !connectMode) {
+      onNodeSelect(nodeId);
+      return;
+    }
+    if (!connectSourceId) {
+      setConnectSourceId(nodeId);
+      onNodeSelect(nodeId);
+      return;
+    }
+    if (connectSourceId === nodeId) {
+      setConnectSourceId(null);
+      return;
+    }
+    const connection: Connection = {
+      source: connectSourceId,
+      target: nodeId,
+      sourceHandle: connectBranchKey,
+      targetHandle: 'default',
+    };
+    if (!wouldCreateCycle(connection)) {
+      onConnectNodes(connectSourceId, nodeId, connectBranchKey);
+      setConnectMode(false);
+      setConnectSourceId(null);
+    }
+  };
+
   return (
     <div className="relative h-full bg-[radial-gradient(circle_at_top_left,rgba(59,130,246,0.10),transparent_30%),linear-gradient(135deg,rgba(15,23,42,0.04),transparent)]">
-      <div className="absolute left-4 right-4 top-4 z-10 rounded-2xl border border-border bg-background/90 p-3 shadow-sm backdrop-blur">
-        <div className="flex items-center justify-between gap-4">
+      <div className="absolute left-4 right-4 top-4 z-10 rounded-lg border border-border bg-background/95 p-2 shadow-sm backdrop-blur">
+        <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="min-w-0">
-            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Canvas workflow</p>
-            <p className="truncate text-sm text-foreground">
-              {activeExecutionDetail ? `Execution ${activeExecutionDetail.status}` : 'Deplacez les noeuds pour organiser le scenario.'}
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Workflow</p>
+            <p className="truncate text-xs text-foreground">
+              {connectMode
+                ? connectSourceId
+                  ? 'Choisissez le noeud cible.'
+                  : 'Choisissez le noeud source.'
+                : activeExecutionDetail
+                  ? `Execution ${activeExecutionDetail.status}`
+                  : 'Deplacez ou connectez les noeuds.'}
             </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              className={`inline-flex h-8 items-center gap-1.5 rounded-md border px-2 text-xs font-semibold ${connectMode ? 'border-primary bg-primary text-primary-foreground' : 'border-border bg-background text-foreground'}`}
+              onClick={() => {
+                setConnectMode((current) => !current);
+                setConnectSourceId(null);
+              }}
+              disabled={!isEditable}
+              title="Connect mode"
+            >
+              <Link2 className="h-3.5 w-3.5" />
+              Connect
+            </button>
+            <select
+              className="h-8 rounded-md border border-border bg-background px-2 text-xs"
+              value={connectBranchKey}
+              onChange={(event) => setConnectBranchKey(event.target.value as WorkflowBranchKey)}
+              disabled={!isEditable || !connectMode}
+              aria-label="Branche de connexion"
+            >
+              <option value="default">default</option>
+              <option value="success">success</option>
+              <option value="failure">failure</option>
+              <option value="true">true</option>
+              <option value="false">false</option>
+            </select>
+            {selectedEdgeIds.length > 0 ? (
+              <button
+                type="button"
+                className="inline-flex h-8 items-center gap-1.5 rounded-md border border-destructive/30 bg-background px-2 text-xs font-semibold text-destructive"
+                onClick={() => {
+                  onDeleteEdges(selectedEdgeIds);
+                  setSelectedEdgeIds([]);
+                }}
+                disabled={!isEditable}
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                Delete edge
+              </button>
+            ) : null}
+            {connectMode ? (
+              <button
+                type="button"
+                className="grid h-8 w-8 place-items-center rounded-md border border-border bg-background text-muted-foreground"
+                onClick={() => {
+                  setConnectMode(false);
+                  setConnectSourceId(null);
+                }}
+                aria-label="Quitter le mode connexion"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            ) : null}
           </div>
           {activeExecutionDetail ? (
             <div className="flex w-72 items-center gap-3">
@@ -149,7 +241,7 @@ export function WorkflowCanvas({
         })}
         edges={edges}
         nodeTypes={nodeTypes}
-        onNodeClick={(_event, node) => onNodeSelect(node.id)}
+        onNodeClick={(_event, node) => connectByClick(node.id)}
         onNodesChange={(changes) => {
           setLocalNodes((current) =>
             current.map((node) => {
@@ -182,6 +274,13 @@ export function WorkflowCanvas({
           if (!isEditable || deletedEdges.length === 0) return;
           onDeleteEdges(deletedEdges.map((edge) => edge.id));
         }}
+        onEdgeClick={(_event, edge) => {
+          setSelectedEdgeIds([edge.id]);
+        }}
+        onPaneClick={() => {
+          setSelectedEdgeIds([]);
+          if (connectMode && connectSourceId) setConnectSourceId(null);
+        }}
         fitView
         fitViewOptions={{ padding: 0.35 }}
         nodesDraggable={isEditable}
@@ -189,12 +288,18 @@ export function WorkflowCanvas({
         edgesReconnectable={false}
         deleteKeyCode={['Backspace', 'Delete']}
         elementsSelectable
-        className="pt-20"
+        className="pt-16"
       >
         <Background color="#94A3B8" gap={22} />
         <Controls showInteractive={false} />
         <MiniMap pannable zoomable nodeColor="#2563EB" />
       </ReactFlow>
+
+      {edges.length === 0 ? (
+        <div className="pointer-events-none absolute left-1/2 top-24 z-10 -translate-x-1/2 rounded-md border border-dashed border-border bg-background/90 px-3 py-2 text-xs text-muted-foreground shadow-sm">
+          Use Connect, then select two nodes.
+        </div>
+      ) : null}
 
       {screenshotUrl ? (
         <div className="absolute bottom-4 right-4 z-10 w-72 overflow-hidden rounded-2xl border border-border bg-background shadow-lg">

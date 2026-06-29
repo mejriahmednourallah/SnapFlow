@@ -52,6 +52,7 @@ interface FormWorkflowsBody {
     | 'get'
     | 'create'
     | 'create_scenario'
+    | 'update_scenario'
     | 'update_scenario_behavior'
     | 'create_test_cases'
     | 'add_node'
@@ -66,6 +67,7 @@ interface FormWorkflowsBody {
   scenario_id?: string;
   scenario_name?: string;
   scenario_description?: string;
+  scenario_status?: 'draft' | 'pending' | 'approved' | 'rejected';
   expected_behavior?: 'accept' | 'reject' | 'explore';
   expectation_confidence?: number;
   suggested_severity?: 'critical' | 'high' | 'medium' | 'low';
@@ -629,6 +631,45 @@ serve(async (req) => {
 
       if (scenarioError) throw new HttpError(500, scenarioError.message);
       return toJson({ scenario }, 201);
+    }
+
+    if (action === 'update_scenario') {
+      const workflowId = body.workflow_id;
+      const scenarioId = body.scenario_id;
+      if (!workflowId || !scenarioId) {
+        throw new HttpError(400, 'workflow_id et scenario_id sont requis');
+      }
+
+      const workflow = await getAccessibleWorkflow(serviceClient, workflowId, userId, isAdmin);
+      if (workflow.status === 'executed' && !isAdmin) {
+        throw new HttpError(400, 'Le workflow execute doit etre duplique avant modification');
+      }
+      await getScenarioForWorkflow(serviceClient, workflow, scenarioId);
+
+      const updates: Record<string, unknown> = { updated_at: new Date().toISOString() };
+      if (typeof body.scenario_name === 'string' && body.scenario_name.trim()) {
+        updates.name = body.scenario_name.trim().slice(0, 160);
+      }
+      if (typeof body.scenario_description === 'string') {
+        updates.description = body.scenario_description.trim() || null;
+      }
+      if (body.scenario_status) {
+        if (!['draft', 'pending', 'approved', 'rejected'].includes(body.scenario_status)) {
+          throw new HttpError(400, 'scenario_status invalide');
+        }
+        updates.status = body.scenario_status;
+      }
+
+      const { data: updated, error } = await serviceClient
+        .from('form_test_scenarios')
+        .update(updates)
+        .eq('id', scenarioId)
+        .eq('workflow_id', workflowId)
+        .select('*')
+        .single();
+
+      if (error) throw new HttpError(500, error.message);
+      return toJson({ scenario: updated });
     }
 
     if (action === 'create_test_cases') {

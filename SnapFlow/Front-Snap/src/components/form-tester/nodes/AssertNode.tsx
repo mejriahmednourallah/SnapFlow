@@ -30,7 +30,7 @@ export function AssertNode({ data }: { data: AssertNodeData }) {
       }`}
       title={data.value || data.label || ASSERT_LABELS[data.type]}
     >
-      <Handle id="default" type="target" position={Position.Top} className="!h-2 !w-2 !bg-indigo-500" />
+      <Handle id="default" type="target" position={Position.Top} className="!h-3.5 !w-3.5 !border-2 !border-background !bg-indigo-500" />
       <div
         className={`relative flex h-16 w-16 items-center justify-center rounded-2xl border-2 border-indigo-500 bg-background shadow-md transition-all ${
           data.isSelected ? 'ring-4 ring-primary/20' : 'hover:shadow-lg'
@@ -43,7 +43,7 @@ export function AssertNode({ data }: { data: AssertNodeData }) {
         {data.label || ASSERT_LABELS[data.type]}
       </p>
       <p className="mt-0.5 max-w-[86px] truncate text-[9px] uppercase tracking-wide text-muted-foreground">assert</p>
-      <Handle id="default" type="source" position={Position.Bottom} className="!h-2 !w-2 !bg-indigo-500" />
+      <Handle id="default" type="source" position={Position.Bottom} className="!h-3.5 !w-3.5 !border-2 !border-background !bg-indigo-500" />
     </div>
   );
 }

@@ -51,6 +51,28 @@ interface FieldRow {
   field_selector?: string | null;
 }
 
+function getAiClientConfig() {
+  const provider = Deno.env.get('FORM_TESTER_AI_PROVIDER') === 'openai_compatible'
+    ? 'openai_compatible'
+    : 'gemini';
+  if (provider === 'openai_compatible') {
+    return {
+      provider,
+      apiUrl: Deno.env.get('FORM_TESTER_AI_BASE_URL') || 'https://api.deepseek.com/v1/chat/completions',
+      apiKey: Deno.env.get('FORM_TESTER_AI_API_KEY') ?? '',
+      modelName: Deno.env.get('FORM_TESTER_AI_MODEL') || 'flash-v4',
+      missingMessage: 'FORM_TESTER_AI_API_KEY non configuree',
+    };
+  }
+  return {
+    provider,
+    apiUrl: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions',
+    apiKey: Deno.env.get('GEMINI_API_KEY') ?? '',
+    modelName: Deno.env.get('FORM_TESTER_GEMINI_MODEL') || 'gemini-2.0-flash',
+    missingMessage: 'GEMINI_API_KEY non configuree',
+  };
+}
+
 interface FieldSuggestion {
   field_id: string;
   value: string;
@@ -685,10 +707,8 @@ async function inferTestCasesWithLLM(
     )
     .join('\n');
 
-  const apiUrl = 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions';
-  const apiKey = Deno.env.get('GEMINI_API_KEY') ?? '';
-  const modelName = Deno.env.get('FORM_TESTER_GEMINI_MODEL') || 'gemini-2.0-flash';
-  if (!apiKey) throw new Error('GEMINI_API_KEY non configuree');
+  const { apiUrl, apiKey, modelName, missingMessage } = getAiClientConfig();
+  if (!apiKey) throw new Error(missingMessage);
 
   const response = await fetch(apiUrl, {
     method: 'POST',
@@ -777,11 +797,9 @@ Génère des suggestions de test pour chaque champ. Réponds au format JSON vali
   ]
 }`;
 
-  const apiUrl = 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions';
-  const apiKey = Deno.env.get('GEMINI_API_KEY') ?? '';
-  const modelName = Deno.env.get('FORM_TESTER_GEMINI_MODEL') || 'gemini-2.0-flash';
+  const { apiUrl, apiKey, modelName, missingMessage } = getAiClientConfig();
   if (!apiKey) {
-    throw new Error('GEMINI_API_KEY non configuree');
+    throw new Error(missingMessage);
   }
 
   try {

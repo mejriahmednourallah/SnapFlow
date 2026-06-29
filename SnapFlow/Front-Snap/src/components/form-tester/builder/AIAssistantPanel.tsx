@@ -1,13 +1,15 @@
 import { useEffect, useMemo, useState } from 'react';
-import { AlertCircle, ChevronDown, FlaskConical, GitBranch, Play, Sparkles } from 'lucide-react';
+import { AlertCircle, CheckCircle2, ChevronDown, FlaskConical, GitBranch, Loader2, Play, Sparkles, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 import type {
   FormProfile,
   FormProfileType,
   FormTestScenario,
   TestCaseExpectedSignal,
   TestCaseSuggestion,
+  WorkflowAiEditPatch,
   WorkflowExecutionDetail,
 } from '@/lib/form-tester/types';
 import { cn } from '@/lib/utils';
@@ -21,8 +23,13 @@ interface AIAssistantPanelProps {
   onUpdateTestCase: (suggestion: TestCaseSuggestion) => void;
   onCreateTestCases: (suggestionIds: string[]) => void;
   onExecuteAllCases: (scenarioIds: string[]) => void;
+  onProposeWorkflowEdit: (instruction: string) => void;
+  onApplyWorkflowEditPatch: (patch?: WorkflowAiEditPatch) => void;
+  onClearWorkflowEditPatch: () => void;
+  aiEditPatch: WorkflowAiEditPatch | null;
   isLoading: boolean;
   isExecuting: boolean;
+  isAiEditing: boolean;
   isEditable: boolean;
 }
 
@@ -140,13 +147,19 @@ export function AIAssistantPanel({
   onUpdateTestCase,
   onCreateTestCases,
   onExecuteAllCases,
+  onProposeWorkflowEdit,
+  onApplyWorkflowEditPatch,
+  onClearWorkflowEditPatch,
+  aiEditPatch,
   isLoading,
   isExecuting,
+  isAiEditing,
   isEditable,
 }: AIAssistantPanelProps) {
   const [selectedCases, setSelectedCases] = useState<string[]>([]);
   const [selectedFormType, setSelectedFormType] = useState<FormProfileType | ''>('');
   const [expandedCaseId, setExpandedCaseId] = useState<string | null>(null);
+  const [editInstruction, setEditInstruction] = useState('');
 
   useEffect(() => {
     setSelectedCases(testCaseSuggestions.map((item) => item.id));
@@ -201,6 +214,75 @@ export function AIAssistantPanel({
 
   return (
     <div className="space-y-4">
+      <div className="rounded-lg border border-border bg-background p-3">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Edition IA</p>
+            <p className="mt-1 text-xs leading-5 text-muted-foreground">
+              Demandez une modification, verifiez le patch, puis appliquez-le.
+            </p>
+          </div>
+          <Sparkles className="h-5 w-5 shrink-0 text-primary" />
+        </div>
+
+        <Textarea
+          className="mt-3 min-h-20 text-sm"
+          value={editInstruction}
+          onChange={(event) => setEditInstruction(event.target.value)}
+          placeholder="Ex: ajoute une verification de message de succes apres la soumission et connecte-la au bouton submit"
+          disabled={!isEditable || isAiEditing}
+        />
+        <Button
+          className="mt-3 w-full"
+          size="sm"
+          variant="secondary"
+          onClick={() => onProposeWorkflowEdit(editInstruction)}
+          disabled={!isEditable || isAiEditing || !editInstruction.trim()}
+        >
+          {isAiEditing ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Sparkles className="mr-1.5 h-4 w-4" />}
+          Preparer la modification
+        </Button>
+
+        {aiEditPatch ? (
+          <div className="mt-3 rounded-md border border-primary/25 bg-primary/5 p-3">
+            <p className="text-sm font-semibold">{aiEditPatch.summary || 'Patch pret'}</p>
+            {aiEditPatch.provider || aiEditPatch.model ? (
+              <p className="mt-1 text-[11px] text-muted-foreground">
+                {aiEditPatch.provider ?? 'ia'} {aiEditPatch.model ? `- ${aiEditPatch.model}` : ''}
+              </p>
+            ) : null}
+            {aiEditPatch.warnings?.length ? (
+              <div className="mt-2 space-y-1 text-xs text-amber-700">
+                {aiEditPatch.warnings.map((warning) => (
+                  <p key={warning}>{warning}</p>
+                ))}
+              </div>
+            ) : null}
+            <div className="mt-3 space-y-1">
+              {aiEditPatch.operations.map((operation, index) => (
+                <div key={`${operation.op}-${index}`} className="rounded border bg-background px-2 py-1.5 text-xs">
+                  <span className="font-semibold">{operation.op}</span>
+                  {' '}
+                  {'node_id' in operation && operation.node_id ? operation.node_id : ''}
+                  {'type' in operation && operation.type ? operation.type : ''}
+                  {'source_node_id' in operation ? `${operation.source_node_id} -> ${operation.target_node_id} (${operation.branch_key})` : ''}
+                </div>
+              ))}
+            </div>
+            <div className="mt-3 grid grid-cols-2 gap-2">
+              <Button size="sm" onClick={() => onApplyWorkflowEditPatch(aiEditPatch)} disabled={isLoading}>
+                <CheckCircle2 className="mr-1.5 h-4 w-4" />
+                Appliquer
+              </Button>
+              <Button size="sm" variant="outline" onClick={onClearWorkflowEditPatch}>
+                <X className="mr-1.5 h-4 w-4" />
+                Annuler
+              </Button>
+            </div>
+          </div>
+        ) : null}
+      </div>
+
       <div className="rounded-2xl border border-border p-4">
         <div className="flex items-start justify-between gap-3">
           <div>

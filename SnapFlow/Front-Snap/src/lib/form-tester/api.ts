@@ -16,6 +16,7 @@ import type {
   TestCaseSuggestionResponse,
   WorkflowBranchKey,
   WorkflowEdge,
+  WorkflowAiEditPatch,
   WorkflowNodeWithFields,
   WorkflowListItem,
   WorkflowListView,
@@ -60,21 +61,71 @@ async function invokeFormTester<TResponse>(
     throw new Error(response.error);
   }
 
+  const action = typeof body.action === 'string' ? body.action : '';
+  const isReadOnly =
+    (functionName === 'form-workflows' && ['list', 'get', 'results'].includes(action)) ||
+    (functionName === 'form-executions' && ['list', 'get'].includes(action)) ||
+    (functionName === 'form-workflow-schedules' && action === 'list') ||
+    functionName === 'form-tester-ai-status' ||
+    functionName === 'form-workflows-suggest' ||
+    functionName === 'form-workflows-edit';
+  if (!isReadOnly) clearFormTesterCache();
+
   return response as TResponse;
+}
+
+const CACHE_TTL_MS = {
+  workflow: 20_000,
+  workflows: 30_000,
+  executions: 10_000,
+  schedules: 30_000,
+  aiStatus: 60_000,
+};
+
+const formTesterCache = new Map<string, { expiresAt: number; data: unknown }>();
+
+function getCached<T>(key: string): T | null {
+  const hit = formTesterCache.get(key);
+  if (!hit || hit.expiresAt < Date.now()) {
+    formTesterCache.delete(key);
+    return null;
+  }
+  return hit.data as T;
+}
+
+function setCached<T>(key: string, data: T, ttlMs: number): T {
+  formTesterCache.set(key, { expiresAt: Date.now() + ttlMs, data });
+  return data;
+}
+
+function clearFormTesterCache(prefix?: string): void {
+  if (!prefix) {
+    formTesterCache.clear();
+    return;
+  }
+  for (const key of formTesterCache.keys()) {
+    if (key.startsWith(prefix)) formTesterCache.delete(key);
+  }
 }
 
 export const formTesterApi = {
   async listWorkflows(params?: { status?: WorkflowStatus; view?: WorkflowListView; projectId?: string | null }): Promise<WorkflowListItem[]> {
+    const cacheKey = `workflows:${params?.view ?? 'mine'}:${params?.status ?? ''}:${params?.projectId ?? ''}`;
+    const cached = getCached<WorkflowListItem[]>(cacheKey);
+    if (cached) return cached;
     const response = await invokeFormTester<{ workflows: WorkflowListItem[] }>('form-workflows', {
       action: 'list',
       status: params?.status,
       view: params?.view ?? 'mine',
       project_id: params?.projectId ?? undefined,
     });
-    return response.workflows ?? [];
+    return setCached(cacheKey, response.workflows ?? [], CACHE_TTL_MS.workflows);
   },
 
   async getWorkflow(workflowId: string, includeResults = false, scenarioId?: string): Promise<WorkflowWithDetails> {
+    const cacheKey = `workflow:${workflowId}:${scenarioId ?? ''}:${includeResults ? 'results' : 'summary'}`;
+    const cached = getCached<WorkflowWithDetails>(cacheKey);
+    if (cached) return cached;
     const response = await invokeFormTester<{
       workflow: FormWorkflow;
       active_scenario: WorkflowWithDetails['active_scenario'];
@@ -94,7 +145,7 @@ export const formTesterApi = {
       throw new Error('Workflow introuvable ou reponse incomplete');
     }
 
-    return {
+    return setCached(cacheKey, {
       ...response.workflow,
       active_scenario: response.active_scenario,
       scenarios: response.scenarios ?? [],
@@ -102,7 +153,7 @@ export const formTesterApi = {
       nodes: response.nodes ?? [],
       edges: response.edges ?? [],
       latest_result: response.latest_result ?? null,
-    };
+    }, CACHE_TTL_MS.workflow);
   },
 
   async createWorkflow(name: string, targetUrl: string, projectId?: string | null): Promise<FormWorkflow> {
@@ -308,6 +359,37 @@ export const formTesterApi = {
     });
   },
 
+  async updateScenario(payload: {
+    workflowId: string;
+    scenarioId: string;
+    name?: string;
+    description?: string | null;
+    status?: WorkflowWithDetails['active_scenario']['status'];
+  }): Promise<FormTestScenario> {
+    const response = await invokeFormTester<{ scenario: FormTestScenario }>('form-workflows', {
+      action: 'update_scenario',
+      workflow_id: payload.workflowId,
+      scenario_id: payload.scenarioId,
+      scenario_name: payload.name,
+      scenario_description: payload.description,
+      scenario_status: payload.status,
+    });
+    return response.scenario;
+  },
+
+  async proposeWorkflowEdit(payload: {
+    workflowId: string;
+    scenarioId: string;
+    instruction: string;
+  }): Promise<WorkflowAiEditPatch> {
+    const response = await invokeFormTester<{ patch: WorkflowAiEditPatch }>('form-workflows-edit', {
+      workflow_id: payload.workflowId,
+      scenario_id: payload.scenarioId,
+      instruction: payload.instruction,
+    });
+    return response.patch;
+  },
+
   async approveWorkflow(workflowId: string, payload: ApprovalPayload): Promise<FormWorkflow> {
     const response = await invokeFormTester<{ workflow: FormWorkflow }>('form-workflows-approve', {
       workflow_id: workflowId,
@@ -334,12 +416,15 @@ export const formTesterApi = {
   },
 
   async listExecutions(workflowId: string, limit = 50): Promise<WorkflowExecutionDetail[]> {
+    const cacheKey = `executions:${workflowId}:${limit}`;
+    const cached = getCached<WorkflowExecutionDetail[]>(cacheKey);
+    if (cached) return cached;
     const response = await invokeFormTester<{ executions: WorkflowExecutionDetail[] }>('form-executions', {
       action: 'list',
       workflow_id: workflowId,
       limit,
     });
-    return (response.executions ?? []).map(normalizeWorkflowExecution);
+    return setCached(cacheKey, (response.executions ?? []).map(normalizeWorkflowExecution), CACHE_TTL_MS.executions);
   },
 
   async getExecution(executionId: string): Promise<WorkflowExecutionDetail> {
@@ -364,22 +449,29 @@ export const formTesterApi = {
   },
 
   async listResults(workflowId: string): Promise<WorkflowExecutionDetail[]> {
+    const cacheKey = `results:${workflowId}`;
+    const cached = getCached<WorkflowExecutionDetail[]>(cacheKey);
+    if (cached) return cached;
     const response = await invokeFormTester<{ executions: WorkflowExecutionDetail[] }>('form-executions', {
       action: 'list',
       workflow_id: workflowId,
       limit: 50,
     });
-    return (response.executions ?? []).map(normalizeWorkflowExecution);
+    return setCached(cacheKey, (response.executions ?? []).map(normalizeWorkflowExecution), CACHE_TTL_MS.executions);
   },
 
   async listSchedules(workflowId?: string): Promise<{
     schedules: WorkflowSchedule[];
     runs: WorkflowScheduleRun[];
   }> {
-    return invokeFormTester('form-workflow-schedules', {
+    const cacheKey = `schedules:${workflowId ?? 'all'}`;
+    const cached = getCached<{ schedules: WorkflowSchedule[]; runs: WorkflowScheduleRun[] }>(cacheKey);
+    if (cached) return cached;
+    const response = await invokeFormTester<{ schedules: WorkflowSchedule[]; runs: WorkflowScheduleRun[] }>('form-workflow-schedules', {
       action: 'list',
       workflow_id: workflowId,
     });
+    return setCached(cacheKey, response, CACHE_TTL_MS.schedules);
   },
 
   async createSchedule(payload: {
@@ -455,7 +547,10 @@ export const formTesterApi = {
   },
 
   async getAiStatus(): Promise<FormTesterAiStatus> {
-    return invokeFormTester<FormTesterAiStatus>('form-tester-ai-status', {});
+    const cached = getCached<FormTesterAiStatus>('ai-status');
+    if (cached) return cached;
+    const response = await invokeFormTester<FormTesterAiStatus>('form-tester-ai-status', {});
+    return setCached('ai-status', response, CACHE_TTL_MS.aiStatus);
   },
 
   async launchCampaign(payload: {

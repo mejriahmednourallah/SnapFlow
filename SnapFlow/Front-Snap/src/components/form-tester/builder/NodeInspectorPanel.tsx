@@ -5,6 +5,7 @@ import type {
   FormProfile,
   FormProfileType,
   TestCaseSuggestion,
+  WorkflowAiEditPatch,
   WorkflowExecutionDetail,
   WorkflowNodeWithFields,
 } from '@/lib/form-tester/types';
@@ -30,6 +31,8 @@ interface NodeInspectorPanelProps {
   isEditable: boolean;
   isLoading: boolean;
   isExecuting: boolean;
+  isAiEditing: boolean;
+  aiEditPatch: WorkflowAiEditPatch | null;
   onUpdateField: (fieldId: string, value: string) => Promise<void>;
   onUpdateNodeConfig: (nodeId: string, config: Record<string, unknown>) => Promise<void>;
   onDeleteNode: (nodeId: string) => Promise<void>;
@@ -37,6 +40,9 @@ interface NodeInspectorPanelProps {
   onUpdateTestCase: (suggestion: TestCaseSuggestion) => void;
   onCreateTestCases: (suggestionIds: string[]) => Promise<void>;
   onExecuteAllCases: (scenarioIds: string[]) => Promise<void>;
+  onProposeWorkflowEdit: (instruction: string) => Promise<void>;
+  onApplyWorkflowEditPatch: (patch?: WorkflowAiEditPatch) => Promise<void>;
+  onClearWorkflowEditPatch: () => void;
   onStopExecution: (executionId: string) => Promise<void>;
 }
 
@@ -60,6 +66,8 @@ export function NodeInspectorPanel({
   isEditable,
   isLoading,
   isExecuting,
+  isAiEditing,
+  aiEditPatch,
   onUpdateField,
   onUpdateNodeConfig,
   onDeleteNode,
@@ -67,6 +75,9 @@ export function NodeInspectorPanel({
   onUpdateTestCase,
   onCreateTestCases,
   onExecuteAllCases,
+  onProposeWorkflowEdit,
+  onApplyWorkflowEditPatch,
+  onClearWorkflowEditPatch,
   onStopExecution,
 }: NodeInspectorPanelProps) {
   const [tab, setTab] = useState<InspectorTab>('configuration');
@@ -129,8 +140,13 @@ export function NodeInspectorPanel({
               onUpdateTestCase={onUpdateTestCase}
               onCreateTestCases={(suggestionIds) => void onCreateTestCases(suggestionIds)}
               onExecuteAllCases={(scenarioIds) => void onExecuteAllCases(scenarioIds)}
+              onProposeWorkflowEdit={(instruction) => void onProposeWorkflowEdit(instruction)}
+              onApplyWorkflowEditPatch={(patch) => void onApplyWorkflowEditPatch(patch)}
+              onClearWorkflowEditPatch={onClearWorkflowEditPatch}
+              aiEditPatch={aiEditPatch}
               isLoading={isLoading}
               isExecuting={isExecuting}
+              isAiEditing={isAiEditing}
               isEditable={isEditable}
             />
           ) : null}

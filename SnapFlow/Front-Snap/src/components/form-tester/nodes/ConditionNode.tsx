@@ -12,7 +12,7 @@ interface ConditionNodeData {
 export function ConditionNode({ data }: { data: ConditionNodeData }) {
   return (
     <div className="relative flex w-28 flex-col items-center text-center" title={data.detail || data.label}>
-      <Handle id="default" type="target" position={Position.Top} className="!h-2 !w-2 !bg-violet-500" />
+      <Handle id="default" type="target" position={Position.Top} className="!h-3.5 !w-3.5 !border-2 !border-background !bg-violet-500" />
       <div
         className={cn(
           'relative flex h-16 w-16 rotate-45 items-center justify-center rounded-2xl border-2 border-violet-500 bg-background shadow-md transition-all',
@@ -32,13 +32,13 @@ export function ConditionNode({ data }: { data: ConditionNodeData }) {
         id="false"
         type="source"
         position={Position.Bottom}
-        className="!bottom-0 !left-5 !h-2.5 !w-2.5 !bg-red-500"
+        className="!bottom-0 !left-5 !h-3.5 !w-3.5 !border-2 !border-background !bg-red-500"
       />
       <Handle
         id="true"
         type="source"
         position={Position.Bottom}
-        className="!bottom-0 !left-auto !right-5 !h-2.5 !w-2.5 !bg-emerald-500"
+        className="!bottom-0 !left-auto !right-5 !h-3.5 !w-3.5 !border-2 !border-background !bg-emerald-500"
       />
     </div>
   );
