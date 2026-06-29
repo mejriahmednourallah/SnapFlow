@@ -38,6 +38,7 @@ interface UseFormWorkflowBuilderReturn {
   suggestAndApplyAll: () => Promise<void>;
   suggestOne: (fieldId: string) => Promise<void>;
   updateFieldValue: (fieldId: string, value: string) => Promise<void>;
+  updateWorkflowProject: (projectId: string | null) => Promise<void>;
   updateNodePositions: (updates: NodePositionUpdate[]) => Promise<void>;
   addNode: (type: NodeType, position?: { x: number; y: number }) => Promise<void>;
   updateNodeConfig: (nodeId: string, config: Record<string, unknown>) => Promise<void>;
@@ -239,6 +240,21 @@ export function useFormWorkflowBuilder(workflowId: string): UseFormWorkflowBuild
       setIsSaving(false);
     }
   }, [reload, workflow, workflowId]);
+
+  const updateWorkflowProject = useCallback(async (projectId: string | null): Promise<void> => {
+    setIsSaving(true);
+    setError(null);
+    try {
+      await formTesterApi.updateWorkflow({ workflowId, projectId });
+      await reload();
+    } catch (saveError) {
+      const message = saveError instanceof Error ? saveError.message : 'Impossible de modifier le projet du workflow';
+      setError(message);
+      throw new Error(message);
+    } finally {
+      setIsSaving(false);
+    }
+  }, [reload, workflowId]);
 
   const updateNodePositions = useCallback(async (updates: NodePositionUpdate[]): Promise<void> => {
     if (updates.length === 0) return;
@@ -697,6 +713,7 @@ export function useFormWorkflowBuilder(workflowId: string): UseFormWorkflowBuild
     suggestAndApplyAll,
     suggestOne,
     updateFieldValue,
+    updateWorkflowProject,
     updateNodePositions,
     addNode,
     updateNodeConfig,

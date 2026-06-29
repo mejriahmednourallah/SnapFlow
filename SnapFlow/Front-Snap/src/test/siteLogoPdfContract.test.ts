@@ -29,8 +29,13 @@ describe('PDF site logo contract', () => {
     expect(detector).toContain('attrs["aria-label"]');
     expect(detector).toContain('extractSrcsetCandidates');
     expect(detector).toContain('extractJsonLdLogos');
+    expect(detector).toContain('extractMetaLogoImages');
+    expect(detector).toContain('extractLogoHrefLinks');
     expect(detector).toContain('extractBackgroundImages');
+    expect(detector).toContain('normalizeHttpUrl');
     expect(detector).toContain('source: "jsonld-logo"');
+    expect(detector).toContain('source: "meta-logo"');
+    expect(detector).toContain('source: "logo-link"');
     expect(detector).toContain('source: "background-logo"');
     expect(detector).toContain('isImageResponse');
     expect(detector).toContain('source: "page-logo"');

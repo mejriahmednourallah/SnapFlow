@@ -16,7 +16,7 @@ const templates: WorkflowTemplate[] = [
   {
     id: 'audit-hebdomadaire',
     titre: 'Audit hebdomadaire automatisé',
-    description: 'Déclencher un audit complet chaque semaine et envoyer un résumé à l\'équipe.',
+    description: "Déclencher un audit complet chaque semaine et envoyer un résumé à l'équipe.",
     frequence: 'Chaque lundi à 08:00',
     statut: 'Bientôt disponible',
   },
@@ -30,7 +30,7 @@ const templates: WorkflowTemplate[] = [
   {
     id: 'suivi-actions',
     titre: 'Suivi des actions correctives',
-    description: 'Relancer automatiquement les propriétaires d\'actions non clôturées après 7 jours.',
+    description: "Relancer automatiquement les propriétaires d'actions non clôturées après 7 jours.",
     frequence: 'Tous les jours à 09:00',
     statut: 'Bientôt disponible',
   },
@@ -55,7 +55,7 @@ const WorkflowsPage = () => {
           <p className="text-sm text-muted-foreground">Assistant IA + Flux de travail</p>
           <h2 className="text-lg font-semibold mt-1">Orchestrez vos actions en quelques clics</h2>
           <p className="text-sm text-muted-foreground mt-2 max-w-2xl">
-            Les workflows enchainent des controles, validations et notifications internes sans canal mail pour cette phase.
+            Les workflows enchaînent des contrôles, validations et notifications internes sans canal mail pour cette phase.
           </p>
         </div>
         <Button onClick={() => navigate('/app/assistant')} className="w-full sm:w-auto">
@@ -82,10 +82,10 @@ const WorkflowsPage = () => {
 
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-3">
         {[
-          ['Auto-detecter', 'Static HTML, rendu JS et confirmation Chromium recuperent les champs reels.'],
-          ['Valider', 'Captcha, login, paiement, upload ou booking passent en revue avant execution.'],
-          ['Executer', 'Les preuves finales viennent de Chromium: trace, URL finale, reseau et capture.'],
-          ['Notifier', 'Les alertes restent dans SnapFlow avec files de validation et resultats recents.'],
+          ['Auto-détecter', 'Static HTML, rendu JS et confirmation Chromium récupèrent les champs réels.'],
+          ['Valider', 'Captcha, login, paiement, upload ou booking passent en revue avant exécution.'],
+          ['Exécuter', 'Les preuves finales viennent de Chromium: trace, URL finale, réseau et capture.'],
+          ['Notifier', 'Les alertes restent dans SnapFlow avec files de validation et résultats récents.'],
         ].map(([title, text]) => (
           <div key={title} className="rounded-lg border border-border bg-background/70 p-4">
             <p className="text-sm font-semibold">{title}</p>

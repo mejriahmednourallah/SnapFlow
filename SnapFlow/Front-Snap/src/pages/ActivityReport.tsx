@@ -14,9 +14,7 @@ import { TicketHistorySheet } from '@/components/activity/TicketHistorySheet';
 import { PdfExportModal } from '@/components/activity/pdf/PdfExportModal';
 import { PDF_THEMES } from '@/components/pdf/pdfStyles';
 import type { ActivityPdfOptions } from '@/components/activity/pdf/pdfTypes';
-import { format } from 'date-fns';
-import { fr } from 'date-fns/locale';
-import { formatDateTime } from '@/lib/dateFormat';
+import { formatDate, formatDateTime } from '@/lib/dateFormat';
 import { ACTIVITY_PDF_BRAND_DEFAULTS, fetchActivityPdfBrandDefaults } from '@/lib/appSettings';
 import { normalizeProjectPerimeterBlocks, hasProjectPerimeterBlocks, type ProjectPerimeterBlock } from '@/lib/projectPerimeters';
 
@@ -584,7 +582,7 @@ const ActivityReport = () => {
                           </div>
                         </td>
                         <td className="p-3 text-center text-xs text-muted-foreground">
-                          {format(new Date(issue.created_on), 'dd/MM/yyyy')}
+                          {formatDate(issue.created_on)}
                         </td>
                       </tr>
                     ))}
@@ -633,7 +631,7 @@ const ActivityReport = () => {
                         <td className="p-3 text-center text-xs">{issue.priority.name}</td>
                         <td className="p-3 text-sm">{issue.assigned_to?.name || '—'}</td>
                         <td className="p-3 text-center text-xs text-muted-foreground">
-                          {format(new Date(issue.created_on), 'dd/MM/yyyy')}
+                          {formatDate(issue.created_on)}
                         </td>
                       </tr>
                     ))}
@@ -723,7 +721,7 @@ const ActivityReport = () => {
                         </span>
                         {report.archived_at && (
                           <span className="text-xs bg-muted text-muted-foreground px-2 py-0.5 rounded-full">
-                            Archivé le {format(new Date(report.archived_at), 'dd/MM/yyyy HH:mm')}
+                            Archivé le {formatDateTime(report.archived_at)}
                           </span>
                         )}
                       </div>
@@ -784,7 +782,7 @@ const ActivityComparisonView = ({ reports }: { reports: SavedActivityReport[] })
       const name = i.status?.name || 'Inconnu';
       counts[name] = (counts[name] || 0) + 1;
     });
-    return { date: format(new Date(r.created_at), 'dd/MM/yyyy', { locale: fr }), ticketCount: r.ticket_count || 0, counts };
+    return { date: formatDate(r.created_at), ticketCount: r.ticket_count || 0, counts };
   });
 
   const allStatuses = Array.from(new Set(statusBreakdowns.flatMap(s => Object.keys(s.counts))));
@@ -796,7 +794,7 @@ const ActivityComparisonView = ({ reports }: { reports: SavedActivityReport[] })
       const name = i.tracker?.name || 'Inconnu';
       counts[name] = (counts[name] || 0) + 1;
     });
-    return { date: format(new Date(r.created_at), 'dd/MM/yyyy', { locale: fr }), counts };
+    return { date: formatDate(r.created_at), counts };
   });
 
   const allTrackers = Array.from(new Set(trackerBreakdowns.flatMap(t => Object.keys(t.counts))));

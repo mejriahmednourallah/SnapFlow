@@ -9,9 +9,7 @@ import {
   ArrowLeft, FileText, Plus, Archive, Eye, BarChart3, Loader2, Calendar, ClipboardList,
   Globe, User, ExternalLink, ChevronDown, ChevronUp, AlertCircle, X,
 } from 'lucide-react';
-import { format } from 'date-fns';
-import { fr } from 'date-fns/locale';
-import { formatDateTime } from '@/lib/dateFormat';
+import { formatDate, formatDateTime } from '@/lib/dateFormat';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { useAsyncAuditPoll } from '@/hooks/useAsyncAuditPoll';
 import { useProjectAssignments } from '@/hooks/useProjectAssignments';
@@ -335,7 +333,7 @@ const ProjectDetail = () => {
             <div className="flex-1">
               <h3 className="font-semibold text-sm text-yellow-900">Audit bloqué détecté</h3>
               <p className="text-xs text-yellow-800 mt-1">
-                Un audit lancé le {format(new Date(staleAuditWarning.created_at), 'dd/MM/yyyy à HH:mm', { locale: fr })} semble bloqué et n'a pas progressé.
+                Un audit lancé le {formatDateTime(staleAuditWarning.created_at)} semble bloqué et n'a pas progressé.
               </p>
             </div>
           </div>
@@ -614,7 +612,7 @@ const AuditCard = ({ audit, project, onView, onArchive, isArchived, isSelectedFo
           )}
           {isArchived && audit.archived_at && (
             <span className="text-xs bg-muted text-muted-foreground px-2 py-0.5 rounded-full">
-              Archivé le {format(new Date(audit.archived_at), 'dd/MM/yyyy HH:mm')}
+              Archivé le {formatDateTime(audit.archived_at)}
             </span>
           )}
         </div>
@@ -646,7 +644,7 @@ const AuditCard = ({ audit, project, onView, onArchive, isArchived, isSelectedFo
 
 const ComparisonView = ({ audits, project }: { audits: AuditRow[]; project: ProjectInfo | null }) => {
   const globalData = audits.map(a => ({
-    date: format(new Date(a.created_at), 'dd/MM/yyyy', { locale: fr }),
+    date: formatDate(a.created_at),
     score: getAuditScoreFromAny(a.report_data, a.id, {
       url: project?.url ?? '',
       site_name: project?.site_name ?? 'Site',
@@ -655,7 +653,7 @@ const ComparisonView = ({ audits, project }: { audits: AuditRow[]; project: Proj
 
   const allAxes: Map<string, { name: string; scores: { date: string; score: number }[] }> = new Map();
   audits.forEach(a => {
-    const date = format(new Date(a.created_at), 'dd/MM/yyyy', { locale: fr });
+    const date = formatDate(a.created_at);
     const normalized = normalizeAuditForRead(a.report_data, a.id, {
       url: project?.url ?? '',
       site_name: project?.site_name ?? 'Site',

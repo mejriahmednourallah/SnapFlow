@@ -137,7 +137,7 @@ export function RecommendationsPage({ report, theme, clientLogoSrc }: Recommenda
             <SectionTitle title={pageIndex === 0 ? 'Tableau synthétique des actions' : 'Tableau synthétique - suite'} theme={theme} />
             {pageIndex === 0 && inlineTopCards ? (
               <View style={{ ...s.card, padding: 7, marginBottom: 8 }}>
-                <Text style={{ ...s.h3, fontSize: 12.2, marginBottom: 6 }}>Actions Ã  traiter en premier</Text>
+                <Text style={{ ...s.h3, fontSize: 12.2, marginBottom: 6 }}>Actions à traiter en premier</Text>
                 {[0, 1].map((rowIndex) => {
                   const row = topCards.slice(rowIndex * 2, rowIndex * 2 + 2);
                   if (row.length === 0) return null;
@@ -164,7 +164,7 @@ export function RecommendationsPage({ report, theme, clientLogoSrc }: Recommenda
                             <StatusBadge label={formatCriticality(item.criticality)} status={toStatus(item.criticality)} />
                           </View>
                           <Text style={{ fontSize: 8.3, color: t?.textMuted ?? '#64748B', marginBottom: 3 }}>
-                            Axe: {item.axisName} Â· {formatPriority(item.priority)}
+                            Axe: {item.axisName} - {formatPriority(item.priority)}
                           </Text>
                           <Text style={{ fontSize: 8.7, color: t?.text ?? '#111827', lineHeight: 1.25 }}>
                             {truncate(item.recommendation, 150)}

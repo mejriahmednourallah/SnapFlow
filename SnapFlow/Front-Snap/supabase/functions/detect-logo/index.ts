@@ -28,8 +28,12 @@ const COMMON_PATHS = [
   "/logo.jpeg",
   "/static/logo.png",
   "/assets/logo.png",
+  "/assets/images/logo.png",
+  "/assets/img/logo.png",
   "/images/logo.png",
   "/img/logo.png",
+  "/sites/default/files/logo.png",
+  "/themes/default/assets/img/logo.png",
   "/favicon.png",
   "/favicons/favicon-32x32.png",
   "/favicons/favicon-192x192.png",
@@ -42,8 +46,12 @@ const COMMON_PATHS = [
   "/logo.svg",
   "/static/logo.svg",
   "/assets/logo.svg",
+  "/assets/images/logo.svg",
+  "/assets/img/logo.svg",
   "/images/logo.svg",
   "/img/logo.svg",
+  "/sites/default/files/logo.svg",
+  "/themes/default/assets/img/logo.svg",
   "/branding/logo.svg",
   "/brand/logo.svg",
   "/media/logo.svg",
@@ -56,6 +64,17 @@ function absoluteUrl(src: string, base: URL): string | null {
   } catch {
     return null;
   }
+}
+
+function normalizeHttpUrl(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+  if (/^https?:\/\//i.test(trimmed)) return trimmed;
+  if (/^\/\//.test(trimmed)) return `https:${trimmed}`;
+  if (/^[a-z0-9.-]+\.[a-z]{2,}(?::\d+)?(?:[/?#].*)?$/i.test(trimmed)) {
+    return `https://${trimmed}`;
+  }
+  return trimmed;
 }
 
 function fetchWithTimeout(url: string, init: RequestInit = {}, timeoutMs = 8_000): Promise<Response> {
@@ -157,9 +176,25 @@ function extractSocialImages(html: string): string[] {
   let match;
   while ((match = tagRegex.exec(html)) !== null) {
     const attrs = attributesOf(match[0]);
-    const key = (attrs.property || attrs.name || "").toLowerCase();
+    const key = (attrs.property || attrs.name || attrs.itemprop || "").toLowerCase();
     if (["og:logo", "og:image", "twitter:image"].includes(key) && attrs.content) {
       results.push(attrs.content);
+    }
+  }
+  return results;
+}
+
+function extractMetaLogoImages(html: string): string[] {
+  const results: string[] = [];
+  const tagRegex = /<meta\b[^>]*>/gi;
+  let match;
+  while ((match = tagRegex.exec(html)) !== null) {
+    const attrs = attributesOf(match[0]);
+    const key = (attrs.itemprop || attrs.property || attrs.name || "").toLowerCase();
+    const content = attrs.content?.trim();
+    if (!content) continue;
+    if (key === "logo" || key.includes(":logo") || key.includes("brand")) {
+      results.push(content);
     }
   }
   return results;
@@ -173,6 +208,27 @@ function extractImageSrcLinks(html: string): string[] {
     const attrs = attributesOf(match[0]);
     const rel = (attrs.rel || "").toLowerCase();
     if (attrs.href && rel.includes("image_src")) results.push(attrs.href);
+  }
+  return results;
+}
+
+function extractLogoHrefLinks(html: string): Array<{ src: string; source: string; confidence: number; reason: string }> {
+  const results: Array<{ src: string; source: string; confidence: number; reason: string }> = [];
+  const tagRegex = /<(?:a|link)\b[^>]*>/gi;
+  let match;
+  while ((match = tagRegex.exec(html)) !== null) {
+    const attrs = attributesOf(match[0]);
+    const href = attrs.href?.trim();
+    if (!href || !/\.(svg|png|jpe?g|webp|ico)(?:[?#]|$)/i.test(href)) continue;
+    const identity = [href, attrs.rel, attrs.class, attrs.id, attrs.title, attrs["aria-label"]].filter(Boolean).join(" ");
+    if (/logo|brand(?:mark)?|site-?identity|identity|marque/i.test(identity)) {
+      results.push({
+        src: href,
+        source: "logo-link",
+        confidence: 0.7,
+        reason: "logo-like href on link/anchor",
+      });
+    }
   }
   return results;
 }
@@ -334,7 +390,7 @@ serve(async (req) => {
 
     let target: URL;
     try {
-      target = new URL(targetUrl);
+      target = new URL(normalizeHttpUrl(targetUrl));
     } catch {
       return new Response(JSON.stringify({ error: "Invalid URL" }), {
         status: 400,
@@ -344,9 +400,10 @@ serve(async (req) => {
 
     // Explicit manual logo URLs remain supported, but report generation uses siteUrl first.
     if (logoUrl && !siteUrl) {
-      const dataUrl = returnDataUrl ? await toDataUrl(logoUrl) : null;
+      const normalizedLogoUrl = normalizeHttpUrl(logoUrl);
+      const dataUrl = returnDataUrl ? await toDataUrl(normalizedLogoUrl) : null;
       const payload: DetectResult = {
-        logo_url: logoUrl,
+        logo_url: normalizedLogoUrl,
         source: "provided",
         confidence: 1,
         data_url: dataUrl || undefined,
@@ -390,6 +447,11 @@ serve(async (req) => {
       if (url) candidates.push({ url, source: item.source, confidence: item.confidence, reason: item.reason });
     });
 
+    extractMetaLogoImages(html).forEach((src) => {
+      const url = absoluteUrl(src, documentBase);
+      if (url) candidates.push({ url, source: "meta-logo", confidence: 0.82, reason: "meta logo field" });
+    });
+
     extractJsonLdLogos(html).forEach((src) => {
       const url = absoluteUrl(src, documentBase);
       if (url) candidates.push({ url, source: "jsonld-logo", confidence: 0.9, reason: "JSON-LD logo field" });
@@ -398,6 +460,11 @@ serve(async (req) => {
     extractImageSrcLinks(html).forEach((src) => {
       const url = absoluteUrl(src, documentBase);
       if (url) candidates.push({ url, source: "image-src", confidence: 0.62, reason: "link rel=image_src" });
+    });
+
+    extractLogoHrefLinks(html).forEach((item) => {
+      const url = absoluteUrl(item.src, documentBase);
+      if (url) candidates.push({ url, source: item.source, confidence: item.confidence, reason: item.reason });
     });
 
     extractFavicons(html).forEach((src) => {
@@ -464,7 +531,7 @@ serve(async (req) => {
       }
     }
 
-    const storedFallback = typeof fallbackLogoUrl === "string" ? fallbackLogoUrl.trim() : "";
+    const storedFallback = typeof fallbackLogoUrl === "string" ? normalizeHttpUrl(fallbackLogoUrl) : "";
     if (storedFallback) {
       const dataUrl = returnDataUrl ? await toDataUrl(storedFallback) : null;
       if (dataUrl || (!returnDataUrl && await isReachableImage(storedFallback))) {

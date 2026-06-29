@@ -38,8 +38,9 @@ describe('tickets 1-4 clients and project grouping', () => {
     expect(adminClients).toContain("HOLDING_CLIENT_NAME = 'A classer'");
     expect(adminClients).toContain('charge_de_projet');
     expect(adminProjects).toContain("from('clients')");
-    expect(adminProjects).toContain('handleChangeProjectClient');
-    expect(adminProjects).toContain('client_id: newClientId');
+    expect(adminProjects).not.toContain('handleChangeProjectClient');
+    expect(adminProjects).not.toContain('client_id: newClientId');
+    expect(adminProjects).toContain("HOLDING_CLIENT_NAME = 'A classer'");
     expect(adminProjects).toContain('client_id: clientId');
     expect(overview).toContain("from('clients')");
     expect(overview).toContain('clientCount');
@@ -47,8 +48,10 @@ describe('tickets 1-4 clients and project grouping', () => {
 
   it('shows client context on project details and keeps function project creation compatible with client_id', () => {
     expect(projectShell).toContain("from('clients')");
+    expect(projectShell).toContain("client?.name === 'A classer' ? null");
     expect(projectShell).toContain('client_name');
     expect(projectFiche).toContain('Client');
+    expect(projectFiche).toContain('{project.client_name &&');
     expect(projectFiche).toContain('project.client_name');
     expect(fetchRedmine).toContain('ensureClientForProject');
     expect(fetchRedmine).toContain('client_id: clientId');

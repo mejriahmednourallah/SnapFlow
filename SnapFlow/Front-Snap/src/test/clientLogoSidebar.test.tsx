@@ -44,7 +44,7 @@ describe('ClientLogoSidebar', () => {
     await waitFor(() => expect(eq).toHaveBeenCalledWith('id', 'project-1'));
     expect(update).toHaveBeenCalledWith({ logo_url: 'https://cdn.example/logo.png' });
     expect(onApply).toHaveBeenCalledWith('https://cdn.example/logo.png');
-    expect(await screen.findByText(/sauvegarde/i)).toBeInTheDocument();
+    expect(await screen.findByText(/sauvegard/i)).toBeInTheDocument();
   });
 
   it('shows a detected logo as a suggestion without overwriting the saved field', async () => {
@@ -65,7 +65,11 @@ describe('ClientLogoSidebar', () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: /detecter/i }));
+    expect(screen.getByText(/logo déjà enregistré/i)).toBeInTheDocument();
+    expect(screen.getByAltText(/logo enregistré/i)).toBeInTheDocument();
+    expect(invoke).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: /chercher un autre/i }));
     expect(await screen.findByText(/logo json-ld/i)).toBeInTheDocument();
     expect(screen.getByPlaceholderText('https://exemple.com/logo.png')).toHaveValue('https://cdn.example/manual.png');
 

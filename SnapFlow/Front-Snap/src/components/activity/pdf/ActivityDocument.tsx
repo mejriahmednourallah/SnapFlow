@@ -147,13 +147,13 @@ function buildData(issues: RedmineIssue[], totalCount: number) {
   const avgClosed = avgResolutionDays(closedTickets);
   const avgOpen = avgAgeDays(openTickets);
   const kpis: ActivityKpi[] = [
-    { key: 'total', label: 'Tickets', value: String(totalCount !== undefined && totalCount !== total ? totalCount : total), caption: totalCount !== undefined && totalCount !== total ? `${total} traitement (hors rÃ©unions)` : 'PÃ©rimÃ¨tre traitement (hors rÃ©unions)', status: 'success' },
-    { key: 'meetings', label: 'RÃ©unions', value: String(meetings.length), caption: "Points d'Ã©change", status: meetings.length ? 'success' : 'warning' },
+    { key: 'total', label: 'Tickets', value: String(totalCount !== undefined && totalCount !== total ? totalCount : total), caption: totalCount !== undefined && totalCount !== total ? `${total} traitement (hors réunions)` : 'Périmètre traitement (hors réunions)', status: 'success' },
+    { key: 'meetings', label: 'Réunions', value: String(meetings.length), caption: "Points d'échange", status: meetings.length ? 'success' : 'warning' },
     { key: 'open', label: 'Ouverts', value: String(openTickets.length), caption: `${pct(openTickets.length, total)} % du volume`, status: openTickets.length ? 'warning' : 'success' },
-    { key: 'resolved', label: 'ClÃ´turÃ©s', value: String(closedTickets.length), caption: `${pct(closedTickets.length, total)} % livrÃ©s`, status: 'success' },
-    { key: 'cancelled', label: 'AnnulÃ©s', value: String(cancelledTickets.length), caption: `${pct(cancelledTickets.length, total)} % sans suite`, status: cancelledTickets.length ? 'warning' : 'success' },
-    { key: 'critical', label: 'Critiques', value: String(criticalIssues.length), caption: 'PrioritÃ© urgente ou critique', status: criticalIssues.length ? 'danger' : 'success' },
-    { key: 'blocked', label: 'BloquÃ©s', value: String(blockedTickets.length), caption: 'Actions en attente', status: blockedTickets.length ? 'danger' : 'success' },
+    { key: 'resolved', label: 'Clôturés', value: String(closedTickets.length), caption: `${pct(closedTickets.length, total)} % livrés`, status: 'success' },
+    { key: 'cancelled', label: 'Annulés', value: String(cancelledTickets.length), caption: `${pct(cancelledTickets.length, total)} % sans suite`, status: cancelledTickets.length ? 'warning' : 'success' },
+    { key: 'critical', label: 'Critiques', value: String(criticalIssues.length), caption: 'Priorité urgente ou critique', status: criticalIssues.length ? 'danger' : 'success' },
+    { key: 'blocked', label: 'Bloqués', value: String(blockedTickets.length), caption: 'Actions en attente', status: blockedTickets.length ? 'danger' : 'success' },
   ];
 
   const insights = [
@@ -216,17 +216,17 @@ function filterSummary(filters?: ActivityDocumentProps['filters']) {
 }
 
 function periodLabel(filters?: ActivityDocumentProps['filters']) {
-  if (filters?.dateFrom && filters?.dateTo) return `PÃ©riode du ${filters.dateFrom} au ${filters.dateTo}`;
+  if (filters?.dateFrom && filters?.dateTo) return `Période du ${filters.dateFrom} au ${filters.dateTo}`;
   if (filters?.dateFrom) return `Depuis le ${filters.dateFrom}`;
   if (filters?.dateTo) return `Jusqu'au ${filters.dateTo}`;
-  return 'Toutes pÃ©riodes confondues';
+  return 'Toutes périodes confondues';
 }
 
 function periodSentence(filters?: ActivityDocumentProps['filters']) {
-  if (filters?.dateFrom && filters?.dateTo) return `la pÃ©riode du ${filters.dateFrom} au ${filters.dateTo}`;
-  if (filters?.dateFrom) return `la pÃ©riode depuis le ${filters.dateFrom}`;
-  if (filters?.dateTo) return `la pÃ©riode jusqu'au ${filters.dateTo}`;
-  return 'toutes pÃ©riodes confondues';
+  if (filters?.dateFrom && filters?.dateTo) return `la période du ${filters.dateFrom} au ${filters.dateTo}`;
+  if (filters?.dateFrom) return `la période depuis le ${filters.dateFrom}`;
+  if (filters?.dateTo) return `la période jusqu'au ${filters.dateTo}`;
+  return 'toutes périodes confondues';
 }
 
 function pageText(theme?: PdfTheme) {
@@ -521,7 +521,7 @@ function TicketMiniCard({ issue, theme, accentColor, emptyLabel }: { issue?: Red
         <Text style={{ fontSize: 7.4, color: t.muted }}>{safeDate(issue.updated_on)}</Text>
       </View>
       <Text style={{ fontSize: 10, color: t.text, fontFamily: 'DMSans', fontWeight: 700, lineHeight: 1.25 }}>{short(issue.subject, 72)}</Text>
-      <Text style={{ fontSize: 7.8, color: t.muted, marginTop: 7 }}>Type: {issue.tracker.name} | PrioritÃ©: {issue.priority.name} | Avancement: {issue.done_ratio}%</Text>
+      <Text style={{ fontSize: 7.8, color: t.muted, marginTop: 7 }}>Type: {issue.tracker.name} | Priorité: {issue.priority.name} | Avancement: {issue.done_ratio}%</Text>
     </View>
   );
 }
@@ -529,10 +529,10 @@ function TicketMiniCard({ issue, theme, accentColor, emptyLabel }: { issue?: Red
 function WorkflowPanel({ data, theme, accentColor }: { data: ActivityData; theme?: PdfTheme; accentColor: string }) {
   const t = pageText(theme);
   const cards = [
-    { label: 'En cours de test', value: data.testingTickets.length, caption: 'Validation cÃ´tÃ© client', status: data.testingTickets.length ? 'warning' as const : 'success' as const },
-    { label: 'En cours de traitement', value: data.activeTickets.length, caption: 'Traitement cÃ´tÃ© Ã©quipe', status: data.activeTickets.length ? 'warning' as const : 'success' as const },
+    { label: 'En cours de test', value: data.testingTickets.length, caption: 'Validation côté client', status: data.testingTickets.length ? 'warning' as const : 'success' as const },
+    { label: 'En cours de traitement', value: data.activeTickets.length, caption: 'Traitement côté équipe', status: data.activeTickets.length ? 'warning' as const : 'success' as const },
     { label: 'Pris en charge', value: data.acknowledgedTickets.length, caption: 'En attente de fermeture', status: data.acknowledgedTickets.length ? 'warning' as const : 'success' as const },
-    { label: 'Tickets bloquÃ©s', value: data.blockedTickets.length, caption: 'Action de dÃ©blocage requise', status: data.blockedTickets.length ? 'danger' as const : 'success' as const },
+    { label: 'Tickets bloqués', value: data.blockedTickets.length, caption: 'Action de déblocage requise', status: data.blockedTickets.length ? 'danger' as const : 'success' as const },
   ];
   return (
     <View style={{ gap: 14 }}>
@@ -543,12 +543,12 @@ function WorkflowPanel({ data, theme, accentColor }: { data: ActivityData; theme
       </View>
       <View style={{ flexDirection: 'row', gap: 14 }}>
         <View style={{ flex: 1, backgroundColor: t.surface, borderRadius: 12, borderWidth: 0.8, borderColor: t.border, padding: 14 }}>
-          <Text style={{ fontSize: 10, fontFamily: 'DMSans', fontWeight: 700, color: t.primary, marginBottom: 10 }}>Chiffres basÃ©s sur la typologie des tickets en cours de traitement</Text>
+          <Text style={{ fontSize: 10, fontFamily: 'DMSans', fontWeight: 700, color: t.primary, marginBottom: 10 }}>Chiffres basés sur la typologie des tickets en cours de traitement</Text>
           <HorizontalBars rows={data.activeByType} theme={theme} limit={5} />
         </View>
         <View style={{ flex: 1, gap: 9 }}>
-          <TicketMiniCard issue={data.testingTickets[0]} theme={theme} accentColor={accentColor} emptyLabel="Aucun ticket en cours de test: aucune validation client n'est en attente sur la pÃ©riode." />
-          <TicketMiniCard issue={data.acknowledgedTickets[0]} theme={theme} accentColor={accentColor} emptyLabel="Aucun ticket pris en charge: aucun ticket acceptÃ© n'attend une fermeture." />
+          <TicketMiniCard issue={data.testingTickets[0]} theme={theme} accentColor={accentColor} emptyLabel="Aucun ticket en cours de test: aucune validation client n'est en attente sur la période." />
+          <TicketMiniCard issue={data.acknowledgedTickets[0]} theme={theme} accentColor={accentColor} emptyLabel="Aucun ticket pris en charge: aucun ticket accepté n'attend une fermeture." />
         </View>
       </View>
     </View>
@@ -579,7 +579,7 @@ function FullWidthTicketTable({
         <Text style={{ fontSize: 8, color: 'rgba(255,255,255,0.84)' }}>{continuation || `${totalRows} ticket(s)`}</Text>
       </View>
       <View style={{ flexDirection: 'row', backgroundColor: t.headerBg, paddingVertical: 7, paddingHorizontal: 10 }}>
-        {['Identifiant', 'Sujet', 'Type', 'PrioritÃ©', 'Date ouverture'].map((label, index) => (
+        {['Identifiant', 'Sujet', 'Type', 'Priorité', 'Date ouverture'].map((label, index) => (
           <Text key={label} style={{ width: widths[index], fontSize: 8, color: t.primary, fontFamily: 'DMSans', fontWeight: 700 }}>{label}</Text>
         ))}
       </View>
@@ -646,7 +646,7 @@ function CoverPage({ project, filters, options, data, theme, accentColor }: { pr
         </View>
         {project.logo_url ? <Image src={project.logo_url} style={{ width: 94, height: 30, objectFit: 'contain' }} /> : null}
       </View>
-      <Text style={{ fontFamily: 'PlayfairDisplay', fontSize: 44, color: '#FFFFFF', lineHeight: 1.06 }}>RAPPORT{'\n'}D'ACTIVITÃ‰</Text>
+      <Text style={{ fontFamily: 'PlayfairDisplay', fontSize: 44, color: '#FFFFFF', lineHeight: 1.06 }}>RAPPORT{'\n'}D'ACTIVITÉ</Text>
       <Text style={{ color: 'rgba(255,255,255,0.72)', fontSize: 9, marginTop: 8 }}>{periodLabel(filters)}</Text>
       {filterSummary(filters) ? (
         <Text style={{ color: 'rgba(255,255,255,0.64)', fontSize: 8, marginTop: 4 }}>{filterSummary(filters)}</Text>
@@ -664,7 +664,7 @@ function CoverPage({ project, filters, options, data, theme, accentColor }: { pr
         ))}
       </View>
       <View style={{ position: 'absolute', bottom: 28, left: 34, right: 34, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-        <Text style={{ color: 'rgba(255,255,255,0.7)', fontSize: 8 }}>GÃ©nÃ©rÃ© le {format(new Date(), 'dd/MM/yyyy HH:mm', { locale: fr })}</Text>
+        <Text style={{ color: 'rgba(255,255,255,0.7)', fontSize: 8 }}>Généré le {format(new Date(), 'dd/MM/yyyy HH:mm', { locale: fr })}</Text>
         <Image src={snapflowLogo} style={{ width: 86, height: 26, objectFit: 'contain' }} />
       </View>
     </Page>
@@ -749,22 +749,22 @@ export function ActivityDocument({ project, issues, totalCount, filters, options
   const accentColor = options.pdfColor || t.accent;
   const showPerimeter = options.sections.perimetre !== false && hasProjectPerimeterBlocks(perimeterBlocks);
   const generatedSections = [
-    showPerimeter ? 'PÃ©rimÃ¨tre' : null,
+    showPerimeter ? 'Périmètre' : null,
     'Indicateurs globaux',
-    'Ã‰tat des tickets',
+    'État des tickets',
     'Typologie des tickets',
-    'PrioritÃ© des tickets',
-    'DÃ©tails des tickets clÃ´turÃ©s',
-    'DÃ©tails des tickets ouverts',
-    sections.showCancelledAnalysis ? 'Tickets annulÃ©s' : null,
+    'Priorité des tickets',
+    'Détails des tickets clôturés',
+    'Détails des tickets ouverts',
+    sections.showCancelledAnalysis ? 'Tickets annulés' : null,
     'Tickets en cours de test et pris en charge',
     sections.showActiveTables ? 'Tickets en cours de traitement' : null,
-    sections.showBlockedAnalysis ? 'Tickets bloquÃ©s' : null,
-    sections.showMeetings ? "RÃ©unions et points d'Ã©change" : null,
+    sections.showBlockedAnalysis ? 'Tickets bloqués' : null,
+    sections.showMeetings ? "Réunions et points d'échange" : null,
   ].filter(Boolean) as string[];
 
   return (
-    <Document title={`Rapport d'activitÃ© - ${project.site_name}`}>
+    <Document title={`Rapport d'activité - ${project.site_name}`}>
       <CoverPage project={project} filters={filters} options={options} data={data} theme={theme} accentColor={accentColor} />
 
       {options.sections.sommaire !== false && (
@@ -775,12 +775,12 @@ export function ActivityDocument({ project, issues, totalCount, filters, options
         <PerimetrePage project={project} filters={filters} options={options} theme={theme} accentColor={accentColor} blocks={perimeterBlocks} />
       )}
 
-      <ActivitySlidePage title="SUIVI DES ACTIVITÃ‰S RÃ‰ALISÃ‰ES" subtitle="INDICATEURS GLOBAUX" project={project} theme={theme} options={options}>
+      <ActivitySlidePage title="SUIVI DES ACTIVITÉS RÉALISÉES" subtitle="INDICATEURS GLOBAUX" project={project} theme={theme} options={options}>
         <View style={{ flexDirection: 'row', gap: 18 }}>
           <View style={{ flex: 1.05, gap: 12 }}>
             <View style={{ backgroundColor: t.surface, borderRadius: 15, padding: 18, borderWidth: 0.8, borderColor: t.border }}>
               <Text style={{ fontSize: 10, color: t.muted, lineHeight: 1.45 }}>
-                Ce rapport est Ã©laborÃ© dans le cadre du contrat de run services du site afin de prÃ©senter les interventions rÃ©alisÃ©es durant {periodSentence(filters)} et qui sont en dÃ©finitif au nombre de {data.totalCount || data.total} dont {data.meetings.length} rÃ©union(s).
+                Ce rapport est élaboré dans le cadre du contrat de run services du site afin de présenter les interventions réalisées durant {periodSentence(filters)} et qui sont en définitif au nombre de {data.totalCount || data.total} dont {data.meetings.length} réunion(s).
               </Text>
             </View>
             <MetricStrip kpis={data.kpis.slice(0, 3)} theme={theme} accentColor={accentColor} />
@@ -792,51 +792,51 @@ export function ActivityDocument({ project, issues, totalCount, filters, options
         </View>
       </ActivitySlidePage>
 
-      <ActivitySlidePage title="Ã‰TAT DES TICKETS" subtitle={`LES ${data.total} TICKETS SONT RÃ‰PARTIS COMME SUIT :`} project={project} theme={theme} options={options}>
+      <ActivitySlidePage title="ÉTAT DES TICKETS" subtitle={`LES ${data.total} TICKETS SONT RÉPARTIS COMME SUIT :`} project={project} theme={theme} options={options}>
         <FigureTableLayout chart="donut" rows={data.statusRows} total={data.total} tableLabel="Statut" theme={theme} accentColor={accentColor} />
       </ActivitySlidePage>
 
-      <ActivitySlidePage title="TYPOLOGIE DES TICKETS" subtitle={`LES ${data.total} TICKETS SONT RÃ‰PARTIS COMME SUIT :`} project={project} theme={theme} options={options}>
+      <ActivitySlidePage title="TYPOLOGIE DES TICKETS" subtitle={`LES ${data.total} TICKETS SONT RÉPARTIS COMME SUIT :`} project={project} theme={theme} options={options}>
         <FigureTableLayout chart="vertical" rows={data.trackerRows} total={data.total} tableLabel="Type" theme={theme} accentColor={accentColor} />
       </ActivitySlidePage>
 
-      <ActivitySlidePage title="PRIORITÃ‰ DES TICKETS" subtitle={`LES ${data.total} TICKETS SONT RÃ‰PARTIS COMME SUIT :`} project={project} theme={theme} options={options}>
-        <FigureTableLayout chart="horizontal" rows={data.priorityRows} total={data.total} tableLabel="PrioritÃ©" theme={theme} accentColor={accentColor} reverse />
+      <ActivitySlidePage title="PRIORITÉ DES TICKETS" subtitle={`LES ${data.total} TICKETS SONT RÉPARTIS COMME SUIT :`} project={project} theme={theme} options={options}>
+        <FigureTableLayout chart="horizontal" rows={data.priorityRows} total={data.total} tableLabel="Priorité" theme={theme} accentColor={accentColor} reverse />
       </ActivitySlidePage>
 
-      <ActivitySlidePage title="DÃ‰TAILS DES TICKETS CLÃ”TURÃ‰S" subtitle="Chiffres basÃ©s sur la typologie des tickets clÃ´turÃ©s" project={project} theme={theme} options={options}>
+      <ActivitySlidePage title="DÉTAILS DES TICKETS CLÔTURÉS" subtitle="Chiffres basés sur la typologie des tickets clôturés" project={project} theme={theme} options={options}>
         <View style={{ flexDirection: 'row', gap: 18 }}>
           <View style={{ width: 210 }}>
             <View style={{ flexDirection: 'row', gap: 10 }}>
-              <BigNumberPanel value={data.closedTickets.length} label="NOMBRE TICKETS CLÃ”TURÃ‰S" caption="Chiffres basÃ©s sur la typologie des tickets clÃ´turÃ©s" theme={theme} accentColor={accentColor} grow />
+              <BigNumberPanel value={data.closedTickets.length} label="NOMBRE TICKETS CLÔTURÉS" caption="Chiffres basés sur la typologie des tickets clôturés" theme={theme} accentColor={accentColor} grow />
             </View>
           </View>
           <View style={{ flex: 1 }}>
             <View style={{ backgroundColor: t.surface, borderRadius: 12, padding: 14, borderWidth: 0.8, borderColor: t.border }}>
-              <Text style={{ fontSize: 10, fontFamily: 'DMSans', fontWeight: 700, color: t.primary, marginBottom: 10 }}>Chiffres basÃ©s sur la typologie des tickets clÃ´turÃ©s</Text>
+              <Text style={{ fontSize: 10, fontFamily: 'DMSans', fontWeight: 700, color: t.primary, marginBottom: 10 }}>Chiffres basés sur la typologie des tickets clôturés</Text>
               <VerticalBars rows={data.closedByType} theme={theme} />
             </View>
           </View>
         </View>
       </ActivitySlidePage>
 
-      <ActivitySlidePage title="DÃ‰TAILS DES TICKETS OUVERTS" subtitle="Chiffres basÃ©s sur la typologie des tickets ouverts" project={project} theme={theme} options={options}>
+      <ActivitySlidePage title="DÉTAILS DES TICKETS OUVERTS" subtitle="Chiffres basés sur la typologie des tickets ouverts" project={project} theme={theme} options={options}>
         <View style={{ flexDirection: 'row', gap: 18 }}>
           <View style={{ width: 210 }}>
             <View style={{ flexDirection: 'row', gap: 10 }}>
-              <BigNumberPanel value={data.openTickets.length} label="NOMBRE TICKETS OUVERTS" caption="Chiffres basÃ©s sur la typologie des tickets ouverts" theme={theme} status={data.openTickets.length ? 'warning' : 'success'} accentColor={accentColor} grow />
+              <BigNumberPanel value={data.openTickets.length} label="NOMBRE TICKETS OUVERTS" caption="Chiffres basés sur la typologie des tickets ouverts" theme={theme} status={data.openTickets.length ? 'warning' : 'success'} accentColor={accentColor} grow />
             </View>
             {data.openTickets[0] ? (
               <View style={{ marginTop: 12 }}>
                 <SectionNote theme={theme} accentColor={accentColor}>
-                  Le ticket est ouvert parce qu'il reste en attente d'une action, d'une dÃ©cision ou d'un retour permettant de poursuivre le traitement.
+                  Le ticket est ouvert parce qu'il reste en attente d'une action, d'une décision ou d'un retour permettant de poursuivre le traitement.
                 </SectionNote>
               </View>
             ) : null}
           </View>
           <View style={{ flex: 1 }}>
             <View style={{ backgroundColor: t.surface, borderRadius: 12, padding: 14, borderWidth: 0.8, borderColor: t.border }}>
-              <Text style={{ fontSize: 10, fontFamily: 'DMSans', fontWeight: 700, color: t.primary, marginBottom: 10 }}>Chiffres basÃ©s sur la typologie des tickets ouverts</Text>
+              <Text style={{ fontSize: 10, fontFamily: 'DMSans', fontWeight: 700, color: t.primary, marginBottom: 10 }}>Chiffres basés sur la typologie des tickets ouverts</Text>
               <HorizontalBars rows={data.openByType} theme={theme} />
             </View>
           </View>
@@ -844,17 +844,17 @@ export function ActivityDocument({ project, issues, totalCount, filters, options
       </ActivitySlidePage>
 
       {sections.showCancelledAnalysis && (
-        <ActivitySlidePage title="TICKETS ANNULÃ‰S" subtitle="Tickets sortis du pÃ©rimÃ¨tre de traitement ou clÃ´turÃ©s sans suite" project={project} theme={theme} options={options}>
+        <ActivitySlidePage title="TICKETS ANNULÉS" subtitle="Tickets sortis du périmètre de traitement ou clôturés sans suite" project={project} theme={theme} options={options}>
           <View style={{ flexDirection: 'row', gap: 16 }}>
             <View style={{ width: 188 }}>
-              <BigNumberPanel value={data.cancelledTickets.length} label="NOMBRE TICKETS ANNULÃ‰S" caption="Demandes annulÃ©es, rejetÃ©es ou sorties du pÃ©rimÃ¨tre actif" theme={theme} status="warning" accentColor={accentColor} />
+              <BigNumberPanel value={data.cancelledTickets.length} label="NOMBRE TICKETS ANNULÉS" caption="Demandes annulées, rejetées ou sorties du périmètre actif" theme={theme} status="warning" accentColor={accentColor} />
             </View>
             <View style={{ flex: 1, backgroundColor: t.surface, borderRadius: 12, borderWidth: 0.8, borderColor: t.border, padding: 14 }}>
-              <Text style={{ fontSize: 10, fontFamily: 'DMSans', fontWeight: 700, color: t.primary, marginBottom: 10 }}>TYPOLOGIE DES TICKETS ANNULÃ‰S</Text>
+              <Text style={{ fontSize: 10, fontFamily: 'DMSans', fontWeight: 700, color: t.primary, marginBottom: 10 }}>TYPOLOGIE DES TICKETS ANNULÉS</Text>
               <VerticalBars rows={data.cancelledByType} theme={theme} />
             </View>
             <View style={{ flex: 1, backgroundColor: t.surface, borderRadius: 12, borderWidth: 0.8, borderColor: t.border, padding: 14 }}>
-              <Text style={{ fontSize: 10, fontFamily: 'DMSans', fontWeight: 700, color: t.primary, marginBottom: 10 }}>PRIORITÃ‰ DES TICKETS ANNULÃ‰S</Text>
+              <Text style={{ fontSize: 10, fontFamily: 'DMSans', fontWeight: 700, color: t.primary, marginBottom: 10 }}>PRIORITÉ DES TICKETS ANNULÉS</Text>
               <HorizontalBars rows={data.cancelledByPriority} theme={theme} limit={5} />
             </View>
           </View>
@@ -863,22 +863,22 @@ export function ActivityDocument({ project, issues, totalCount, filters, options
 
       {sections.showCancelledTables && renderTicketTablePages({
         issues: data.cancelledTickets,
-        title: 'TICKETS ANNULÃ‰S',
-        subtitle: "Identifiant, sujet, type, prioritÃ© et date d'ouverture",
+        title: 'TICKETS ANNULÉS',
+        subtitle: "Identifiant, sujet, type, priorité et date d'ouverture",
         project,
         theme,
         options,
         accentColor,
       })}
 
-      <ActivitySlidePage title="TICKETS EN COURS DE TEST ET PRIS EN CHARGE" subtitle="Le traitement complet cÃ´tÃ© Ã©quipe est prÃ©sentÃ© avec les tickets en validation ou en attente de fermeture." project={project} theme={theme} options={options}>
+      <ActivitySlidePage title="TICKETS EN COURS DE TEST ET PRIS EN CHARGE" subtitle="Le traitement complet côté équipe est présenté avec les tickets en validation ou en attente de fermeture." project={project} theme={theme} options={options}>
         <WorkflowPanel data={data} theme={theme} accentColor={accentColor} />
       </ActivitySlidePage>
 
       {sections.showActiveTables && renderTicketTablePages({
         issues: data.activeTickets,
         title: 'TICKETS EN COURS DE TRAITEMENT',
-        subtitle: "Identifiant, sujet, type, prioritÃ© et date d'ouverture",
+        subtitle: "Identifiant, sujet, type, priorité et date d'ouverture",
         project,
         theme,
         options,
@@ -886,17 +886,17 @@ export function ActivityDocument({ project, issues, totalCount, filters, options
       })}
 
       {sections.showBlockedAnalysis && (
-        <ActivitySlidePage title="TICKETS BLOQUÃ‰S" subtitle="Analyse des tickets en attente d'action ou de dÃ©cision" project={project} theme={theme} options={options}>
+        <ActivitySlidePage title="TICKETS BLOQUÉS" subtitle="Analyse des tickets en attente d'action ou de décision" project={project} theme={theme} options={options}>
           <View style={{ flexDirection: 'row', gap: 16 }}>
             <View style={{ width: 170 }}>
-              <BigNumberPanel value={data.blockedTickets.length} label="NOMBRE TICKETS BLOQUÃ‰S" caption="Tickets en attente de dÃ©blocage" theme={theme} status="danger" accentColor={accentColor} />
+              <BigNumberPanel value={data.blockedTickets.length} label="NOMBRE TICKETS BLOQUÉS" caption="Tickets en attente de déblocage" theme={theme} status="danger" accentColor={accentColor} />
             </View>
             <View style={{ flex: 1, backgroundColor: t.surface, borderRadius: 12, borderWidth: 0.8, borderColor: t.border, padding: 14 }}>
-              <Text style={{ fontSize: 10, fontFamily: 'DMSans', fontWeight: 700, color: t.primary, marginBottom: 10 }}>PRIORITÃ‰ DES TICKETS BLOQUÃ‰S</Text>
+              <Text style={{ fontSize: 10, fontFamily: 'DMSans', fontWeight: 700, color: t.primary, marginBottom: 10 }}>PRIORITÉ DES TICKETS BLOQUÉS</Text>
               <HorizontalBars rows={data.blockedByPriority} theme={theme} limit={5} />
             </View>
             <View style={{ flex: 1, backgroundColor: t.surface, borderRadius: 12, borderWidth: 0.8, borderColor: t.border, padding: 14 }}>
-              <Text style={{ fontSize: 10, fontFamily: 'DMSans', fontWeight: 700, color: t.primary, marginBottom: 10 }}>TYPOLOGIE DES TICKETS BLOQUÃ‰S</Text>
+              <Text style={{ fontSize: 10, fontFamily: 'DMSans', fontWeight: 700, color: t.primary, marginBottom: 10 }}>TYPOLOGIE DES TICKETS BLOQUÉS</Text>
               <DonutChart rows={data.blockedByType} theme={theme} size={150} limit={5} />
             </View>
           </View>
@@ -905,8 +905,8 @@ export function ActivityDocument({ project, issues, totalCount, filters, options
 
       {sections.showBlockedTables && renderTicketTablePages({
         issues: data.blockedTickets,
-        title: 'TICKETS BLOQUÃ‰S',
-        subtitle: "Identifiant, sujet, type, prioritÃ© et date d'ouverture",
+        title: 'TICKETS BLOQUÉS',
+        subtitle: "Identifiant, sujet, type, priorité et date d'ouverture",
         project,
         theme,
         options,
@@ -915,7 +915,7 @@ export function ActivityDocument({ project, issues, totalCount, filters, options
 
       {sections.showMeetings && renderTicketTablePages({
         issues: data.meetings,
-        title: "RÃ‰UNIONS ET POINTS D'Ã‰CHANGE",
+        title: "RÉUNIONS ET POINTS D'ÉCHANGE",
         subtitle: 'Historique des points de gouvernance et de suivi client',
         project,
         theme,

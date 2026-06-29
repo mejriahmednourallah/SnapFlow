@@ -15,6 +15,7 @@ const executeScheduled = readFileSync(resolve(root, '../supabase/functions/execu
 const workflowList = readFileSync(resolve(root, 'components/form-tester/WorkflowList.tsx'), 'utf8');
 const workflowDraft = readFileSync(resolve(root, 'components/form-tester/WorkflowRedmineDraftDialog.tsx'), 'utf8');
 const projectFiche = readFileSync(resolve(root, 'pages/project/ProjectFiche.tsx'), 'utf8');
+const projectPerimeterEditor = readFileSync(resolve(root, 'components/projects/ProjectPerimeterEditor.tsx'), 'utf8');
 const tabDetails = readFileSync(resolve(root, 'components/audit/TabDetails.tsx'), 'utf8');
 const reportSchedules = readFileSync(resolve(root, 'pages/ReportSchedules.tsx'), 'utf8');
 
@@ -27,6 +28,10 @@ describe('remaining ticket implementation contracts', () => {
     expect(activityReport).toContain('hasProjectPerimeterBlocks(perimeterBlocks)');
     expect(activityDocument).toContain('hasProjectPerimeterBlocks(perimeterBlocks)');
     expect(activityDocument).toContain('showPerimeter &&');
+    expect(projectPerimeterEditor).toContain('const existingRows');
+    expect(projectPerimeterEditor).toContain('const newRows');
+    expect(projectPerimeterEditor).toContain('.insert(newRows)');
+    expect(projectPerimeterEditor).not.toContain('.upsert(payload');
     expect(activityDocument).not.toContain('MAINTENANCE CORRECTIVE');
     expect(activityDocument).not.toContain('SYST');
   });

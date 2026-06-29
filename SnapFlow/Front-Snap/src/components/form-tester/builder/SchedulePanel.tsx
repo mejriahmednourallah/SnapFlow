@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { CalendarClock, Loader2, Pause, Play, RefreshCw, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { formatDateTime } from '@/lib/dateFormat';
 import { formTesterApi } from '@/lib/form-tester/api';
 import type { WorkflowSchedule, WorkflowScheduleFrequency } from '@/lib/form-tester/types';
 
@@ -25,14 +26,6 @@ function defaultStartAt(): string {
   return new Date(value.getTime() - value.getTimezoneOffset() * 60_000)
     .toISOString()
     .slice(0, 16);
-}
-
-function formatDate(value: string | null): string {
-  if (!value) return 'Aucune prochaine execution';
-  return new Intl.DateTimeFormat('fr-FR', {
-    dateStyle: 'medium',
-    timeStyle: 'short',
-  }).format(new Date(value));
 }
 
 export function SchedulePanel({
@@ -232,7 +225,7 @@ export function SchedulePanel({
                     {FREQUENCY_LABELS[schedule.frequency]} - {schedule.timezone}
                   </p>
                   <p className="mt-1 text-xs text-muted-foreground">
-                    Prochaine: {formatDate(schedule.next_run_at)}
+                    Prochaine: {schedule.next_run_at ? formatDateTime(schedule.next_run_at) : 'Aucune prochaine execution'}
                   </p>
                   <p className="mt-1 text-[11px] text-muted-foreground">
                     Snapshot v{schedule.form_scenario_versions?.version_number ?? '?'}

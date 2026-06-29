@@ -103,10 +103,44 @@ export function ProjectPerimeterEditor({ projectId }: ProjectPerimeterEditorProp
       if (deleteError) throw deleteError;
 
       if (payload.length > 0) {
+        const existingRows = payload
+          .filter((block) => block.id)
+          .map((block) => ({
+            id: block.id,
+            project_id: block.project_id,
+            title: block.title,
+            subtitle: block.subtitle,
+            items: block.items,
+            display_order: block.display_order,
+          }));
+        const newRows = payload
+          .filter((block) => !block.id)
+          .map((block) => ({
+            project_id: block.project_id,
+            title: block.title,
+            subtitle: block.subtitle,
+            items: block.items,
+            display_order: block.display_order,
+          }));
+
+        if (existingRows.length > 0) {
+          const { error } = await supabase
+            .from('project_perimeter_blocks')
+            .upsert(existingRows, { onConflict: 'id' });
+          if (error) throw error;
+        }
+
+        if (newRows.length > 0) {
+          const { error } = await supabase
+            .from('project_perimeter_blocks')
+            .insert(newRows);
+          if (error) throw error;
+        }
+
         const { data, error } = await supabase
           .from('project_perimeter_blocks')
-          .upsert(payload, { onConflict: 'id' })
           .select('*')
+          .eq('project_id', projectId)
           .order('display_order', { ascending: true });
         if (error) throw error;
         setBlocks(normalizeProjectPerimeterBlocks(data as Array<Record<string, unknown>> | null));

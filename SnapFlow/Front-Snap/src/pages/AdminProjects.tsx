@@ -4,7 +4,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Building2, Globe, Plus, Download, Users, ArrowLeft, Trash2, Eye, Filter, ArrowUpDown, CalendarClock, ShieldAlert, Search } from 'lucide-react';
+import { Globe, Plus, Download, Users, ArrowLeft, Trash2, Eye, Filter, ArrowUpDown, CalendarClock, ShieldAlert, Search } from 'lucide-react';
 import { RefreshCw } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { getAuditScoreFromAny } from '@/lib/auditReadUtils';
@@ -65,6 +65,8 @@ interface RedmineProject {
   audit_url_needs_review?: boolean;
   access_level?: string;
 }
+
+const HOLDING_CLIENT_NAME = 'A classer';
 
 const extractProjectIdentifier = (value: unknown): string => {
   const raw = String(value || '').trim();
@@ -142,7 +144,6 @@ const AdminProjects = () => {
   const [showAdd, setShowAdd] = useState(false);
   const [newUrl, setNewUrl] = useState('');
   const [newName, setNewName] = useState('');
-  const [newClientId, setNewClientId] = useState('');
   const [newAssignee, setNewAssignee] = useState('');
   const [adding, setAdding] = useState(false);
 
@@ -235,10 +236,6 @@ const AdminProjects = () => {
     return nextSchedules.find(s => s.project_id === projectId);
   };
 
-  const getClientName = (clientId?: string | null): string => {
-    return clients.find(client => client.id === clientId)?.name ?? 'Client non renseigne';
-  };
-
   const ensureClient = async (name: string): Promise<string> => {
     const trimmed = name.trim() || 'Client sans nom';
     const existing = clients.find(client => client.name.toLowerCase() === trimmed.toLowerCase());
@@ -254,19 +251,7 @@ const AdminProjects = () => {
     return data.id;
   };
 
-  const handleChangeProjectClient = async (projectId: string, clientId: string) => {
-    if (!clientId) return;
-    try {
-      const { error } = await supabase.from('projects').update({ client_id: clientId }).eq('id', projectId);
-      if (error) throw error;
-      setProjects(prev => prev.map(project => project.id === projectId ? { ...project, client_id: clientId } : project));
-      toast({ title: 'Client du projet mis a jour', description: getClientName(clientId) });
-    } catch (err: any) {
-      toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
-    }
-  };
-
-  // Get unique chargÃ©s (users assigned to at least one project)
+  // Get unique charges (users assigned to at least one project)
   const chargeProfiles = useMemo(() => {
     const userIds = new Set(assignments.map(a => a.user_id));
     return profiles.filter(p => userIds.has(p.id));
@@ -320,15 +305,12 @@ const AdminProjects = () => {
 
   const handleAddProject = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newClientId) {
-      toast({ title: 'Client requis', description: 'Selectionnez le client auquel rattacher ce projet.', variant: 'destructive' });
-      return;
-    }
     setAdding(true);
     try {
+      const clientId = await ensureClient(HOLDING_CLIENT_NAME);
       const { data: proj, error } = await supabase
         .from('projects')
-        .insert({ url: newUrl, site_name: newName, client_id: newClientId })
+        .insert({ url: newUrl, site_name: newName, client_id: clientId })
         .select()
         .single();
       if (error) throw error;
@@ -339,7 +321,6 @@ const AdminProjects = () => {
       setShowAdd(false);
       setNewUrl('');
       setNewName('');
-      setNewClientId('');
       setNewAssignee('');
       await fetchData();
     } catch (err: any) {
@@ -383,7 +364,7 @@ const AdminProjects = () => {
       const { error } = await supabase.from('projects').delete().eq('id', deleteTarget.id);
       if (error) throw error;
 
-      toast({ title: 'Projet supprimÃ©', description: deleteTarget.name });
+      toast({ title: 'Projet supprimé', description: deleteTarget.name });
       setDeleteTarget(null);
       await fetchData();
     } catch (err: any) {
@@ -434,8 +415,8 @@ const AdminProjects = () => {
 
       const count = data?.assignment_rows_upserted ?? 0;
       toast({
-        title: 'Synchronisation terminÃ©e',
-        description: `${count} assignation(s) mise(s) Ã  jour.`,
+        title: 'Synchronisation terminée',
+        description: `${count} assignation(s) mise(s) à jour.`,
       });
 
       await fetchData();
@@ -551,7 +532,7 @@ const AdminProjects = () => {
         if (data?.error) throw new Error(data.error);
 
         toast({
-          title: 'Import terminÃ©',
+          title: 'Import terminé',
           description: `${data?.imported ?? identifiers.length} projet(s) Redmine disponible(s).`,
         });
         setShowRedmine(false);
@@ -568,7 +549,7 @@ const AdminProjects = () => {
 
         const siteUrl = rp.homepage || `https://maintenance.medianet.tn/projects/${rp.identifier}`;
         const redmineUrl = `https://maintenance.medianet.tn/projects/${rp.identifier}`;
-        const clientId = await ensureClient(rp.name);
+        const clientId = await ensureClient(HOLDING_CLIENT_NAME);
 
         const { data: proj, error } = await supabase
           .from('projects')
@@ -589,7 +570,7 @@ const AdminProjects = () => {
         }
       }
 
-      toast({ title: 'Import terminÃ©', description: `${selectedRedmine.size} projet(s) importÃ©(s)` });
+      toast({ title: 'Import terminé', description: `${selectedRedmine.size} projet(s) importé(s)` });
       setShowRedmine(false);
       setSelectedRedmine(new Set());
       setRedmineAssignee('');
@@ -611,7 +592,7 @@ const AdminProjects = () => {
       if (data?.error) throw new Error(data.error);
 
       toast({
-        title: 'Projets Redmine synchronisÃƒÂ©s',
+        title: 'Projets Redmine synchronisés',
         description: data?.message || `${data?.imported ?? 0} projet(s) disponible(s), ${data?.revoked ?? 0} acces retire(s).`,
       });
       await fetchData();
@@ -655,7 +636,7 @@ const AdminProjects = () => {
             <>
               <Button size="sm" variant="outline" onClick={handleSyncMyRedmineProjects} disabled={syncingMyRedmine}>
                 <RefreshCw className={`w-4 h-4 mr-1.5 ${syncingMyRedmine ? 'animate-spin' : ''}`} />
-                <span className="hidden sm:inline">{syncingMyRedmine ? 'Synchronisation...' : 'Synchroniser mes accÃ¨s'}</span>
+              <span className="hidden sm:inline">{syncingMyRedmine ? 'Synchronisation...' : 'Synchroniser mes accès'}</span>
                 <span className="sm:hidden">{syncingMyRedmine ? '...' : 'Sync'}</span>
               </Button>
               {canImportRedmine && (
@@ -671,11 +652,11 @@ const AdminProjects = () => {
             <>
             <Button size="sm" variant="outline" onClick={handleBulkSyncAssignments} disabled={syncingBulk}>
               <RefreshCw className={`w-4 h-4 mr-1.5 ${syncingBulk ? 'animate-spin' : ''}`} />
-              <span className="hidden sm:inline">{syncingBulk ? 'Syncingâ€¦' : 'Sync to Redmine'}</span>
-              <span className="sm:hidden">{syncingBulk ? 'â€¦' : 'Sync'}</span>
+              <span className="hidden sm:inline">{syncingBulk ? 'Synchronisation...' : 'Sync to Redmine'}</span>
+              <span className="sm:hidden">{syncingBulk ? '...' : 'Sync'}</span>
             </Button>
             <Button size="sm" variant="outline" onClick={handleFetchRedmine} disabled={loadingRedmine}>
-              <Download className="w-4 h-4 mr-1.5" /> <span className="hidden sm:inline">{loadingRedmine ? 'Chargementâ€¦' : 'Importer de Redmine'}</span><span className="sm:hidden">{loadingRedmine ? 'â€¦' : 'Redmine'}</span>
+              <Download className="w-4 h-4 mr-1.5" /> <span className="hidden sm:inline">{loadingRedmine ? 'Chargement...' : 'Importer de Redmine'}</span><span className="sm:hidden">{loadingRedmine ? '...' : 'Redmine'}</span>
             </Button>
             <Button size="sm" onClick={() => setShowAdd(!showAdd)}>
               <Plus className="w-4 h-4 mr-1.5" /> Ajouter
@@ -692,13 +673,13 @@ const AdminProjects = () => {
           <h3 className="font-semibold text-sm">Filtres & Tri</h3>
           {hasActiveFilters && (
             <Button variant="ghost" size="sm" onClick={handleResetFilters} className="text-xs ml-auto">
-              RÃ©initialiser
+              Réinitialiser
             </Button>
           )}
         </div>
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3 items-end">
           <div>
-            <label className="text-xs text-muted-foreground mb-1 block">ChargÃ©(e)</label>
+            <label className="text-xs text-muted-foreground mb-1 block">Chargé(e)</label>
             <select
               value={filterCharge}
               onChange={e => setFilterCharge(e.target.value)}
@@ -742,22 +723,22 @@ const AdminProjects = () => {
               className="w-full h-10 text-sm bg-secondary border border-border rounded-md px-3 text-foreground"
             >
               <option value="name">Nom (A-Z)</option>
-              <option value="score-desc">Score â†“ (meilleur en premier)</option>
-              <option value="score-asc">Score â†‘ (pire en premier)</option>
-              <option value="date-desc">Dernier rapport â†“ (rÃ©cent)</option>
-              <option value="date-asc">Dernier rapport â†‘ (ancien)</option>
+              <option value="score-desc">Score ↓ (meilleur en premier)</option>
+              <option value="score-asc">Score ↑ (pire en premier)</option>
+              <option value="date-desc">Dernier rapport ↓ (récent)</option>
+              <option value="date-asc">Dernier rapport ↑ (ancien)</option>
             </select>
           </div>
           <div className="flex items-center">
             <ArrowUpDown className="w-4 h-4 text-muted-foreground" />
-            <span className="text-xs text-muted-foreground ml-1">{filteredAndSortedProjects.length} rÃ©sultat(s)</span>
+            <span className="text-xs text-muted-foreground ml-1">{filteredAndSortedProjects.length} résultat(s)</span>
           </div>
         </div>
       </div>
 
       {/* Manual add form */}
       {showAdd && (
-        <form onSubmit={handleAddProject} className="glass-card p-4 grid grid-cols-1 md:grid-cols-5 gap-3 items-end">
+        <form onSubmit={handleAddProject} className="glass-card p-4 grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
           <div>
             <label className="text-xs text-muted-foreground mb-1 block">Nom du site</label>
             <Input value={newName} onChange={e => setNewName(e.target.value)} placeholder="Mon site" required />
@@ -765,15 +746,6 @@ const AdminProjects = () => {
           <div>
             <label className="text-xs text-muted-foreground mb-1 block">URL</label>
             <Input value={newUrl} onChange={e => setNewUrl(e.target.value)} placeholder="https://exemple.com" required />
-          </div>
-          <div>
-            <label className="text-xs text-muted-foreground mb-1 block">Client</label>
-            <select value={newClientId} onChange={e => setNewClientId(e.target.value)} required className="w-full h-10 text-sm bg-secondary border border-border rounded-md px-3 text-foreground">
-              <option value="">Selectionner</option>
-              {clients.map(client => (
-                <option key={client.id} value={client.id}>{client.name}</option>
-              ))}
-            </select>
           </div>
           <div>
             <label className="text-xs text-muted-foreground mb-1 block">Affecter a</label>
@@ -800,14 +772,14 @@ const AdminProjects = () => {
 
           {filteringRedmineByUser && (
             <div className="text-xs bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800 rounded px-3 py-2 text-blue-700 dark:text-blue-300">
-              â³ Filtrage des projets Redmine assignÃ©s Ã  l'utilisateur...
+              Filtrage des projets Redmine assignés à l'utilisateur...
             </div>
           )}
 
           <div className="flex items-end gap-3 mb-2">
             <div className="flex-1">
               <label className="text-xs text-muted-foreground mb-1 block">
-                {filterUserId ? `Affecter les projets sÃ©lectionnÃ©s Ã  ${getProfileDisplayName(filterUser)}` : isAdmin ? 'Affecter les projets sÃ©lectionnÃ©s Ã ' : 'Importer pour mon compte'}
+                {filterUserId ? `Affecter les projets sélectionnés à ${getProfileDisplayName(filterUser)}` : isAdmin ? 'Affecter les projets sélectionnés à' : 'Importer pour mon compte'}
               </label>
               <select 
                 value={filterUserId ? filterUserId : !isAdmin ? user?.id || '' : redmineAssignee}
@@ -821,7 +793,7 @@ const AdminProjects = () => {
                   <option value={user?.id || ''}>{getProfileDisplayName(currentUserProfile)}</option>
                 ) : (
                   <>
-                    <option value="">â€” Aucun â€”</option>
+                    <option value="">Aucun</option>
                     {profiles.map(p => (
                       <option key={p.id} value={p.id}>{getProfileDisplayName(p)}</option>
                     ))}
@@ -830,13 +802,13 @@ const AdminProjects = () => {
               </select>
             </div>
             <Button size="sm" onClick={handleImportRedmine} disabled={importing || selectedRedmine.size === 0 || filteringRedmineByUser}>
-              {importing ? 'Importâ€¦' : `Importer (${selectedRedmine.size})`}
+              {importing ? 'Import...' : `Importer (${selectedRedmine.size})`}
             </Button>
           </div>
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
             <Input
-              placeholder="Rechercher un projetâ€¦"
+              placeholder="Rechercher un projet..."
               value={redmineSearch}
               onChange={e => setRedmineSearch(e.target.value)}
               className="pl-9"
@@ -861,7 +833,7 @@ const AdminProjects = () => {
                 <span className="font-medium">{rp.name}</span>
                 <span className="text-xs text-muted-foreground">({rp.identifier})</span>
                 {rp.audit_url_needs_review && (
-                  <span className="text-xs text-amber-600">URL audit Ã  vÃ©rifier</span>
+                  <span className="text-xs text-amber-600">URL audit à vérifier</span>
                 )}
               </label>
             ))}
@@ -872,7 +844,7 @@ const AdminProjects = () => {
               return keywords.every(kw => text.includes(kw));
             }).length === 0 && (
               <p className="text-xs text-muted-foreground text-center py-2">
-                {filterUserId ? 'Aucun projet Redmine assignÃ© Ã  cet utilisateur' : 'Aucun projet trouvÃ©'}
+                {filterUserId ? 'Aucun projet Redmine assigné à cet utilisateur' : 'Aucun projet trouvé'}
               </p>
             )}
           </div>
@@ -893,22 +865,6 @@ const AdminProjects = () => {
                   <div className="min-w-0">
                     <h3 className="font-semibold truncate">{project.site_name}</h3>
                     <a href={project.url} target="_blank" rel="noopener noreferrer" className="text-xs text-muted-foreground hover:text-primary truncate block">{project.url}</a>
-                    <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
-                      <Building2 className="w-3 h-3 flex-shrink-0" />
-                      {isAdmin ? (
-                        <select
-                          value={project.client_id || ''}
-                          onChange={e => handleChangeProjectClient(project.id, e.target.value)}
-                          className="h-8 min-w-0 flex-1 bg-secondary border border-border rounded-md px-2 text-xs text-foreground"
-                        >
-                          {clients.map(client => (
-                            <option key={client.id} value={client.id}>{client.name}</option>
-                          ))}
-                        </select>
-                      ) : (
-                        <span className="truncate">{getClientName(project.client_id)}</span>
-                      )}
-                    </div>
                   </div>
                 </div>
                 {isAdmin && (
@@ -925,7 +881,7 @@ const AdminProjects = () => {
                     {latestAudit.score}/100
                   </span>
                   <span className="text-xs text-muted-foreground">
-                    â€” {formatDate(latestAudit.created_at)}
+                    - {formatDate(latestAudit.created_at)}
                   </span>
                 </div>
               )}
@@ -938,7 +894,7 @@ const AdminProjects = () => {
                 <div className="flex items-center gap-2 text-xs text-muted-foreground">
                   <CalendarClock className="w-3 h-3" />
                   <span>Prochain rapport : <strong className="text-foreground">{formatDate(nextSched.next_run_at)}</strong></span>
-                  <span className="text-[10px] bg-muted px-1.5 py-0.5 rounded">{nextSched.report_type === 'audit' ? 'Audit' : 'ActivitÃ©'}</span>
+                  <span className="text-[10px] bg-muted px-1.5 py-0.5 rounded">{nextSched.report_type === 'audit' ? 'Audit' : 'Activité'}</span>
                 </div>
               )}
 
@@ -968,8 +924,8 @@ const AdminProjects = () => {
             </DialogTitle>
             <DialogDescription>
               {deleteStep === 1
-                ? `Vous Ãªtes sur le point de supprimer dÃ©finitivement le projet "${deleteTarget?.name}". Cette action est irrÃ©versible et supprimera tous les rapports, planifications et assignations associÃ©s.`
-                : 'Pour des raisons de sÃ©curitÃ©, veuillez saisir votre mot de passe pour confirmer la suppression.'}
+                ? `Vous êtes sur le point de supprimer définitivement le projet "${deleteTarget?.name}". Cette action est irréversible et supprimera tous les rapports, planifications et assignations associés.`
+                : 'Pour des raisons de sécurité, veuillez saisir votre mot de passe pour confirmer la suppression.'}
             </DialogDescription>
           </DialogHeader>
 
@@ -988,14 +944,14 @@ const AdminProjects = () => {
                   type="password"
                   value={deletePassword}
                   onChange={e => setDeletePassword(e.target.value)}
-                  placeholder="â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢"
+                  placeholder="********"
                   autoFocus
                 />
               </div>
               <DialogFooter className="gap-2">
                 <Button variant="outline" onClick={() => setDeleteTarget(null)}>Annuler</Button>
                 <Button variant="destructive" onClick={handleDeleteStep2} disabled={deleting || !deletePassword}>
-                  {deleting ? 'Suppressionâ€¦' : 'Supprimer dÃ©finitivement'}
+                  {deleting ? 'Suppression...' : 'Supprimer définitivement'}
                 </Button>
               </DialogFooter>
             </div>

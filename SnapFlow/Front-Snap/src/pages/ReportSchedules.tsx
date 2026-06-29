@@ -8,8 +8,7 @@ import {
   CalendarClock, Plus, Trash2, Pause, Play, Filter, List, CalendarDays,
 } from 'lucide-react';
 import { format, addDays, addWeeks, addMonths, startOfWeek, setDay } from 'date-fns';
-import { fr } from 'date-fns/locale';
-import { formatDate } from '@/lib/dateFormat';
+import { formatDate, formatDateTime } from '@/lib/dateFormat';
 import { pickMysteryVisitRunAt } from '@/lib/mysteryVisitScheduling';
 import ScheduleCalendarView from '@/components/schedules/ScheduleCalendarView';
 import type { CalendarSchedule } from '@/components/schedules/ScheduleCalendarView';
@@ -173,7 +172,7 @@ const ReportSchedules = () => {
     return Array.from(map.entries()).sort((a, b) => a[0].localeCompare(b[0])).slice(0, 30);
   }, [filteredSchedules]);
 
-  const getProjectName = (id: string) => projects.find(p => p.id === id)?.site_name ?? 'â€”';
+  const getProjectName = (id: string) => projects.find(p => p.id === id)?.site_name ?? '-';
   const calendarSchedules = useMemo<CalendarSchedule[]>(() => [
     ...filteredSchedules.map((schedule) => ({
       id: schedule.id,
@@ -197,7 +196,7 @@ const ReportSchedules = () => {
 
   const getProfileName = (id: string) => {
     const p = profiles.find(p => p.id === id);
-    return p ? (p.full_name || p.email) : 'â€”';
+    return p ? (p.full_name || p.email) : '-';
   };
 
   const chargeProfiles = useMemo(() => {
@@ -242,7 +241,7 @@ const ReportSchedules = () => {
         mystery_randomized_run_at: mysteryRunAt,
       } as any);
       if (error) throw error;
-      toast({ title: 'Planification crÃ©Ã©e' });
+      toast({ title: 'Planification créée' });
       setShowAdd(false);
       await fetchData();
     } catch (err: any) {
@@ -267,7 +266,7 @@ const ReportSchedules = () => {
     try {
       const { error } = await supabase.from('report_schedules').delete().eq('id', id);
       if (error) throw error;
-      toast({ title: 'Planification supprimÃ©e' });
+      toast({ title: 'Planification supprimée' });
       await fetchData();
     } catch (err: any) {
       toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
@@ -282,13 +281,13 @@ const ReportSchedules = () => {
         .eq('id', id);
       if (error) throw error;
 
-      toast({ title: 'Lancement en coursâ€¦', description: 'ExÃ©cution du rapport planifiÃ©.' });
+      toast({ title: 'Lancement en cours...', description: 'Exécution du rapport planifié.' });
 
       // Step 2: Actually invoke the Edge Function to process due schedules
       const { error: execError } = await supabase.functions.invoke('execute-scheduled-reports');
       if (execError) throw execError;
 
-      toast({ title: 'ExÃ©cution terminÃ©e', description: 'Le rapport a Ã©tÃ© gÃ©nÃ©rÃ© avec succÃ¨s.' });
+      toast({ title: 'Exécution terminée', description: 'Le rapport a été généré avec succès.' });
       await fetchData();
     } catch (err: any) {
       toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
@@ -299,7 +298,7 @@ const ReportSchedules = () => {
     try {
       const { error } = await supabase.functions.invoke('execute-scheduled-reports');
       if (error) throw error;
-      toast({ title: 'Synchronisation terminÃ©e' });
+      toast({ title: 'Synchronisation terminée' });
       await fetchData();
     } catch (err: any) {
       toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
@@ -353,7 +352,7 @@ const ReportSchedules = () => {
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
           {isAdmin && (
             <div>
-              <label className="text-xs text-muted-foreground mb-1 block">ChargÃ©(e)</label>
+              <label className="text-xs text-muted-foreground mb-1 block">Chargé(e)</label>
               <select value={filterCharge} onChange={e => setFilterCharge(e.target.value)} className="w-full h-10 text-sm bg-secondary border border-border rounded-md px-3 text-foreground">
                 <option value="">Tous</option>
                 {chargeProfiles.map(p => <option key={p.id} value={p.id}>{p.full_name || p.email}</option>)}
@@ -378,7 +377,7 @@ const ReportSchedules = () => {
             <div>
               <label className="text-xs text-muted-foreground mb-1 block">Projet</label>
               <select value={newProjectId} onChange={e => setNewProjectId(e.target.value)} className="w-full h-10 text-sm bg-secondary border border-border rounded-md px-3 text-foreground" required>
-                <option value="">â€” SÃ©lectionner â€”</option>
+                <option value="">- Sélectionner -</option>
                 {availableProjects.map(p => <option key={p.id} value={p.id}>{p.site_name}</option>)}
               </select>
             </div>
@@ -386,7 +385,7 @@ const ReportSchedules = () => {
               <label className="text-xs text-muted-foreground mb-1 block">Type de rapport</label>
               <select value={newType} onChange={e => setNewType(e.target.value as any)} className="w-full h-10 text-sm bg-secondary border border-border rounded-md px-3 text-foreground">
                 <option value="audit">Audit</option>
-                <option value="activity">ActivitÃ© (Redmine)</option>
+                <option value="activity">Activité (Redmine)</option>
                 <option value="mystery_visit">Visite mystere</option>
               </select>
             </div>
@@ -443,7 +442,7 @@ const ReportSchedules = () => {
           </div>
           <div className="flex justify-end gap-2">
             <Button variant="outline" type="button" onClick={() => setShowAdd(false)}>Annuler</Button>
-            <Button type="submit" disabled={adding}>{adding ? 'CrÃ©ationâ€¦' : 'CrÃ©er'}</Button>
+            <Button type="submit" disabled={adding}>{adding ? 'Création...' : 'Créer'}</Button>
           </div>
         </form>
       )}
@@ -461,7 +460,7 @@ const ReportSchedules = () => {
             <div className="glass-card p-6">
               <h3 className="font-semibold mb-4 flex items-center gap-2">
                 <CalendarClock className="w-4 h-4 text-primary" />
-                Calendrier des prochaines exÃ©cutions
+                Calendrier des prochaines exécutions
               </h3>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
                 {calendarData.map(([date, items]) => (
@@ -487,10 +486,10 @@ const ReportSchedules = () => {
           {/* List */}
           <div className="space-y-2">
             {loadingData ? (
-              <div className="glass-card p-8 text-center text-muted-foreground">Chargementâ€¦</div>
+              <div className="glass-card p-8 text-center text-muted-foreground">Chargement...</div>
             ) : filteredSchedules.length === 0 ? (
               <div className="glass-card p-8 text-center text-muted-foreground">
-                Aucune planification. Cliquez sur "Nouvelle planification" pour en crÃ©er une.
+                Aucune planification. Cliquez sur "Nouvelle planification" pour en créer une.
               </div>
             ) : (
               filteredSchedules.map(s => (
@@ -509,15 +508,15 @@ const ReportSchedules = () => {
                       )}
                     </div>
                     <div className="flex items-center gap-4 mt-1 text-xs text-muted-foreground flex-wrap">
-                      <span>Du <strong className="text-foreground">{format(new Date(s.start_date), 'dd/MM/yyyy HH:mm')}</strong></span>
-                      <span>{s.end_date ? `au ${format(new Date(s.end_date), 'dd/MM/yyyy HH:mm')}` : 'âˆž Sans fin'}</span>
-                      <span>Prochaine : <strong className="text-foreground">{format(new Date(s.next_run_at), 'dd/MM/yyyy HH:mm')}</strong></span>
-                      {s.last_run_at && <span>DerniÃ¨re : {format(new Date(s.last_run_at), 'dd/MM/yyyy HH:mm')}</span>}
+                      <span>Du <strong className="text-foreground">{formatDateTime(s.start_date)}</strong></span>
+                      <span>{s.end_date ? `au ${formatDateTime(s.end_date)}` : 'Sans fin'}</span>
+                      <span>Prochaine : <strong className="text-foreground">{formatDateTime(s.next_run_at)}</strong></span>
+                      {s.last_run_at && <span>Dernière : {formatDateTime(s.last_run_at)}</span>}
                       {isAdmin && <span>Par : {getProfileName(s.created_by)}</span>}
                     </div>
                   </div>
                   <div className="flex items-center gap-1 flex-shrink-0">
-                    <Button variant="ghost" size="icon" className="h-8 w-8 text-primary" onClick={() => handleRunNow(s.id)} title="ExÃ©cuter maintenant">
+                    <Button variant="ghost" size="icon" className="h-8 w-8 text-primary" onClick={() => handleRunNow(s.id)} title="Exécuter maintenant">
                       <Play className="w-4 h-4" />
                     </Button>
                     <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => handleToggle(s.id, s.is_active)} title={s.is_active ? 'Mettre en pause' : 'Activer'}>

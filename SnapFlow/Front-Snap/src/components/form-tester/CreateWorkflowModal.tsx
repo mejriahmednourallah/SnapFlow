@@ -1,6 +1,7 @@
-import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { Button } from '@/components/ui/button'
+import { useState, type FormEvent } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { Loader2 } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 import {
   Dialog,
   DialogContent,
@@ -8,50 +9,52 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from '@/components/ui/dialog'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { formTesterApi } from '@/lib/form-tester/api'
-import { Loader2 } from 'lucide-react'
+} from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { formTesterApi } from '@/lib/form-tester/api';
+import { ProjectSearchSelect } from './ProjectSearchSelect';
 
 interface CreateWorkflowModalProps {
-  open: boolean
-  onOpenChange: (open: boolean) => void
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
 }
 
 export function CreateWorkflowModal({ open, onOpenChange }: CreateWorkflowModalProps) {
-  const navigate = useNavigate()
-  const [isLoading, setIsLoading] = useState(false)
+  const navigate = useNavigate();
+  const [isLoading, setIsLoading] = useState(false);
   const [formData, setFormData] = useState({
     name: '',
     target_url: '',
-  })
+    project_id: null as string | null,
+  });
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
+  const handleSubmit = async (e: FormEvent) => {
+    e.preventDefault();
 
     if (!formData.name.trim() || !formData.target_url.trim()) {
-      return
+      return;
     }
 
-    setIsLoading(true)
+    setIsLoading(true);
     try {
       const newWorkflow = await formTesterApi.createWorkflow(
         formData.name,
-        formData.target_url
-      )
+        formData.target_url,
+        formData.project_id,
+      );
 
       if (newWorkflow) {
-        onOpenChange(false)
-        setFormData({ name: '', target_url: '' })
-        navigate(`/app/workflows/form-tester/${newWorkflow.id}`)
+        onOpenChange(false);
+        setFormData({ name: '', target_url: '', project_id: null });
+        navigate(`/app/workflows/form-tester/${newWorkflow.id}`);
       }
     } catch (error) {
-      console.error('Failed to create workflow:', error)
+      console.error('Failed to create workflow:', error);
     } finally {
-      setIsLoading(false)
+      setIsLoading(false);
     }
-  }
+  };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -59,7 +62,7 @@ export function CreateWorkflowModal({ open, onOpenChange }: CreateWorkflowModalP
         <DialogHeader>
           <DialogTitle>Créer un nouveau workflow</DialogTitle>
           <DialogDescription>
-            Définissez le nom et l'URL cible de votre workflow de test de formulaire.
+            Définissez le nom, l'URL cible et le projet optionnel de votre workflow de test de formulaire.
           </DialogDescription>
         </DialogHeader>
 
@@ -87,6 +90,18 @@ export function CreateWorkflowModal({ open, onOpenChange }: CreateWorkflowModalP
             />
           </div>
 
+          <div className="space-y-2">
+            <Label>Projet lié</Label>
+            <ProjectSearchSelect
+              value={formData.project_id}
+              onChange={(projectId) => setFormData({ ...formData, project_id: projectId })}
+              emptyLabel="Workflow global"
+              placeholder="Rechercher un projet..."
+              disabled={isLoading}
+              className="w-full"
+            />
+          </div>
+
           <DialogFooter className="gap-2 sm:gap-0">
             <Button
               type="button"
@@ -107,5 +122,5 @@ export function CreateWorkflowModal({ open, onOpenChange }: CreateWorkflowModalP
         </form>
       </DialogContent>
     </Dialog>
-  )
+  );
 }

@@ -10,7 +10,8 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "logo:sites": "node scripts/extract-logo-test-sites.mjs"
   },
   "dependencies": {
     "@fontsource/dm-sans": "^5.2.8",

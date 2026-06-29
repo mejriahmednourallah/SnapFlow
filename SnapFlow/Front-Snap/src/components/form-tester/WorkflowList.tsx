@@ -4,10 +4,10 @@ import { ClipboardCheck, FolderKanban, Plus, SquareArrowOutUpRight } from 'lucid
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useFormTester } from '@/hooks/useFormTester';
-import { supabase } from '@/integrations/supabase/client';
 import type { WorkflowListView, WorkflowStatus } from '@/lib/form-tester/types';
 import { formatDate } from '@/lib/dateFormat';
 import { StatusBadge } from './StatusBadge';
+import { ProjectSearchSelect } from './ProjectSearchSelect';
 
 interface WorkflowListProps {
   isOperator: boolean;
@@ -17,8 +17,8 @@ export function WorkflowList({ isOperator }: WorkflowListProps) {
   const navigate = useNavigate();
   const { workflows, isLoading, isCreating, error, createWorkflow, reload } = useFormTester(isOperator);
 
-  const [projects, setProjects] = useState<Array<{ id: string; site_name: string }>>([]);
-  const [selectedProjectId, setSelectedProjectId] = useState<string>('all');
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
+  const [newProjectId, setNewProjectId] = useState<string | null>(null);
   const [newName, setNewName] = useState('');
   const [newUrl, setNewUrl] = useState('');
   const [statusFilter, setStatusFilter] = useState<WorkflowStatus | 'all'>('all');
@@ -31,33 +31,26 @@ export function WorkflowList({ isOperator }: WorkflowListProps) {
 
   const handleCreate = async (): Promise<void> => {
     if (!newName.trim() || !newUrl.trim()) return;
-    const workflow = await createWorkflow(newName, newUrl, selectedProjectId === 'all' ? null : selectedProjectId);
+    const workflow = await createWorkflow(newName, newUrl, newProjectId);
     setNewName('');
     setNewUrl('');
+    setNewProjectId(null);
     navigate(`/app/workflows/form-tester/${workflow.id}`);
   };
 
   const handleRefresh = async (): Promise<void> => {
-    await reload(statusFilter === 'all' ? undefined : statusFilter, listView, selectedProjectId === 'all' ? null : selectedProjectId);
+    await reload(statusFilter === 'all' ? undefined : statusFilter, listView, selectedProjectId);
   };
 
   const changeView = async (view: WorkflowListView): Promise<void> => {
     setListView(view);
     setStatusFilter('all');
-    await reload(undefined, view, selectedProjectId === 'all' ? null : selectedProjectId);
+    await reload(undefined, view, selectedProjectId);
   };
 
   useEffect(() => {
-    supabase
-      .from('projects')
-      .select('id, site_name')
-      .order('site_name', { ascending: true })
-      .then(({ data }) => setProjects((data as Array<{ id: string; site_name: string }> | null) ?? []));
-  }, []);
-
-  useEffect(() => {
-    void reload(statusFilter === 'all' ? undefined : statusFilter, listView, selectedProjectId === 'all' ? null : selectedProjectId);
-  }, [selectedProjectId]);
+    void reload(statusFilter === 'all' ? undefined : statusFilter, listView, selectedProjectId);
+  }, [listView, reload, selectedProjectId, statusFilter]);
 
   return (
     <div className="space-y-5">
@@ -94,16 +87,13 @@ export function WorkflowList({ isOperator }: WorkflowListProps) {
               </button>
             ) : null}
           </div>
-          <select
+          <ProjectSearchSelect
             value={selectedProjectId}
-            onChange={(event) => setSelectedProjectId(event.target.value)}
-            className="h-9 rounded-md border border-input bg-background px-3 text-sm"
-          >
-            <option value="all">Tous les projets</option>
-            {projects.map((project) => (
-              <option key={project.id} value={project.id}>{project.site_name}</option>
-            ))}
-          </select>
+            onChange={setSelectedProjectId}
+            emptyLabel="Tous les projets"
+            placeholder="Rechercher un projet..."
+            className="w-full sm:w-64"
+          />
           <select
             value={statusFilter}
             onChange={(event) => setStatusFilter(event.target.value as WorkflowStatus | 'all')}
@@ -111,11 +101,11 @@ export function WorkflowList({ isOperator }: WorkflowListProps) {
           >
             <option value="all">Tous les statuts</option>
             {listView !== 'review_queue' ? <option value="draft">Brouillon</option> : null}
-            <option value="needs_review">A valider</option>
+            <option value="needs_review">À valider</option>
             <option value="pending">En attente</option>
             <option value="approved">Accepté</option>
             <option value="executed">Exécuté</option>
-            <option value="blocked">Bloque</option>
+            <option value="blocked">Bloqué</option>
           </select>
           <Button variant="outline" onClick={() => void handleRefresh()} size="sm">
             Actualiser
@@ -126,12 +116,19 @@ export function WorkflowList({ isOperator }: WorkflowListProps) {
       {listView === 'mine' ? (
         <section className="glass-card p-4 space-y-3">
           <p className="text-sm font-medium">Nouveau workflow</p>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+          <div className="grid grid-cols-1 gap-2 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(13rem,18rem)_auto]">
             <Input value={newName} onChange={(event) => setNewName(event.target.value)} placeholder="Nom du workflow" />
             <Input
               value={newUrl}
               onChange={(event) => setNewUrl(event.target.value)}
               placeholder="https://votresite.com/contact"
+            />
+            <ProjectSearchSelect
+              value={newProjectId}
+              onChange={setNewProjectId}
+              emptyLabel="Workflow global"
+              placeholder="Rechercher un projet..."
+              className="w-full"
             />
             <Button onClick={() => void handleCreate()} disabled={isCreating || !newName.trim() || !newUrl.trim()}>
               <Plus className="h-4 w-4 mr-1" />
@@ -154,7 +151,7 @@ export function WorkflowList({ isOperator }: WorkflowListProps) {
               <div className="min-w-0">
                 <p className="text-sm font-semibold truncate">{workflow.name}</p>
                 <p className="text-xs text-muted-foreground truncate mt-1">{workflow.target_url}</p>
-                <div className="mt-2 flex items-center gap-2">
+                <div className="mt-2 flex flex-wrap items-center gap-2">
                   <StatusBadge status={workflow.status} size="sm" />
                   <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground">
                     {workflow.project_name ?? 'Global'}

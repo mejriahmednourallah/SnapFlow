@@ -7,7 +7,12 @@
  * - The shared helpers do NOT handle machine formats (yyyy-MM-dd, ISO-8601).
  */
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { formatDate, formatDateTime, formatMachineDateTime } from '@/lib/dateFormat';
+
+const root = resolve(__dirname, '..');
+const readSource = (relativePath: string) => readFileSync(resolve(root, relativePath), 'utf8');
 
 describe('formatDate', () => {
   it('returns dd/MM/yyyy for a valid Date', () => {
@@ -74,5 +79,26 @@ describe('formatDateTime', () => {
 describe('formatMachineDateTime', () => {
   it('returns yyyy-MM-ddTHH:mm for machine use only', () => {
     expect(formatMachineDateTime(new Date(2026, 5, 25, 14, 30))).toBe('2026-06-25T14:30');
+  });
+});
+
+describe('visible app date usage', () => {
+  it('uses shared helpers in audit, activity, and planning visible date surfaces', () => {
+    const activityReport = readSource('pages/ActivityReport.tsx');
+    const reportSchedules = readSource('pages/ReportSchedules.tsx');
+    const projectAudits = readSource('pages/project/ProjectAudits.tsx');
+    const workflowSchedulePanel = readSource('components/form-tester/builder/SchedulePanel.tsx');
+
+    expect(activityReport).toContain('formatDate(issue.created_on)');
+    expect(activityReport).toContain('formatDateTime(report.archived_at)');
+    expect(reportSchedules).toContain('formatDateTime(s.start_date)');
+    expect(reportSchedules).toContain('formatDateTime(s.next_run_at)');
+    expect(projectAudits).toContain('formatDateTime(audit.archived_at)');
+    expect(workflowSchedulePanel).toContain('formatDateTime(schedule.next_run_at)');
+
+    expect(activityReport).not.toContain("format(new Date(report.archived_at), 'dd/MM/yyyy HH:mm')");
+    expect(reportSchedules).not.toContain("format(new Date(s.next_run_at), 'dd/MM/yyyy HH:mm')");
+    expect(projectAudits).not.toContain("format(new Date(audit.archived_at), 'dd/MM/yyyy HH:mm')");
+    expect(workflowSchedulePanel).not.toContain("dateStyle: 'medium'");
   });
 });

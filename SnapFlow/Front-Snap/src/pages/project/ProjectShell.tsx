@@ -78,7 +78,7 @@ const ProjectShell = () => {
       const clientId = (data as any).client_id as string | null | undefined;
       if (clientId) {
         const { data: client } = await supabase.from('clients').select('name').eq('id', clientId).maybeSingle();
-        clientName = client?.name ?? null;
+        clientName = client?.name === 'A classer' ? null : client?.name ?? null;
       }
 
       setProject({ ...(data as ProjectInfo), client_name: clientName });

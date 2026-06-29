@@ -18,6 +18,7 @@ import { NodeInspectorPanel } from './builder/NodeInspectorPanel';
 import { ScenarioSidebar } from './builder/ScenarioSidebar';
 import { WorkflowBuilderShell } from './builder/WorkflowBuilderShell';
 import { WorkflowCanvas } from './builder/WorkflowCanvas';
+import { ProjectSearchSelect } from './ProjectSearchSelect';
 import { WorkflowRedmineDraftDialog } from './WorkflowRedmineDraftDialog';
 import { AssertNode } from './nodes/AssertNode';
 import { ConditionNode } from './nodes/ConditionNode';
@@ -172,6 +173,7 @@ export function WorkflowBuilder({ workflowId, isOperator }: WorkflowBuilderProps
     isExecuting,
     error,
     detect,
+    updateWorkflowProject,
     updateFieldValue,
     updateNodePositions,
     addNode,
@@ -297,6 +299,16 @@ export function WorkflowBuilder({ workflowId, isOperator }: WorkflowBuilderProps
             <StatusBadge status={workflow.status} size="sm" />
           </div>
           <p className="mt-1 truncate text-xs text-muted-foreground">{workflow.target_url}</p>
+          <div className="mt-2 max-w-sm">
+            <ProjectSearchSelect
+              value={workflow.project_id}
+              onChange={(projectId) => void updateWorkflowProject(projectId)}
+              emptyLabel="Workflow global"
+              placeholder="Rechercher un projet..."
+              disabled={!isEditable || isSaving}
+              className="w-full"
+            />
+          </div>
           {workflow.active_scenario ? (
             <p className="mt-1 truncate text-xs text-muted-foreground">
               Scenario: {workflow.active_scenario.name}

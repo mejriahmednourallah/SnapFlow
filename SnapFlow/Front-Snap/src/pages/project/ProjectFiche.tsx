@@ -123,15 +123,15 @@ const ProjectFiche = () => {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {/* ── Left column: project info ───────────────────── */}
               <div className="space-y-3">
-                <div className="flex items-start gap-2">
-                  <Building2 className="w-4 h-4 text-muted-foreground mt-0.5 flex-shrink-0" />
-                  <div>
-                    <p className="text-xs text-muted-foreground">Client</p>
-                    <p className="text-sm font-medium">
-                      {project.client_name || <span className="text-muted-foreground italic">Non renseigne</span>}
-                    </p>
+                {project.client_name && (
+                  <div className="flex items-start gap-2">
+                    <Building2 className="w-4 h-4 text-muted-foreground mt-0.5 flex-shrink-0" />
+                    <div>
+                      <p className="text-xs text-muted-foreground">Client</p>
+                      <p className="text-sm font-medium">{project.client_name}</p>
+                    </div>
                   </div>
-                </div>
+                )}
 
                 {/* Assigned user */}
                 <div className="flex items-start gap-2">
