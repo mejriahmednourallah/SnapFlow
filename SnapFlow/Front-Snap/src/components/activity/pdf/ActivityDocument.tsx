@@ -313,7 +313,7 @@ function ActivitySlidePage({
 function SectionNote({ children, theme, accentColor }: { children: ReactNode; theme?: PdfTheme; accentColor: string }) {
   const t = pageText(theme);
   return (
-    <View style={{ backgroundColor: '#F8FAFC', borderLeftWidth: 5, borderLeftColor: accentColor, padding: 13, borderWidth: 0.8, borderColor: t.border }}>
+    <View style={{ backgroundColor: '#F8FAFC', borderLeftWidth: 5, borderLeftColor: accentColor, padding: 13, borderWidth: 1, borderColor: t.border }}>
       <Text style={{ fontSize: 10, lineHeight: 1.45, color: t.text }}>{children}</Text>
     </View>
   );
@@ -369,7 +369,7 @@ function TableLegend({ rows, total, theme, accentColor, label = 'Libelle', limit
     return <SectionNote theme={theme} accentColor={accentColor}>Aucune donnée disponible pour cette répartition.</SectionNote>;
   }
   return (
-    <View style={{ backgroundColor: MANUAL_YELLOW, borderRadius: 0, padding: 0, minHeight: 286, borderWidth: 1.2, borderColor: MANUAL_GRID_WHITE }}>
+    <View style={{ backgroundColor: MANUAL_YELLOW, borderRadius: 0, padding: 0, minHeight: 286, borderWidth: 1, borderColor: MANUAL_GRID_WHITE }}>
       <View style={{ flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: MANUAL_GRID_WHITE }}>
         <Text style={{ width: 230, fontSize: 10, fontFamily: 'DMSans', fontWeight: 700, color: '#FFFFFF', padding: 10, borderRightWidth: 1, borderRightColor: MANUAL_GRID_WHITE }}>{label}</Text>
         <Text style={{ width: 70, fontSize: 10, fontFamily: 'DMSans', fontWeight: 700, color: '#FFFFFF', textAlign: 'right', padding: 10 }}>Tickets</Text>
@@ -639,7 +639,7 @@ function TicketNarrativePage({
   return (
     <ActivitySlidePage title={title} project={project} theme={theme} options={options}>
       <View style={{ flexDirection: 'row', gap: 42, alignItems: 'stretch', marginTop: 8 }}>
-        <View style={{ width: 280, justifyContent: 'center', borderBottomWidth: 1.2, borderBottomColor: '#1F2937' }}>
+        <View style={{ width: 280, justifyContent: 'center', borderBottomWidth: 1, borderBottomColor: '#1F2937' }}>
           <Text style={{ fontSize: 124, lineHeight: 1, color: '#000000', fontFamily: 'DMSans', fontWeight: 700, textAlign: 'center' }}>
             {String(issues.length).padStart(2, '0')}
           </Text>
@@ -873,11 +873,11 @@ export function ActivityDocument({ project, issues, totalCount, filters, options
             <View style={{ width: 188 }}>
               <BigNumberPanel value={data.cancelledTickets.length} label="NOMBRE TICKETS ANNULÉS" caption="Demandes annulées, rejetées ou sorties du périmètre actif" theme={theme} status="warning" accentColor={accentColor} />
             </View>
-            <View style={{ flex: 1, backgroundColor: t.surface, borderRadius: 12, borderWidth: 0.8, borderColor: t.border, padding: 14 }}>
+            <View style={{ flex: 1, backgroundColor: t.surface, borderRadius: 12, borderWidth: 1, borderColor: t.border, padding: 14 }}>
               <Text style={{ fontSize: 10, fontFamily: 'DMSans', fontWeight: 700, color: t.primary, marginBottom: 10 }}>TYPOLOGIE DES TICKETS ANNULÉS</Text>
               <VerticalBars rows={data.cancelledByType} theme={theme} />
             </View>
-            <View style={{ flex: 1, backgroundColor: t.surface, borderRadius: 12, borderWidth: 0.8, borderColor: t.border, padding: 14 }}>
+            <View style={{ flex: 1, backgroundColor: t.surface, borderRadius: 12, borderWidth: 1, borderColor: t.border, padding: 14 }}>
               <Text style={{ fontSize: 10, fontFamily: 'DMSans', fontWeight: 700, color: t.primary, marginBottom: 10 }}>PRIORITÉ DES TICKETS ANNULÉS</Text>
               <HorizontalBars rows={data.cancelledByPriority} theme={theme} limit={5} />
             </View>
@@ -946,11 +946,11 @@ export function ActivityDocument({ project, issues, totalCount, filters, options
             <View style={{ width: 170 }}>
               <BigNumberPanel value={data.blockedTickets.length} label="NOMBRE TICKETS BLOQUÉS" caption="Tickets en attente de déblocage" theme={theme} status="danger" accentColor={accentColor} />
             </View>
-            <View style={{ flex: 1, backgroundColor: t.surface, borderRadius: 12, borderWidth: 0.8, borderColor: t.border, padding: 14 }}>
+            <View style={{ flex: 1, backgroundColor: t.surface, borderRadius: 12, borderWidth: 1, borderColor: t.border, padding: 14 }}>
               <Text style={{ fontSize: 10, fontFamily: 'DMSans', fontWeight: 700, color: t.primary, marginBottom: 10 }}>PRIORITÉ DES TICKETS BLOQUÉS</Text>
               <HorizontalBars rows={data.blockedByPriority} theme={theme} limit={5} />
             </View>
-            <View style={{ flex: 1, backgroundColor: t.surface, borderRadius: 12, borderWidth: 0.8, borderColor: t.border, padding: 14 }}>
+            <View style={{ flex: 1, backgroundColor: t.surface, borderRadius: 12, borderWidth: 1, borderColor: t.border, padding: 14 }}>
               <Text style={{ fontSize: 10, fontFamily: 'DMSans', fontWeight: 700, color: t.primary, marginBottom: 10 }}>TYPOLOGIE DES TICKETS BLOQUÉS</Text>
               <DonutChart rows={data.blockedByType} theme={theme} size={150} limit={5} />
             </View>
