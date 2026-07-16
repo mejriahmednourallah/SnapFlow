@@ -803,6 +803,7 @@ class FormExecutor:
                                 "captcha_task_type": captcha_result.task_type,
                                 "captcha_provider_error_code": captcha_result.provider_error_code,
                                 "captcha_provider_error_description": captcha_result.provider_error_description,
+                                "captcha_provider_retry_after_s": captcha_result.provider_retry_after_s or None,
                             }
                             provider_details = {
                                 key: value

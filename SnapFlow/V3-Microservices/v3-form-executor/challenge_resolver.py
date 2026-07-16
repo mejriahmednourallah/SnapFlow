@@ -15,10 +15,16 @@ logger = logging.getLogger("form-executor.challenge_resolver")
 # ─── API config ───────────────────────────────────────────────────────────────
 CAPTCHA_API_KEY = (os.getenv("FORM_EXECUTOR_2CAPTCHA_API_KEY") or "").strip()
 CAPTCHA_TIMEOUT_S = int(os.getenv("FORM_EXECUTOR_CAPTCHA_TIMEOUT_S", "120"))
-CAPTCHA_POLL_INTERVAL_S = int(os.getenv("FORM_EXECUTOR_CAPTCHA_POLL_INTERVAL_S", "5"))
+CAPTCHA_POLL_INTERVAL_S = max(int(os.getenv("FORM_EXECUTOR_CAPTCHA_POLL_INTERVAL_S", "5")), 5)
 
 _2CAPTCHA_CREATE_TASK = "https://api.2captcha.com/createTask"
 _2CAPTCHA_GET_RESULT = "https://api.2captcha.com/getTaskResult"
+_2CAPTCHA_CREATE_TASK_RETRY_AFTER_S = {
+    "ERROR_NO_SLOT_AVAILABLE": 5,
+    "ERROR_ZERO_BALANCE": 60,
+}
+_2captcha_create_task_cooldown_until = 0.0
+_2captcha_create_task_cooldown_code: str | None = None
 
 # ─── CAPTCHA type selectors ───────────────────────────────────────────────────
 _RECAPTCHA_V2_SELECTORS = (
@@ -80,6 +86,7 @@ class SolveResult:
     error: str | None = None
     provider_error_code: str | None = None
     provider_error_description: str | None = None
+    provider_retry_after_s: int = 0
 
 
 @dataclass(frozen=True)
@@ -199,6 +206,29 @@ def is_captcha_solvable(captcha_info: CaptchaInfo) -> bool:
     return False
 
 
+def _set_2captcha_create_task_cooldown(error_code: str | None) -> int:
+    """Apply documented 2Captcha createTask backoff for account/capacity errors."""
+    retry_after_s = _2CAPTCHA_CREATE_TASK_RETRY_AFTER_S.get(error_code or "", 0)
+    if retry_after_s <= 0:
+        return 0
+
+    global _2captcha_create_task_cooldown_until, _2captcha_create_task_cooldown_code
+    _2captcha_create_task_cooldown_until = max(
+        _2captcha_create_task_cooldown_until,
+        time.monotonic() + retry_after_s,
+    )
+    _2captcha_create_task_cooldown_code = error_code
+    return retry_after_s
+
+
+def _get_2captcha_create_task_cooldown() -> tuple[int, str | None]:
+    """Return remaining createTask cooldown seconds and the provider error behind it."""
+    remaining_s = int(max(0, _2captcha_create_task_cooldown_until - time.monotonic()))
+    if remaining_s <= 0:
+        return 0, None
+    return remaining_s, _2captcha_create_task_cooldown_code
+
+
 # ─── Site key extraction helpers ──────────────────────────────────────────────
 
 
@@ -278,9 +308,28 @@ async def resolve_captcha(
     task_type = str(task_payload.get("task", {}).get("type") or "")
 
     try:
+        cooldown_remaining_s, cooldown_code = _get_2captcha_create_task_cooldown()
+        if cooldown_remaining_s > 0:
+            result = SolveResult(
+                success=False,
+                task_type=task_type,
+                solve_duration_ms=int((time.monotonic() - start_time) * 1000),
+                error=f"2captcha_create_task_cooldown:{cooldown_code}:{cooldown_remaining_s}s",
+                provider_error_code=cooldown_code,
+                provider_error_description=(
+                    "2Captcha createTask cooldown is active after a provider rate-limit "
+                    "or account error."
+                ),
+                provider_retry_after_s=cooldown_remaining_s,
+            )
+            if cache is not None:
+                cache[cache_key] = result
+            return result
+
         creation = await _create_2captcha_task(task_payload)
         if not creation.task_id:
             error_code = creation.error_code or "UNKNOWN"
+            retry_after_s = _set_2captcha_create_task_cooldown(creation.error_code)
             result = SolveResult(
                 success=False,
                 task_type=task_type,
@@ -288,6 +337,7 @@ async def resolve_captcha(
                 error=f"2captcha_create_task_error:{error_code}",
                 provider_error_code=creation.error_code,
                 provider_error_description=creation.error_description,
+                provider_retry_after_s=retry_after_s,
             )
             if cache is not None:
                 cache[cache_key] = result

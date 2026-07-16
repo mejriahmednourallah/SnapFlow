@@ -397,6 +397,51 @@ async def test_resolve_captcha_create_task_error(monkeypatch, fixture_server):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("error_code", "expected_retry_after_s"),
+    [
+        ("ERROR_ZERO_BALANCE", 60),
+        ("ERROR_NO_SLOT_AVAILABLE", 5),
+    ],
+)
+async def test_create_task_provider_errors_set_documented_cooldown(
+    monkeypatch,
+    error_code,
+    expected_retry_after_s,
+):
+    monkeypatch.setattr("challenge_resolver.CAPTCHA_API_KEY", "test-mock-key")
+    monkeypatch.setattr("challenge_resolver._2captcha_create_task_cooldown_until", 0.0)
+    monkeypatch.setattr("challenge_resolver._2captcha_create_task_cooldown_code", None)
+
+    create_task = AsyncMock(
+        return_value=TaskCreationResult(
+            error_code=error_code,
+            error_description="Provider asked the client to back off.",
+        )
+    )
+    monkeypatch.setattr("challenge_resolver._create_2captcha_task", create_task)
+
+    captcha_info = CaptchaInfo(
+        captcha_type="recaptcha_v2",
+        site_key="test-site-key",
+        page_url="https://example.com/contact",
+    )
+
+    first = await resolve_captcha(MagicMock(), captcha_info)
+    second = await resolve_captcha(MagicMock(), captcha_info)
+
+    assert first.success is False
+    assert first.error == f"2captcha_create_task_error:{error_code}"
+    assert first.provider_error_code == error_code
+    assert first.provider_retry_after_s == expected_retry_after_s
+    assert second.success is False
+    assert second.error.startswith(f"2captcha_create_task_cooldown:{error_code}:")
+    assert second.provider_error_code == error_code
+    assert 0 < second.provider_retry_after_s <= expected_retry_after_s
+    assert create_task.await_count == 1
+
+
+@pytest.mark.asyncio
 async def test_resolve_captcha_poll_error_preserves_provider_details(monkeypatch, fixture_server):
     monkeypatch.setattr("challenge_resolver.CAPTCHA_API_KEY", "test-mock-key")
     monkeypatch.setattr("challenge_resolver.CAPTCHA_POLL_INTERVAL_S", 0)
