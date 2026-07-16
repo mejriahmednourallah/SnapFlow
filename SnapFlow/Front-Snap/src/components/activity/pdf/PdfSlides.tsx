@@ -5,7 +5,6 @@ import {
   BarChart, Bar,
 } from 'recharts';
 import { formatDate } from '@/lib/dateFormat';
-import { hasProjectPerimeterBlocks } from '@/lib/projectPerimeters';
 import type { PdfConfig, PdfData } from './pdfTypes';
 import { GREEN, RED, AMBER, BLUE, TRACKER_COLORS, GOLD_BG, GOLD_BD, GOLD } from './pdfTypes';
 
@@ -308,6 +307,8 @@ function PerimetreSlide({ cfg, data }: { cfg: PdfConfig; data: PdfData }) {
   const trackerNames = trackerData.map(t => t.name);
   const leftItems = trackerNames.filter(n => /web|content|feature|fonc/i.test(n));
   const rightItems = trackerNames.filter(n => /bug|maintenance|securit|fix/i.test(n));
+  const leftFallback = ['Mise à jour des rubriques et contenus', 'Gestion des médias et bannières', 'Correction des liens cassés', 'Déploiement de nouvelles fonctionnalités'];
+  const rightFallback = ['Correction de bugs et anomalies', 'Mise à jour des modules et plugins', 'Surveillance des failles de sécurité', 'Tests de non-régression'];
 
   const renderItems = (items: string[], fallback: string[]) =>
     (items.length ? items : fallback).map((item, i) => (
@@ -324,23 +325,23 @@ function PerimetreSlide({ cfg, data }: { cfg: PdfConfig; data: PdfData }) {
         {/* Left col */}
         <div style={{ flex: 1, padding: '20px', background: '#f8fafc', borderRadius: 10, border: '1px solid #e7e5e4' }}>
           <div style={{ fontSize: 13, fontWeight: 800, color: pdfColor, marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
-            {data.perimeterBlocks?.[0]?.title ?? 'Perimetre configure'}
+            Webmastering & Gestion de contenu
           </div>
-          <div style={{ fontSize: 10, color: '#78716c', marginBottom: 14 }}>{data.perimeterBlocks?.[0]?.subtitle ?? 'Bloc projet'}</div>
-          {renderItems(data.perimeterBlocks?.[0]?.items ?? leftItems, [])}
+          <div style={{ fontSize: 10, color: '#78716c', marginBottom: 14 }}>Maintenance évolutive du site</div>
+          {renderItems(leftItems, leftFallback)}
         </div>
         {/* Right col */}
         <div style={{ flex: 1, padding: '20px', background: '#f8fafc', borderRadius: 10, border: '1px solid #e7e5e4' }}>
           <div style={{ fontSize: 13, fontWeight: 800, color: pdfColor, marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
-            {data.perimeterBlocks?.[1]?.title ?? 'Perimetre configure'}
+            Maintenance corrective & Sécurité
           </div>
-          <div style={{ fontSize: 10, color: '#78716c', marginBottom: 14 }}>{data.perimeterBlocks?.[1]?.subtitle ?? 'Bloc projet'}</div>
-          {renderItems(data.perimeterBlocks?.[1]?.items ?? rightItems, [])}
+          <div style={{ fontSize: 10, color: '#78716c', marginBottom: 14 }}>Corrections et mises à jour techniques</div>
+          {renderItems(rightItems, rightFallback)}
         </div>
       </div>
       {/* Bottom banner */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 24, padding: '12px 40px', background: '#f0f9ff', borderTop: '1px solid #bae6fd', flexShrink: 0 }}>
-        {["Perimetre configurable", "Rapport activite", "Suivi continu"].map((txt, i) => (
+        {["Syst\u00e8me de ticketing Redmine", "Rapport d'activit\u00e9 annuel", "Suivi continu des demandes client"].map((txt, i) => (
           <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             {i > 0 && <div style={{ width: 1, height: 14, background: '#bae6fd' }} />}
             <span style={{ fontSize: 11, color: '#0369a1', fontWeight: 600 }}>{txt}</span>
@@ -881,7 +882,6 @@ export const PdfSlides = forwardRef<HTMLDivElement, PdfSlidesProps>(
   function PdfSlides({ cfg, data }, ref) {
     const { pdfSections, pdfColor } = cfg;
     const { filteredIssues } = data;
-    const showPerimeter = Boolean(pdfSections.perimetre && hasProjectPerimeterBlocks(data.perimeterBlocks));
 
     // Unique statuses: Bloqués first, Clôturés second, then by count descending
     const uniqueStatuses = Array.from(
@@ -918,10 +918,10 @@ export const PdfSlides = forwardRef<HTMLDivElement, PdfSlidesProps>(
         {pdfSections.sommaire && <SommaireSlide cfg={cfg} data={data} />}
 
         {/* 3. Section separator: Périmètre */}
-        {pdfSections.separateurs && showPerimeter && <SeparatorSlide label="PERIMETRE" slideKey="sep-perimetre" color={pdfColor} />}
+        {pdfSections.separateurs && <SeparatorSlide label="PÉRIMÈTRE" slideKey="sep-perimetre" color={pdfColor} />}
 
         {/* 4. Périmètre */}
-        {showPerimeter && <PerimetreSlide cfg={cfg} data={data} />}
+        {pdfSections.perimetre && <PerimetreSlide cfg={cfg} data={data} />}
 
         {/* 5. Section separator: Suivi */}
         {pdfSections.separateurs && <SeparatorSlide label="SUIVI DES ACTIVITÉS" slideKey="sep-suivi" color={pdfColor} />}

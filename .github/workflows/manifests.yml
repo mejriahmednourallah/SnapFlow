@@ -22,6 +22,9 @@ concurrency:
 permissions:
   contents: read
 
+env:
+  TRIVY_IMAGE: aquasec/trivy:0.72.0
+
 jobs:
   validate:
     name: Validate Manifests And Scripts
@@ -39,10 +42,51 @@ jobs:
 
       - name: Trivy config scan
         run: |
-          docker run --rm -v "${{ github.workspace }}:/repo" -v "$HOME/.cache/trivy:/root/.cache" aquasec/trivy:latest config \
+          mkdir -p trivy-results
+          docker run --rm -v "${{ github.workspace }}:/repo" -v "$HOME/.cache/trivy:/root/.cache" "$TRIVY_IMAGE" config \
+            --severity HIGH,CRITICAL \
+            --exit-code 0 \
+            --format table \
+            /repo/SnapFlow/k8s /repo/SnapFlow/V3-Microservices
+          docker run --rm -v "${{ github.workspace }}:/repo" -v "$HOME/.cache/trivy:/root/.cache" "$TRIVY_IMAGE" config \
+            --severity HIGH,CRITICAL \
+            --exit-code 0 \
+            --format sarif \
+            --output /repo/trivy-results/config.sarif \
+            /repo/SnapFlow/k8s /repo/SnapFlow/V3-Microservices
+          docker run --rm -v "${{ github.workspace }}:/repo" -v "$HOME/.cache/trivy:/root/.cache" "$TRIVY_IMAGE" config \
             --severity HIGH,CRITICAL \
             --exit-code 1 \
+            --format json \
+            --output /repo/trivy-results/config.json \
             /repo/SnapFlow/k8s /repo/SnapFlow/V3-Microservices
+
+      - name: Trivy config summary
+        if: always()
+        run: |
+          {
+            echo "## Trivy Config"
+            echo
+            echo "| Target | ID | Severity | Title |"
+            echo "|---|---|---|---|"
+            if [ -s trivy-results/config.json ]; then
+              jq -r '
+                [.Results[]? as $r | $r.Misconfigurations[]? |
+                  ["`" + ($r.Target // "-") + "`", (.ID // "-"), (.Severity // "-"), ((.Title // "-") | gsub("\\|"; "\\\\|"))]
+                  | @tsv] | .[]
+              ' trivy-results/config.json | while IFS=$'\t' read -r target id severity title; do
+                echo "| $target | $id | $severity | $title |"
+              done
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload Trivy config artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-config
+          path: trivy-results/
+          if-no-files-found: ignore
 
       - name: Bash syntax check
         shell: bash

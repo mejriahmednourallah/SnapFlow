@@ -27,13 +27,7 @@ interface Project {
   id: string;
   url: string;
   site_name: string;
-  client_id: string;
   redmine_url?: string | null;
-}
-
-interface Client {
-  id: string;
-  name: string;
 }
 
 interface Assignment {
@@ -65,8 +59,6 @@ interface RedmineProject {
   audit_url_needs_review?: boolean;
   access_level?: string;
 }
-
-const HOLDING_CLIENT_NAME = 'A classer';
 
 const extractProjectIdentifier = (value: unknown): string => {
   const raw = String(value || '').trim();
@@ -127,7 +119,6 @@ const AdminProjects = () => {
 
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
-  const [clients, setClients] = useState<Client[]>([]);
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [latestAudits, setLatestAudits] = useState<AuditSummary[]>([]);
   const [nextSchedules, setNextSchedules] = useState<ScheduleSummary[]>([]);
@@ -158,11 +149,10 @@ const AdminProjects = () => {
   const [redmineSearch, setRedmineSearch] = useState('');
 
   const fetchData = async () => {
-    const [profilesRes, redmineIdentitiesRes, projectsRes, clientsRes, assignmentsRes, auditsRes, schedulesRes] = await Promise.all([
+    const [profilesRes, redmineIdentitiesRes, projectsRes, assignmentsRes, auditsRes, schedulesRes] = await Promise.all([
       supabase.from('profiles').select('id, email, full_name'),
       supabase.from('redmine_user_identities').select('user_id, redmine_login, redmine_display_name'),
       supabase.from('projects').select('*'),
-      supabase.from('clients').select('id, name').order('name', { ascending: true }),
       supabase.from('project_assignments').select('*'),
       supabase.from('audits').select('project_id, report_data, created_at, status').order('created_at', { ascending: false }),
       supabase.from('report_schedules').select('project_id, next_run_at, report_type').eq('is_active', true).order('next_run_at', { ascending: true }),
@@ -173,8 +163,7 @@ const AdminProjects = () => {
       redmine_login: identitiesByUser.get(profile.id)?.redmine_login ?? null,
       redmine_display_name: identitiesByUser.get(profile.id)?.redmine_display_name ?? null,
     })));
-    setProjects((projectsRes.data || []) as Project[]);
-    setClients((clientsRes.data || []) as Client[]);
+    setProjects(projectsRes.data || []);
     setAssignments(assignmentsRes.data || []);
 
     // Extract latest audit per project (prefer completed, else most recent with data)
@@ -236,22 +225,7 @@ const AdminProjects = () => {
     return nextSchedules.find(s => s.project_id === projectId);
   };
 
-  const ensureClient = async (name: string): Promise<string> => {
-    const trimmed = name.trim() || 'Client sans nom';
-    const existing = clients.find(client => client.name.toLowerCase() === trimmed.toLowerCase());
-    if (existing) return existing.id;
-
-    const { data, error } = await supabase
-      .from('clients')
-      .upsert({ name: trimmed }, { onConflict: 'name' })
-      .select('id, name')
-      .single();
-    if (error) throw error;
-    setClients(prev => [...prev.filter(client => client.id !== data.id), data as Client].sort((a, b) => a.name.localeCompare(b.name)));
-    return data.id;
-  };
-
-  // Get unique charges (users assigned to at least one project)
+  // Get unique chargés (users assigned to at least one project)
   const chargeProfiles = useMemo(() => {
     const userIds = new Set(assignments.map(a => a.user_id));
     return profiles.filter(p => userIds.has(p.id));
@@ -307,17 +281,12 @@ const AdminProjects = () => {
     e.preventDefault();
     setAdding(true);
     try {
-      const clientId = await ensureClient(HOLDING_CLIENT_NAME);
-      const { data: proj, error } = await supabase
-        .from('projects')
-        .insert({ url: newUrl, site_name: newName, client_id: clientId })
-        .select()
-        .single();
+      const { data: proj, error } = await supabase.from('projects').insert({ url: newUrl, site_name: newName }).select().single();
       if (error) throw error;
       if (newAssignee) {
         await supabase.from('project_assignments').insert({ project_id: proj.id, user_id: newAssignee });
       }
-      toast({ title: 'Projet ajoute', description: newName });
+      toast({ title: 'Projet ajouté', description: newName });
       setShowAdd(false);
       setNewUrl('');
       setNewName('');
@@ -549,7 +518,6 @@ const AdminProjects = () => {
 
         const siteUrl = rp.homepage || `https://maintenance.medianet.tn/projects/${rp.identifier}`;
         const redmineUrl = `https://maintenance.medianet.tn/projects/${rp.identifier}`;
-        const clientId = await ensureClient(HOLDING_CLIENT_NAME);
 
         const { data: proj, error } = await supabase
           .from('projects')
@@ -558,7 +526,6 @@ const AdminProjects = () => {
             redmine_url: redmineUrl,
             redmine_identifier: rp.identifier,
             site_name: rp.name,
-            client_id: clientId,
             audit_url_needs_review: !rp.homepage,
           })
           .select()
@@ -592,7 +559,7 @@ const AdminProjects = () => {
       if (data?.error) throw new Error(data.error);
 
       toast({
-        title: 'Projets Redmine synchronisés',
+        title: 'Projets Redmine synchronisÃ©s',
         description: data?.message || `${data?.imported ?? 0} projet(s) disponible(s), ${data?.revoked ?? 0} acces retire(s).`,
       });
       await fetchData();
@@ -636,7 +603,7 @@ const AdminProjects = () => {
             <>
               <Button size="sm" variant="outline" onClick={handleSyncMyRedmineProjects} disabled={syncingMyRedmine}>
                 <RefreshCw className={`w-4 h-4 mr-1.5 ${syncingMyRedmine ? 'animate-spin' : ''}`} />
-              <span className="hidden sm:inline">{syncingMyRedmine ? 'Synchronisation...' : 'Synchroniser mes accès'}</span>
+                <span className="hidden sm:inline">{syncingMyRedmine ? 'Synchronisation...' : 'Synchroniser mes accès'}</span>
                 <span className="sm:hidden">{syncingMyRedmine ? '...' : 'Sync'}</span>
               </Button>
               {canImportRedmine && (
@@ -652,11 +619,11 @@ const AdminProjects = () => {
             <>
             <Button size="sm" variant="outline" onClick={handleBulkSyncAssignments} disabled={syncingBulk}>
               <RefreshCw className={`w-4 h-4 mr-1.5 ${syncingBulk ? 'animate-spin' : ''}`} />
-              <span className="hidden sm:inline">{syncingBulk ? 'Synchronisation...' : 'Sync to Redmine'}</span>
-              <span className="sm:hidden">{syncingBulk ? '...' : 'Sync'}</span>
+              <span className="hidden sm:inline">{syncingBulk ? 'Syncing…' : 'Sync to Redmine'}</span>
+              <span className="sm:hidden">{syncingBulk ? '…' : 'Sync'}</span>
             </Button>
             <Button size="sm" variant="outline" onClick={handleFetchRedmine} disabled={loadingRedmine}>
-              <Download className="w-4 h-4 mr-1.5" /> <span className="hidden sm:inline">{loadingRedmine ? 'Chargement...' : 'Importer de Redmine'}</span><span className="sm:hidden">{loadingRedmine ? '...' : 'Redmine'}</span>
+              <Download className="w-4 h-4 mr-1.5" /> <span className="hidden sm:inline">{loadingRedmine ? 'Chargement…' : 'Importer de Redmine'}</span><span className="sm:hidden">{loadingRedmine ? '…' : 'Redmine'}</span>
             </Button>
             <Button size="sm" onClick={() => setShowAdd(!showAdd)}>
               <Plus className="w-4 h-4 mr-1.5" /> Ajouter
@@ -748,15 +715,15 @@ const AdminProjects = () => {
             <Input value={newUrl} onChange={e => setNewUrl(e.target.value)} placeholder="https://exemple.com" required />
           </div>
           <div>
-            <label className="text-xs text-muted-foreground mb-1 block">Affecter a</label>
+            <label className="text-xs text-muted-foreground mb-1 block">Affecter à</label>
             <select value={newAssignee} onChange={e => setNewAssignee(e.target.value)} className="w-full h-10 text-sm bg-secondary border border-border rounded-md px-3 text-foreground">
-              <option value="">Aucun</option>
+              <option value="">— Aucun —</option>
               {profiles.map(p => (
                 <option key={p.id} value={p.id}>{getProfileDisplayName(p)}</option>
               ))}
             </select>
           </div>
-          <Button type="submit" disabled={adding}>{adding ? 'Ajout...' : 'Ajouter'}</Button>
+          <Button type="submit" disabled={adding}>{adding ? 'Ajout…' : 'Ajouter'}</Button>
         </form>
       )}
 
@@ -772,7 +739,7 @@ const AdminProjects = () => {
 
           {filteringRedmineByUser && (
             <div className="text-xs bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800 rounded px-3 py-2 text-blue-700 dark:text-blue-300">
-              Filtrage des projets Redmine assignés à l'utilisateur...
+              ⏳ Filtrage des projets Redmine assignés à l'utilisateur...
             </div>
           )}
 
@@ -793,7 +760,7 @@ const AdminProjects = () => {
                   <option value={user?.id || ''}>{getProfileDisplayName(currentUserProfile)}</option>
                 ) : (
                   <>
-                    <option value="">Aucun</option>
+                    <option value="">— Aucun —</option>
                     {profiles.map(p => (
                       <option key={p.id} value={p.id}>{getProfileDisplayName(p)}</option>
                     ))}
@@ -802,13 +769,13 @@ const AdminProjects = () => {
               </select>
             </div>
             <Button size="sm" onClick={handleImportRedmine} disabled={importing || selectedRedmine.size === 0 || filteringRedmineByUser}>
-              {importing ? 'Import...' : `Importer (${selectedRedmine.size})`}
+              {importing ? 'Import…' : `Importer (${selectedRedmine.size})`}
             </Button>
           </div>
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
             <Input
-              placeholder="Rechercher un projet..."
+              placeholder="Rechercher un projet…"
               value={redmineSearch}
               onChange={e => setRedmineSearch(e.target.value)}
               className="pl-9"
@@ -881,7 +848,7 @@ const AdminProjects = () => {
                     {latestAudit.score}/100
                   </span>
                   <span className="text-xs text-muted-foreground">
-                    - {formatDate(latestAudit.created_at)}
+                    — {formatDate(latestAudit.created_at)}
                   </span>
                 </div>
               )}
@@ -944,14 +911,14 @@ const AdminProjects = () => {
                   type="password"
                   value={deletePassword}
                   onChange={e => setDeletePassword(e.target.value)}
-                  placeholder="********"
+                  placeholder="••••••••"
                   autoFocus
                 />
               </div>
               <DialogFooter className="gap-2">
                 <Button variant="outline" onClick={() => setDeleteTarget(null)}>Annuler</Button>
                 <Button variant="destructive" onClick={handleDeleteStep2} disabled={deleting || !deletePassword}>
-                  {deleting ? 'Suppression...' : 'Supprimer définitivement'}
+                  {deleting ? 'Suppression…' : 'Supprimer définitivement'}
                 </Button>
               </DialogFooter>
             </div>
@@ -963,10 +930,4 @@ const AdminProjects = () => {
 };
 
 export default AdminProjects;
-
-
-
-
-
-
 

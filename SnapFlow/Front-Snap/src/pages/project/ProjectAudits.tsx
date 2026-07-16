@@ -8,13 +8,15 @@ import { generateAudit, archiveAudit, failAuditRow, deleteAudit } from '@/servic
 import { normalizeAuditForRead, getAuditScoreFromAny } from '@/lib/auditReadUtils';
 import { isRedmineProjectUrl, resolveAuditTargetUrl as resolveProjectAuditTargetUrl } from '@/lib/projectUrls';
 import { useRedmineIdentifier } from '@/hooks/useRedmineIdentifier';
-import { formatDate, formatDateTime } from '@/lib/dateFormat';
+import { formatDateTime } from '@/lib/dateFormat';
 import { fetchProjectDetail } from '@/services/redmineService';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
   FileText, Plus, Eye, Archive, Loader2, AlertCircle, X, Trash2, GitCompare, ArrowLeft,
 } from 'lucide-react';
+import { format } from 'date-fns';
+import { fr } from 'date-fns/locale';
 import type { ProjectContext } from './ProjectShell';
 
 interface AuditRow {
@@ -156,7 +158,7 @@ const ProjectAudits = () => {
   const handleGenerate = async () => {
     if (!projectId || !project) return;
     if (!canLaunchAudit) {
-      toast({ title: 'Accès lecture seule', description: "Votre rôle Redmine permet de consulter les rapports, mais pas de lancer un audit.", variant: 'destructive' });
+      toast({ title: 'AccÃ¨s lecture seule', description: "Votre rÃ´le Redmine permet de consulter les rapports, mais pas de lancer un audit.", variant: 'destructive' });
       return;
     }
     if (isAuditRunning) {
@@ -281,7 +283,7 @@ const ProjectAudits = () => {
             <div className="flex-1">
               <h3 className="font-semibold text-sm text-yellow-900">Audit bloqué détecté</h3>
               <p className="text-xs text-yellow-800 mt-1">
-                Un audit lancé le {formatDateTime(staleAuditWarning.created_at)} semble bloqué et n'a pas progressé.
+                Un audit lancé le {format(new Date(staleAuditWarning.created_at), 'dd/MM/yyyy à HH:mm', { locale: fr })} semble bloqué et n'a pas progressé.
               </p>
             </div>
           </div>
@@ -500,7 +502,7 @@ const AuditCard = ({ audit, project, onView, onArchive, onDelete, isArchived, is
           )}
           {isArchived && audit.archived_at && (
             <span className="text-xs bg-muted text-muted-foreground px-2 py-0.5 rounded-full">
-              Archivé le {formatDateTime(audit.archived_at)}
+              Archivé le {format(new Date(audit.archived_at), 'dd/MM/yyyy HH:mm')}
             </span>
           )}
         </div>
@@ -539,14 +541,14 @@ const AuditCard = ({ audit, project, onView, onArchive, onDelete, isArchived, is
 
 const ComparisonView = ({ audits, project }: { audits: AuditRow[]; project: { url: string; site_name: string } | null }) => {
   const globalData = audits.map(a => ({
-    date: formatDate(a.created_at),
+    date: format(new Date(a.created_at), 'dd/MM/yyyy', { locale: fr }),
     fullDate: a.created_at,
     score: getAuditScoreFromAny(a.report_data, a.id, { url: project?.url ?? '', site_name: project?.site_name ?? 'Site' }) ?? 0,
   }));
 
   const allAxes: Map<string, { name: string; scores: { date: string; score: number }[] }> = new Map();
   audits.forEach(a => {
-    const date = formatDate(a.created_at);
+    const date = format(new Date(a.created_at), 'dd/MM/yyyy', { locale: fr });
     const normalized = normalizeAuditForRead(a.report_data, a.id, { url: project?.url ?? '', site_name: project?.site_name ?? 'Site' });
     (normalized?.axes ?? []).forEach((axis: any) => {
       const key = axis.id || axis.name;

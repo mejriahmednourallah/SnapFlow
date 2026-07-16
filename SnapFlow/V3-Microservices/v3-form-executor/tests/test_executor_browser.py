@@ -423,6 +423,37 @@ def test_executor_resolves_each_captcha_once(tmp_path, fixture_server, monkeypat
     asyncio.run(verify())
 
 
+def test_2captcha_zero_balance_is_solver_configuration_error(tmp_path, fixture_server, monkeypatch):
+    async def verify():
+        resolve = AsyncMock(
+            return_value=SolveResult(
+                success=False,
+                task_type="RecaptchaV2TaskProxyless",
+                error="2captcha_create_task_error:ERROR_ZERO_BALANCE",
+                provider_error_code="ERROR_ZERO_BALANCE",
+                provider_error_description="Account has zero balance",
+            )
+        )
+        monkeypatch.setattr("executor.resolve_captcha", resolve)
+        scenario = snapshot(
+            f"{fixture_server}/recaptcha-v2.html",
+            [node("trigger", "trigger", 0)],
+        )
+
+        outcome, storage = await run_scenario(tmp_path, scenario)
+
+        assert outcome.status == "error", (outcome, storage.steps)
+        assert outcome.failure_reason == (
+            "captcha_solver_unavailable:recaptcha_v2:"
+            "2captcha_create_task_error:ERROR_ZERO_BALANCE"
+        )
+        assert storage.steps[0]["status"] == "error"
+        assert storage.steps[0]["output"]["error_reason"] == outcome.failure_reason
+        assert storage.steps[0]["output"]["captcha_provider_error_code"] == "ERROR_ZERO_BALANCE"
+
+    asyncio.run(verify())
+
+
 def test_expected_captcha_block_is_a_successful_test_case(tmp_path, fixture_server):
     async def verify():
         scenario = ScenarioSnapshot(

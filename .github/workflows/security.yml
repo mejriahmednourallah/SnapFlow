@@ -41,6 +41,7 @@ env:
   PYTHON_VERSION: "3.11"
   GO_VERSION: "1.25.8"
   FAIL_ON_SEVERITY: ${{ github.event.inputs.fail_on_severity || 'HIGH,CRITICAL' }}
+  TRIVY_IMAGE: aquasec/trivy:0.72.0
 
 jobs:
   gitleaks:
@@ -161,12 +162,63 @@ jobs:
 
       - name: Run Trivy filesystem scan
         run: |
+          mkdir -p trivy-results
           docker run --rm \
             -v "${{ github.workspace }}:/repo" \
             -v "$HOME/.cache/trivy:/root/.cache" \
-            aquasec/trivy:latest fs \
+            "$TRIVY_IMAGE" fs \
+            --severity "$FAIL_ON_SEVERITY" \
+            --exit-code 0 \
+            --ignore-unfixed \
+            --scanners vuln,secret,misconfig \
+            --format table \
+            /repo
+          docker run --rm \
+            -v "${{ github.workspace }}:/repo" \
+            -v "$HOME/.cache/trivy:/root/.cache" \
+            "$TRIVY_IMAGE" fs \
+            --severity "$FAIL_ON_SEVERITY" \
+            --exit-code 0 \
+            --ignore-unfixed \
+            --scanners vuln,secret,misconfig \
+            --format sarif \
+            --output /repo/trivy-results/filesystem.sarif \
+            /repo
+          docker run --rm \
+            -v "${{ github.workspace }}:/repo" \
+            -v "$HOME/.cache/trivy:/root/.cache" \
+            "$TRIVY_IMAGE" fs \
             --severity "$FAIL_ON_SEVERITY" \
             --exit-code 1 \
             --ignore-unfixed \
             --scanners vuln,secret,misconfig \
+            --format json \
+            --output /repo/trivy-results/filesystem.json \
             /repo
+
+      - name: Trivy filesystem summary
+        if: always()
+        run: |
+          {
+            echo "## Trivy Filesystem"
+            echo
+            echo "| Target | CVE | Severity | Package | Installed | Fixed |"
+            echo "|---|---|---|---|---|---|"
+            if [ -s trivy-results/filesystem.json ]; then
+              jq -r '
+                [.Results[]? as $r | $r.Vulnerabilities[]? |
+                  ["`" + ($r.Target // "-") + "`", (.VulnerabilityID // "-"), (.Severity // "-"), (.PkgName // "-"), (.InstalledVersion // "-"), (.FixedVersion // "-")]
+                  | @tsv] | .[]
+              ' trivy-results/filesystem.json | while IFS=$'\t' read -r target cve sev pkg installed fixed; do
+                echo "| $target | $cve | $sev | $pkg | $installed | $fixed |"
+              done
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload Trivy filesystem artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-filesystem
+          path: trivy-results/
+          if-no-files-found: ignore

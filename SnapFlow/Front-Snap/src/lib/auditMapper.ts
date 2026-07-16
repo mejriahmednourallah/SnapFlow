@@ -947,35 +947,6 @@ function privacyTitleForFinding(finding: AuditFinding): string | undefined {
   return undefined;
 }
 
-function rgpdBusinessIssue(finding: AuditFinding): string {
-  const source = normalizeForComparison(`${finding.id} ${finding.sourceKpi ?? ''} ${finding.title}`);
-  if (source.includes('cookie') || source.includes('consent')) {
-    return 'Les visiteurs ne disposent pas d un choix clair avant le depot de cookies ou traceurs.';
-  }
-  if (source.includes('privacy_policy') || source.includes('policy_score') || source.includes('privacy_score')) {
-    return 'La page qui explique l utilisation des donnees personnelles est absente, difficile a trouver ou incomplete.';
-  }
-  if (source.includes('retention')) {
-    return 'La duree de conservation des donnees n est pas indiquee clairement aux visiteurs.';
-  }
-  if (source.includes('minimization')) {
-    return 'Le site peut demander plus de donnees que necessaire pour le service rendu.';
-  }
-  if (source.includes('legal_notice') || source.includes('mentions')) {
-    return 'Les informations legales permettant d identifier le responsable du site sont incompletes.';
-  }
-  if (source.includes('user_rights') || source.includes('rights_coverage')) {
-    return 'Les visiteurs ne voient pas clairement comment exercer leurs droits sur leurs donnees.';
-  }
-  if (source.includes('declared_purpose') || source.includes('purpose')) {
-    return 'La raison de collecte des donnees n est pas expliquee assez clairement.';
-  }
-  if (source.includes('tracker')) {
-    return 'Des traceurs semblent actifs avant que le visiteur ait donne son accord.';
-  }
-  return 'Une information attendue sur la protection des donnees est absente ou incomplete.';
-}
-
 function cleanFindingTitle(finding: AuditFinding): string {
   if (isServerVersionFinding(finding)) return 'Version serveur';
   if (isProgrammingLanguageFinding(finding)) return 'Version du langage de programmation';
@@ -1024,7 +995,7 @@ function fallbackImpactByFamily(finding: AuditFinding): string {
     case 'ai':
       return 'Le contenu peut etre moins facilement compris, extrait ou cite par les moteurs generatifs.';
     case 'rgpd':
-      return 'Le visiteur peut ne pas comprendre quelles donnees sont collectees, pourquoi, ni comment agir.';
+      return 'Les visiteurs peuvent manquer d informations claires sur l utilisation de leurs donnees.';
     case 'content':
       return 'Le message peut etre moins clair pour les visiteurs et moins convaincant pour passer a l action.';
     case 'ux':
@@ -1051,7 +1022,7 @@ function fallbackRiskByFamily(finding: AuditFinding): string {
     case 'ai':
       return 'Le risque est de limiter la presence du site dans les reponses generees par les assistants et moteurs IA.';
     case 'rgpd':
-      return 'Le risque est de creer une zone de doute pour le visiteur et de devoir corriger les informations publiees.';
+      return 'Le risque est de manquer de clarte sur l usage des donnees personnelles.';
     case 'content':
       return 'Le risque est de proposer un contenu moins convaincant ou incomplet.';
     case 'ux':
@@ -1087,7 +1058,7 @@ function fallbackRecommendationByFamily(finding: AuditFinding): string {
     case 'ai':
       return 'Rendre les contenus publics plus faciles a explorer et a comprendre par les moteurs generatifs.';
     case 'rgpd':
-      return 'Clarifier les informations visibles, expliquer les choix du visiteur et corriger les pages ou bandeaux concernes.';
+      return 'Rendre les informations de protection des donnees plus visibles et plus completes.';
     case 'content':
       return 'Completer le contenu, clarifier les appels a l action et supprimer les zones trop faibles.';
     case 'ux':
@@ -1178,7 +1149,7 @@ function fallbackIssueByFamily(finding: AuditFinding): string {
       return 'Un signal AI Friendly a ete mesure pour evaluer la facilite d exploration et de comprehension par les moteurs generatifs.';
     }
     case 'rgpd':
-      return rgpdBusinessIssue(finding);
+      return 'Une information attendue sur la protection des donnees est absente ou incomplete.';
     case 'content':
       return 'Une partie du contenu manque de clarte, de profondeur ou d action proposee.';
     case 'ux':

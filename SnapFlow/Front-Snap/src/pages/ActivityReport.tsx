@@ -14,9 +14,9 @@ import { TicketHistorySheet } from '@/components/activity/TicketHistorySheet';
 import { PdfExportModal } from '@/components/activity/pdf/PdfExportModal';
 import { PDF_THEMES } from '@/components/pdf/pdfStyles';
 import type { ActivityPdfOptions } from '@/components/activity/pdf/pdfTypes';
-import { formatDate, formatDateTime } from '@/lib/dateFormat';
-import { ACTIVITY_PDF_BRAND_DEFAULTS, fetchActivityPdfBrandDefaults } from '@/lib/appSettings';
-import { normalizeProjectPerimeterBlocks, hasProjectPerimeterBlocks, type ProjectPerimeterBlock } from '@/lib/projectPerimeters';
+import { format } from 'date-fns';
+import { fr } from 'date-fns/locale';
+import { formatDateTime } from '@/lib/dateFormat';
 
 import { useRedmineIssues } from '@/hooks/useRedmineIssues';
 
@@ -78,8 +78,8 @@ const ActivityReport = () => {
   const [showPdfAdvanced, setShowPdfAdvanced] = useState(false);
   const [selectedThemeId, setSelectedThemeId] = useState(PDF_THEMES[0]?.id || 'slate');
   const [pdfColor, setPdfColor] = useState(PDF_THEMES[0]?.primary || '#1E3A5F');
-  const [pdfBrandLeft, setPdfBrandLeft] = useState(ACTIVITY_PDF_BRAND_DEFAULTS.left);
-  const [pdfBrandRight, setPdfBrandRight] = useState(ACTIVITY_PDF_BRAND_DEFAULTS.right);
+  const [pdfBrandLeft, setPdfBrandLeft] = useState('MEDIANET RUN SERVICES');
+  const [pdfBrandRight, setPdfBrandRight] = useState('SNAPFLOW');
   const [pdfContactEmail, setPdfContactEmail] = useState('');
   const [pdfContactWeb, setPdfContactWeb] = useState('');
   const [pdfContactWeb2, setPdfContactWeb2] = useState('');
@@ -89,7 +89,6 @@ const ActivityReport = () => {
   const [activeView, setActiveView] = useState<'tickets' | 'saved' | 'compare' | 'dashboard'>('tickets');
   const [selectedForCompare, setSelectedForCompare] = useState<string[]>([]);
   const [historyIssueId, setHistoryIssueId] = useState<number | null>(null);
-  const [perimeterBlocks, setPerimeterBlocks] = useState<ProjectPerimeterBlock[]>([]);
 
   // Dashboard full-fetch state
   const [dashboardIssues, setDashboardIssues] = useState<RedmineIssue[]>([]);
@@ -103,19 +102,6 @@ const ActivityReport = () => {
   useEffect(() => {
     if (!loading && !user) navigate('/auth');
   }, [user, loading, navigate]);
-
-  useEffect(() => {
-    if (!user) return;
-    fetchActivityPdfBrandDefaults()
-      .then((defaults) => {
-        setPdfBrandLeft(defaults.left);
-        setPdfBrandRight(defaults.right);
-      })
-      .catch(() => {
-        setPdfBrandLeft(ACTIVITY_PDF_BRAND_DEFAULTS.left);
-        setPdfBrandRight(ACTIVITY_PDF_BRAND_DEFAULTS.right);
-      });
-  }, [user]);
 
   // Derive Redmine identifier from project URLs
   const redmineIdentifier = useRedmineIdentifier(project?.redmine_url || project?.url);
@@ -136,21 +122,15 @@ const ActivityReport = () => {
   useEffect(() => {
     if (!user || !projectId) return;
     const init = async () => {
-      const [projRes, filterOptions, reports, perimeterRes] = await Promise.all([
+      const [projRes, filterOptions, reports] = await Promise.all([
         supabase.from('projects').select('*').eq('id', projectId).single(),
         fetchIssueFilters(),
         fetchActivityReports(projectId),
-        supabase
-          .from('project_perimeter_blocks')
-          .select('*')
-          .eq('project_id', projectId)
-          .order('display_order', { ascending: true }),
       ]);
       setProject(projRes.data || null);
       setStatuses(filterOptions.statuses);
       setTrackers(filterOptions.trackers);
       setSavedReports(reports);
-      setPerimeterBlocks(normalizeProjectPerimeterBlocks(perimeterRes.data as Array<Record<string, unknown>> | null));
     };
     init();
   }, [user, projectId]);
@@ -268,41 +248,13 @@ const ActivityReport = () => {
 
   const doExportActivityPDF = async () => {
     if (!project || !redmineIdentifier) return;
-    const exportStartedAt = performance.now();
-    console.groupCollapsed(`[Activity PDF Export ${new Date().toISOString()}] start`);
-    console.log('context', {
-      project: {
-        id: project.id,
-        site_name: project.site_name,
-        url: project.url,
-        hasLogo: Boolean(project.logo_url),
-      },
-      redmineIdentifier,
-      currentPageIssueCount: issues.length,
-      cachedStatsIssueCount: allIssuesForStats.length,
-      totalCount,
-      filters,
-      selectedThemeId,
-      pdfSections,
-      coverKpis,
-      hasPerimeterBlocks: hasProjectPerimeterBlocks(perimeterBlocks),
-      perimeterBlockCount: perimeterBlocks.length,
-    });
     setIsExporting(true);
     try {
       const selectedTheme = PDF_THEMES.find(theme => theme.id === selectedThemeId) || PDF_THEMES[0];
       const currentKey = `${filters.status}|${filters.tracker}|${filters.dateFrom}|${filters.dateTo}`;
       let exportIssues = allIssuesForStats.length > 0 && statsFilterKey === currentKey ? allIssuesForStats : [];
       let exportTotalCount = exportIssues.length || totalCount;
-      console.log('issue source decision', {
-        currentKey,
-        statsFilterKey,
-        usingCachedStats: exportIssues.length > 0,
-        exportIssueCountBeforeFetch: exportIssues.length,
-        exportTotalCountBeforeFetch: exportTotalCount,
-      });
       if (exportIssues.length === 0) {
-        console.time('[Activity PDF Export] fetch all issues');
         const result = await fetchAllIssuesPaginated({
           projectIdentifier: redmineIdentifier,
           statusId: filters.status || undefined,
@@ -311,12 +263,6 @@ const ActivityReport = () => {
           dateTo: filters.dateTo || undefined,
           limit: 500,
           offset: 0,
-        });
-        console.timeEnd('[Activity PDF Export] fetch all issues');
-        console.log('fetch all issues result', {
-          issues: result.issues.length,
-          totalCount: result.totalCount,
-          sampleIds: result.issues.slice(0, 10).map(issue => issue.id),
         });
         exportIssues = result.issues;
         exportTotalCount = result.totalCount || result.issues.length;
@@ -332,10 +278,7 @@ const ActivityReport = () => {
         theme: selectedTheme,
         themeId: selectedTheme.id,
         pdfColor,
-        sections: {
-          ...pdfSections,
-          perimetre: pdfSections.perimetre !== false && hasProjectPerimeterBlocks(perimeterBlocks),
-        },
+        sections: pdfSections,
         coverKpis,
         brandLeft: pdfBrandLeft,
         brandRight: pdfBrandRight,
@@ -343,20 +286,6 @@ const ActivityReport = () => {
         contactWeb: pdfContactWeb,
         contactWeb2: pdfContactWeb2,
       };
-      console.log('calling generateActivityPdf', {
-        exportIssueCount: exportIssues.length,
-        exportTotalCount,
-        selectedTheme: selectedTheme.id,
-        options,
-        filtersForPdf: {
-          status: filters.status,
-          tracker: filters.tracker,
-          dateFrom: filters.dateFrom,
-          dateTo: filters.dateTo,
-          statusLabel: filters.status ? statuses.find(s => String(s.id) === filters.status)?.name || filters.status : undefined,
-          trackerLabel: filters.tracker ? trackers.find(t => String(t.id) === filters.tracker)?.name || filters.tracker : undefined,
-        },
-      });
       await generateActivityPdf({
         project,
         issues: exportIssues,
@@ -370,28 +299,12 @@ const ActivityReport = () => {
           trackerLabel: filters.tracker ? trackers.find(t => String(t.id) === filters.tracker)?.name || filters.tracker : undefined,
         },
         options,
-        perimeterBlocks,
       });
       setPdfModalOpen(false);
       toast({ title: 'PDF telecharge', description: `${exportIssues.length} tickets exportes.` });
     } catch (err) {
-      console.error('[Activity PDF Export] failed', err);
-      if (err instanceof Error) {
-        console.error('[Activity PDF Export] error details', {
-          name: err.name,
-          message: err.message,
-          stack: err.stack,
-          cause: (err as Error & { cause?: unknown }).cause,
-        });
-      }
-      toast({
-        title: 'Erreur',
-        description: err instanceof Error && err.message ? `Impossible d'exporter le PDF: ${err.message}` : "Impossible d'exporter le PDF.",
-        variant: 'destructive',
-      });
+      toast({ title: 'Erreur', description: "Impossible d'exporter le PDF.", variant: 'destructive' });
     } finally {
-      console.log('durationMs', Math.round(performance.now() - exportStartedAt));
-      console.groupEnd();
       setIsExporting(false);
     }
   };
@@ -448,7 +361,6 @@ const ActivityReport = () => {
         setPdfContactWeb2={setPdfContactWeb2}
         isExporting={isExporting}
         doExportPDF={doExportActivityPDF}
-        hasPerimeterBlocks={hasProjectPerimeterBlocks(perimeterBlocks)}
       />
       {/* View toggle */}
       <div className="flex items-center gap-2 sm:gap-4 overflow-x-auto pb-1">
@@ -645,7 +557,7 @@ const ActivityReport = () => {
                           </div>
                         </td>
                         <td className="p-3 text-center text-xs text-muted-foreground">
-                          {formatDate(issue.created_on)}
+                          {format(new Date(issue.created_on), 'dd/MM/yyyy')}
                         </td>
                       </tr>
                     ))}
@@ -694,7 +606,7 @@ const ActivityReport = () => {
                         <td className="p-3 text-center text-xs">{issue.priority.name}</td>
                         <td className="p-3 text-sm">{issue.assigned_to?.name || '—'}</td>
                         <td className="p-3 text-center text-xs text-muted-foreground">
-                          {formatDate(issue.created_on)}
+                          {format(new Date(issue.created_on), 'dd/MM/yyyy')}
                         </td>
                       </tr>
                     ))}
@@ -784,7 +696,7 @@ const ActivityReport = () => {
                         </span>
                         {report.archived_at && (
                           <span className="text-xs bg-muted text-muted-foreground px-2 py-0.5 rounded-full">
-                            Archivé le {formatDateTime(report.archived_at)}
+                            Archivé le {format(new Date(report.archived_at), 'dd/MM/yyyy HH:mm')}
                           </span>
                         )}
                       </div>
@@ -845,7 +757,7 @@ const ActivityComparisonView = ({ reports }: { reports: SavedActivityReport[] })
       const name = i.status?.name || 'Inconnu';
       counts[name] = (counts[name] || 0) + 1;
     });
-    return { date: formatDate(r.created_at), ticketCount: r.ticket_count || 0, counts };
+    return { date: format(new Date(r.created_at), 'dd/MM/yyyy', { locale: fr }), ticketCount: r.ticket_count || 0, counts };
   });
 
   const allStatuses = Array.from(new Set(statusBreakdowns.flatMap(s => Object.keys(s.counts))));
@@ -857,7 +769,7 @@ const ActivityComparisonView = ({ reports }: { reports: SavedActivityReport[] })
       const name = i.tracker?.name || 'Inconnu';
       counts[name] = (counts[name] || 0) + 1;
     });
-    return { date: formatDate(r.created_at), counts };
+    return { date: format(new Date(r.created_at), 'dd/MM/yyyy', { locale: fr }), counts };
   });
 
   const allTrackers = Array.from(new Set(trackerBreakdowns.flatMap(t => Object.keys(t.counts))));

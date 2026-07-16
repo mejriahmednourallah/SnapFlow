@@ -8,8 +8,8 @@ import {
   CalendarClock, Plus, Trash2, Pause, Play, Filter, List, CalendarDays,
 } from 'lucide-react';
 import { format, addDays, addWeeks, addMonths, startOfWeek, setDay } from 'date-fns';
-import { formatDate, formatDateTime } from '@/lib/dateFormat';
-import { pickMysteryVisitRunAt } from '@/lib/mysteryVisitScheduling';
+import { fr } from 'date-fns/locale';
+import { formatDate } from '@/lib/dateFormat';
 import ScheduleCalendarView from '@/components/schedules/ScheduleCalendarView';
 import type { CalendarSchedule } from '@/components/schedules/ScheduleCalendarView';
 import { formTesterApi } from '@/lib/form-tester/api';
@@ -25,12 +25,6 @@ interface Schedule {
   day_of_month: number | null;
   next_run_at: string;
   last_run_at: string | null;
-  executed_at?: string | null;
-  mystery_window_start?: string | null;
-  mystery_window_end?: string | null;
-  mystery_allowed_start_hour?: number | null;
-  mystery_allowed_end_hour?: number | null;
-  mystery_randomized_run_at?: string | null;
   is_active: boolean;
   created_at: string;
   start_date: string;
@@ -50,18 +44,11 @@ interface Profile {
 }
 
 const FREQ_LABELS: Record<string, string> = {
-  once: 'Une fois',
   daily: 'Quotidien',
   weekly: 'Hebdomadaire',
   biweekly: 'Bi-hebdomadaire',
   monthly: 'Mensuel',
 };
-
-const reportTypeLabel = (type: string) =>
-  type === 'audit' ? 'Audit' : type === 'mystery_visit' ? 'Visite mystere' : 'Activite';
-
-const reportTypeDotClass = (type: string) =>
-  type === 'audit' ? 'bg-primary' : type === 'mystery_visit' ? 'bg-amber-500' : 'bg-emerald-500';
 
 const DAYS = ['Dimanche', 'Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi'];
 
@@ -115,15 +102,12 @@ const ReportSchedules = () => {
   const [showAdd, setShowAdd] = useState(false);
   const [viewMode, setViewMode] = useState<'list' | 'calendar'>('list');
   const [newProjectId, setNewProjectId] = useState('');
-  const [newType, setNewType] = useState<'audit' | 'activity' | 'mystery_visit'>('audit');
+  const [newType, setNewType] = useState<'audit' | 'activity'>('audit');
   const [newFreq, setNewFreq] = useState<'daily' | 'weekly' | 'biweekly' | 'monthly'>('weekly');
   const [newDayOfWeek, setNewDayOfWeek] = useState(1);
   const [newDayOfMonth, setNewDayOfMonth] = useState(1);
   const [newStartDate, setNewStartDate] = useState(format(new Date(), "yyyy-MM-dd'T'HH:mm"));
   const [newEndDate, setNewEndDate] = useState('');
-  const [mysteryWindowEnd, setMysteryWindowEnd] = useState(format(new Date(), "yyyy-MM-dd'T'HH:mm"));
-  const [mysteryStartHour, setMysteryStartHour] = useState(9);
-  const [mysteryEndHour, setMysteryEndHour] = useState(18);
   const [adding, setAdding] = useState(false);
 
   const fetchData = async () => {
@@ -172,12 +156,12 @@ const ReportSchedules = () => {
     return Array.from(map.entries()).sort((a, b) => a[0].localeCompare(b[0])).slice(0, 30);
   }, [filteredSchedules]);
 
-  const getProjectName = (id: string) => projects.find(p => p.id === id)?.site_name ?? '-';
+  const getProjectName = (id: string) => projects.find(p => p.id === id)?.site_name ?? '—';
   const calendarSchedules = useMemo<CalendarSchedule[]>(() => [
     ...filteredSchedules.map((schedule) => ({
       id: schedule.id,
       title: getProjectName(schedule.project_id),
-      kind: schedule.report_type === 'mystery_visit' ? 'mystery_visit' as const : schedule.report_type === 'audit' ? 'audit' as const : 'activity' as const,
+      kind: schedule.report_type === 'audit' ? 'audit' as const : 'activity' as const,
       frequency: schedule.frequency,
       next_run_at: schedule.next_run_at,
       is_active: schedule.is_active,
@@ -196,7 +180,7 @@ const ReportSchedules = () => {
 
   const getProfileName = (id: string) => {
     const p = profiles.find(p => p.id === id);
-    return p ? (p.full_name || p.email) : '-';
+    return p ? (p.full_name || p.email) : '—';
   };
 
   const chargeProfiles = useMemo(() => {
@@ -209,16 +193,7 @@ const ReportSchedules = () => {
     if (!user || !newProjectId) return;
     setAdding(true);
     try {
-      const isMysteryVisit = newType === 'mystery_visit';
-      const mysteryRunAt = isMysteryVisit
-        ? pickMysteryVisitRunAt({
-            windowStart: new Date(newStartDate).toISOString(),
-            windowEnd: new Date(mysteryWindowEnd || newStartDate).toISOString(),
-            allowedStartHour: mysteryStartHour,
-            allowedEndHour: mysteryEndHour,
-          }, schedules.filter((schedule) => schedule.project_id === newProjectId).map((schedule) => schedule.next_run_at))
-        : null;
-      const nextRun = mysteryRunAt ?? computeNextRun(
+      const nextRun = computeNextRun(
         newFreq,
         newStartDate,
         newFreq === 'weekly' || newFreq === 'biweekly' ? newDayOfWeek : null,
@@ -228,17 +203,12 @@ const ReportSchedules = () => {
         project_id: newProjectId,
         created_by: user.id,
         report_type: newType,
-        frequency: isMysteryVisit ? 'once' : newFreq,
-        day_of_week: !isMysteryVisit && (newFreq === 'weekly' || newFreq === 'biweekly') ? newDayOfWeek : null,
-        day_of_month: !isMysteryVisit && newFreq === 'monthly' ? newDayOfMonth : null,
+        frequency: newFreq,
+        day_of_week: newFreq === 'weekly' || newFreq === 'biweekly' ? newDayOfWeek : null,
+        day_of_month: newFreq === 'monthly' ? newDayOfMonth : null,
         next_run_at: nextRun,
         start_date: new Date(newStartDate).toISOString(),
-        end_date: isMysteryVisit ? new Date(mysteryWindowEnd || newStartDate).toISOString() : (newEndDate ? new Date(newEndDate).toISOString() : null),
-        mystery_window_start: isMysteryVisit ? new Date(newStartDate).toISOString() : null,
-        mystery_window_end: isMysteryVisit ? new Date(mysteryWindowEnd || newStartDate).toISOString() : null,
-        mystery_allowed_start_hour: isMysteryVisit ? mysteryStartHour : null,
-        mystery_allowed_end_hour: isMysteryVisit ? mysteryEndHour : null,
-        mystery_randomized_run_at: mysteryRunAt,
+        end_date: newEndDate ? new Date(newEndDate).toISOString() : null,
       } as any);
       if (error) throw error;
       toast({ title: 'Planification créée' });
@@ -281,7 +251,7 @@ const ReportSchedules = () => {
         .eq('id', id);
       if (error) throw error;
 
-      toast({ title: 'Lancement en cours...', description: 'Exécution du rapport planifié.' });
+      toast({ title: 'Lancement en cours…', description: 'Exécution du rapport planifié.' });
 
       // Step 2: Actually invoke the Edge Function to process due schedules
       const { error: execError } = await supabase.functions.invoke('execute-scheduled-reports');
@@ -377,7 +347,7 @@ const ReportSchedules = () => {
             <div>
               <label className="text-xs text-muted-foreground mb-1 block">Projet</label>
               <select value={newProjectId} onChange={e => setNewProjectId(e.target.value)} className="w-full h-10 text-sm bg-secondary border border-border rounded-md px-3 text-foreground" required>
-                <option value="">- Sélectionner -</option>
+                <option value="">— Sélectionner —</option>
                 {availableProjects.map(p => <option key={p.id} value={p.id}>{p.site_name}</option>)}
               </select>
             </div>
@@ -386,12 +356,10 @@ const ReportSchedules = () => {
               <select value={newType} onChange={e => setNewType(e.target.value as any)} className="w-full h-10 text-sm bg-secondary border border-border rounded-md px-3 text-foreground">
                 <option value="audit">Audit</option>
                 <option value="activity">Activité (Redmine)</option>
-                <option value="mystery_visit">Visite mystere</option>
               </select>
             </div>
-            {newType !== 'mystery_visit' && (
             <div>
-              <label className="text-xs text-muted-foreground mb-1 block">Frequence</label>
+              <label className="text-xs text-muted-foreground mb-1 block">Fréquence</label>
               <select value={newFreq} onChange={e => setNewFreq(e.target.value as any)} className="w-full h-10 text-sm bg-secondary border border-border rounded-md px-3 text-foreground">
                 <option value="daily">Quotidien</option>
                 <option value="weekly">Hebdomadaire</option>
@@ -399,8 +367,7 @@ const ReportSchedules = () => {
                 <option value="monthly">Mensuel</option>
               </select>
             </div>
-            )}
-            {newType !== 'mystery_visit' && (newFreq === 'weekly' || newFreq === 'biweekly') && (
+            {(newFreq === 'weekly' || newFreq === 'biweekly') && (
               <div>
                 <label className="text-xs text-muted-foreground mb-1 block">Jour</label>
                 <select value={newDayOfWeek} onChange={e => setNewDayOfWeek(parseInt(e.target.value))} className="w-full h-10 text-sm bg-secondary border border-border rounded-md px-3 text-foreground">
@@ -408,41 +375,24 @@ const ReportSchedules = () => {
                 </select>
               </div>
             )}
-            {newType !== 'mystery_visit' && newFreq === 'monthly' && (
+            {newFreq === 'monthly' && (
               <div>
                 <label className="text-xs text-muted-foreground mb-1 block">Jour du mois</label>
                 <Input type="number" min={1} max={28} value={newDayOfMonth} onChange={e => setNewDayOfMonth(parseInt(e.target.value))} className="h-10" />
               </div>
             )}
             <div>
-              <label className="text-xs text-muted-foreground mb-1 block">Date et heure de debut</label>
+              <label className="text-xs text-muted-foreground mb-1 block">Date et heure de début</label>
               <Input type="datetime-local" value={newStartDate} onChange={e => setNewStartDate(e.target.value)} className="h-10" required />
             </div>
-            {newType === 'mystery_visit' ? (
-              <>
-                <div>
-                  <label className="text-xs text-muted-foreground mb-1 block">Fin de fenetre</label>
-                  <Input type="datetime-local" value={mysteryWindowEnd} onChange={e => setMysteryWindowEnd(e.target.value)} className="h-10" min={newStartDate} required />
-                </div>
-                <div>
-                  <label className="text-xs text-muted-foreground mb-1 block">Heure debut autorisee</label>
-                  <Input type="number" min={0} max={23} value={mysteryStartHour} onChange={e => setMysteryStartHour(parseInt(e.target.value || '0', 10))} className="h-10" />
-                </div>
-                <div>
-                  <label className="text-xs text-muted-foreground mb-1 block">Heure fin autorisee</label>
-                  <Input type="number" min={1} max={24} value={mysteryEndHour} onChange={e => setMysteryEndHour(parseInt(e.target.value || '1', 10))} className="h-10" />
-                </div>
-              </>
-            ) : (
-              <div>
+            <div>
               <label className="text-xs text-muted-foreground mb-1 block">Date et heure de fin <span className="text-muted-foreground">(optionnel)</span></label>
               <Input type="datetime-local" value={newEndDate} onChange={e => setNewEndDate(e.target.value)} className="h-10" min={newStartDate} />
-              </div>
-            )}
+            </div>
           </div>
           <div className="flex justify-end gap-2">
             <Button variant="outline" type="button" onClick={() => setShowAdd(false)}>Annuler</Button>
-            <Button type="submit" disabled={adding}>{adding ? 'Création...' : 'Créer'}</Button>
+            <Button type="submit" disabled={adding}>{adding ? 'Création…' : 'Créer'}</Button>
           </div>
         </form>
       )}
@@ -471,9 +421,9 @@ const ReportSchedules = () => {
                     <div className="space-y-1">
                       {items.map(s => (
                         <div key={s.id} className="text-xs flex items-center gap-2">
-                          <span className={`inline-block w-2 h-2 rounded-full ${reportTypeDotClass(s.report_type)}`} />
+                          <span className={`inline-block w-2 h-2 rounded-full ${s.report_type === 'audit' ? 'bg-primary' : 'bg-emerald-500'}`} />
                           <span className="font-medium truncate">{getProjectName(s.project_id)}</span>
-                          <span className="text-muted-foreground">{reportTypeLabel(s.report_type)}</span>
+                          <span className="text-muted-foreground">{s.report_type === 'audit' ? 'Audit' : 'Activité'}</span>
                         </div>
                       ))}
                     </div>
@@ -486,7 +436,7 @@ const ReportSchedules = () => {
           {/* List */}
           <div className="space-y-2">
             {loadingData ? (
-              <div className="glass-card p-8 text-center text-muted-foreground">Chargement...</div>
+              <div className="glass-card p-8 text-center text-muted-foreground">Chargement…</div>
             ) : filteredSchedules.length === 0 ? (
               <div className="glass-card p-8 text-center text-muted-foreground">
                 Aucune planification. Cliquez sur "Nouvelle planification" pour en créer une.
@@ -494,11 +444,11 @@ const ReportSchedules = () => {
             ) : (
               filteredSchedules.map(s => (
                 <div key={s.id} className={`glass-card p-4 flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4 ${!s.is_active ? 'opacity-50' : ''}`}>
-                  <div className={`w-3 h-3 rounded-full flex-shrink-0 ${reportTypeDotClass(s.report_type)}`} />
+                  <div className={`w-3 h-3 rounded-full flex-shrink-0 ${s.report_type === 'audit' ? 'bg-primary' : 'bg-emerald-500'}`} />
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="font-medium text-sm">{getProjectName(s.project_id)}</span>
-                      <span className="text-xs bg-muted px-2 py-0.5 rounded-full">{reportTypeLabel(s.report_type)}</span>
+                      <span className="text-xs bg-muted px-2 py-0.5 rounded-full">{s.report_type === 'audit' ? 'Audit' : 'Activité'}</span>
                       <span className="text-xs bg-primary/10 text-primary px-2 py-0.5 rounded-full">{FREQ_LABELS[s.frequency]}</span>
                       {(s.frequency === 'weekly' || s.frequency === 'biweekly') && s.day_of_week !== null && (
                         <span className="text-xs text-muted-foreground">le {DAYS[s.day_of_week]}</span>
@@ -508,10 +458,10 @@ const ReportSchedules = () => {
                       )}
                     </div>
                     <div className="flex items-center gap-4 mt-1 text-xs text-muted-foreground flex-wrap">
-                      <span>Du <strong className="text-foreground">{formatDateTime(s.start_date)}</strong></span>
-                      <span>{s.end_date ? `au ${formatDateTime(s.end_date)}` : 'Sans fin'}</span>
-                      <span>Prochaine : <strong className="text-foreground">{formatDateTime(s.next_run_at)}</strong></span>
-                      {s.last_run_at && <span>Dernière : {formatDateTime(s.last_run_at)}</span>}
+                      <span>Du <strong className="text-foreground">{format(new Date(s.start_date), 'dd/MM/yyyy HH:mm')}</strong></span>
+                      <span>{s.end_date ? `au ${format(new Date(s.end_date), 'dd/MM/yyyy HH:mm')}` : '∞ Sans fin'}</span>
+                      <span>Prochaine : <strong className="text-foreground">{format(new Date(s.next_run_at), 'dd/MM/yyyy HH:mm')}</strong></span>
+                      {s.last_run_at && <span>Dernière : {format(new Date(s.last_run_at), 'dd/MM/yyyy HH:mm')}</span>}
                       {isAdmin && <span>Par : {getProfileName(s.created_by)}</span>}
                     </div>
                   </div>

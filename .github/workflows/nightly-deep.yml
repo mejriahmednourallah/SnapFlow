@@ -26,6 +26,7 @@ env:
   SERVICES_DIR: SnapFlow/V3-Microservices
   VITE_SUPABASE_URL: ${{ secrets.SNAPFLOW_SUPABASE_URL }}
   VITE_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.SNAPFLOW_SUPABASE_PUBLISHABLE_KEY }}
+  TRIVY_IMAGE: aquasec/trivy:0.72.0
 
 jobs:
   full-frontend:
@@ -137,7 +138,7 @@ jobs:
         run: docker build --progress=plain -f "${{ matrix.dockerfile }}" -t "${{ matrix.tag }}" "${{ matrix.context }}"
       - name: Trivy image scan
         run: |
-          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$HOME/.cache/trivy:/root/.cache" aquasec/trivy:latest image \
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$HOME/.cache/trivy:/root/.cache" "$TRIVY_IMAGE" image \
             --severity HIGH,CRITICAL \
             --exit-code 1 \
             --ignore-unfixed \

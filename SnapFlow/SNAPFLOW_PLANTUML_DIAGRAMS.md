@@ -367,132 +367,85 @@ Profile "1" --> "many" Notification
 
 ```plantuml
 @startuml SnapFlow_Use_Case_Diagram
-title SnapFlow - Use Case Diagram
+title SnapFlow - Use Case Diagram (Users, Reports, Clients)
 
 left to right direction
 skinparam shadowing false
 skinparam packageStyle rectangle
 skinparam linetype ortho
 
-actor "Super Admin" as SuperAdmin
-actor "Chargé de projet" as ProjectManager
-actor "Client externe" as ExternalClient
-actor "Form Executor Worker" as FormWorker
-actor "NLP Worker" as NlpWorkerActor
-actor "Scanner Service" as ScannerActor
-actor "Visual Regression Service" as VisualActor
+actor "Administrateur" as Admin
+actor "Rapporteur\nCharge de projet" as Reporter
+actor "Client externe" as Client
 actor "Redmine" as Redmine
-actor "AI Provider\nGemini / OpenAI-compatible" as AIProvider
 
-rectangle "SnapFlow SaaS Platform" {
+rectangle "SnapFlow" {
   usecase "Se connecter" as UC_Login
-  usecase "Gérer les utilisateurs\net rôles" as UC_Users
-  usecase "Gérer les projets" as UC_Projects
-  usecase "Configurer le branding PDF" as UC_Branding
-  usecase "Configurer le périmètre projet" as UC_Perimeter
+  usecase "Gerer les utilisateurs\net les roles" as UC_Users
+  usecase "Gerer les projets clients" as UC_Projects
+  usecase "Configurer le branding\net le perimetre" as UC_ProjectSetup
 
-  usecase "Lancer un audit site web" as UC_StartAudit
-  usecase "Suivre le statut d'audit" as UC_PollAudit
-  usecase "Consulter le rapport d'audit" as UC_ViewAudit
-  usecase "Exporter le rapport d'audit PDF" as UC_AuditPdf
-  usecase "Éditer les constats" as UC_EditFindings
-  usecase "Créer des tickets Redmine" as UC_CreateRedmineTickets
+  usecase "Lancer un audit\nde site web" as UC_StartAudit
+  usecase "Suivre la generation\ndu rapport d'audit" as UC_TrackAudit
+  usecase "Consulter le rapport\nd'audit" as UC_ViewAudit
+  usecase "Exporter le rapport\nd'audit PDF" as UC_AuditPdf
+  usecase "Creer des tickets\ndepuis les constats" as UC_CreateRedmineTickets
 
-  usecase "Collecter pages et métriques" as UC_Crawl
-  usecase "Analyser sécurité / SEO /\nperformance / RGPD" as UC_Analyze
-  usecase "Enrichir contenu par NLP" as UC_Nlp
-  usecase "Construire KPIs canoniques" as UC_Kpis
-  usecase "Générer recommandations\net roadmap" as UC_Recommendations
-  usecase "Comparer visuellement les pages" as UC_VisualCompare
+  usecase "Actualiser les tickets\nRedmine" as UC_LoadRedmine
+  usecase "Filtrer les tickets\npar periode, statut, type" as UC_FilterTickets
+  usecase "Preparer le rapport\nd'activite" as UC_PrepareActivity
+  usecase "Verifier les indicateurs\net details tickets" as UC_ReviewActivity
+  usecase "Exporter le rapport\nd'activite PDF" as UC_ActivityPdf
+  usecase "Sauvegarder un snapshot\nd'activite" as UC_Snapshot
 
-  usecase "Consulter le tableau d'activité" as UC_ActivityDashboard
-  usecase "Filtrer les tickets Redmine" as UC_FilterRedmine
-  usecase "Exporter le rapport d'activité PDF" as UC_ActivityPdf
-  usecase "Sauvegarder un snapshot\nd'activité" as UC_Snapshot
-
-  usecase "Découvrir les formulaires" as UC_DiscoverForms
-  usecase "Créer un workflow de test" as UC_CreateWorkflow
-  usecase "Éditer un workflow visuel" as UC_EditWorkflow
-  usecase "Connecter des noeuds" as UC_ConnectNodes
-  usecase "Demander une édition IA" as UC_AiEdit
-  usecase "Prévisualiser et appliquer\nun patch IA" as UC_ApplyPatch
-  usecase "Préparer une campagne" as UC_PrepareCampaign
-  usecase "Exécuter un scénario" as UC_RunScenario
-  usecase "Consulter les résultats\nde tests formulaire" as UC_FormResults
-
+  usecase "Partager un rapport\nau client" as UC_ShareReport
+  usecase "Consulter un rapport\npartage" as UC_ClientView
+  usecase "Telecharger le PDF" as UC_ClientDownload
   usecase "Recevoir notifications" as UC_Notifications
 }
 
-SuperAdmin --> UC_Login
-SuperAdmin --> UC_Users
-SuperAdmin --> UC_Projects
-SuperAdmin --> UC_Branding
-SuperAdmin --> UC_Perimeter
-SuperAdmin --> UC_StartAudit
-SuperAdmin --> UC_ViewAudit
-SuperAdmin --> UC_AuditPdf
-SuperAdmin --> UC_EditFindings
-SuperAdmin --> UC_CreateRedmineTickets
-SuperAdmin --> UC_ActivityDashboard
-SuperAdmin --> UC_ActivityPdf
-SuperAdmin --> UC_CreateWorkflow
-SuperAdmin --> UC_EditWorkflow
-SuperAdmin --> UC_AiEdit
-SuperAdmin --> UC_PrepareCampaign
-SuperAdmin --> UC_RunScenario
-SuperAdmin --> UC_FormResults
-SuperAdmin --> UC_Notifications
+Admin --> UC_Login
+Admin --> UC_Users
+Admin --> UC_Projects
+Admin --> UC_ProjectSetup
+Admin --> UC_Notifications
 
-ProjectManager --> UC_Login
-ProjectManager --> UC_Projects
-ProjectManager --> UC_StartAudit
-ProjectManager --> UC_PollAudit
-ProjectManager --> UC_ViewAudit
-ProjectManager --> UC_AuditPdf
-ProjectManager --> UC_CreateRedmineTickets
-ProjectManager --> UC_ActivityDashboard
-ProjectManager --> UC_FilterRedmine
-ProjectManager --> UC_ActivityPdf
-ProjectManager --> UC_Snapshot
-ProjectManager --> UC_DiscoverForms
-ProjectManager --> UC_CreateWorkflow
-ProjectManager --> UC_EditWorkflow
-ProjectManager --> UC_ConnectNodes
-ProjectManager --> UC_PrepareCampaign
-ProjectManager --> UC_RunScenario
-ProjectManager --> UC_FormResults
-ProjectManager --> UC_Notifications
+Reporter --> UC_Login
+Reporter --> UC_Projects
+Reporter --> UC_ProjectSetup
+Reporter --> UC_StartAudit
+Reporter --> UC_TrackAudit
+Reporter --> UC_ViewAudit
+Reporter --> UC_AuditPdf
+Reporter --> UC_CreateRedmineTickets
+Reporter --> UC_LoadRedmine
+Reporter --> UC_FilterTickets
+Reporter --> UC_PrepareActivity
+Reporter --> UC_ReviewActivity
+Reporter --> UC_ActivityPdf
+Reporter --> UC_Snapshot
+Reporter --> UC_ShareReport
+Reporter --> UC_Notifications
 
-ExternalClient --> UC_ViewAudit
-ExternalClient --> UC_AuditPdf
+Client --> UC_ClientView
+Client --> UC_ClientDownload
 
-UC_StartAudit --> UC_Crawl : <<include>>
-UC_StartAudit --> UC_Analyze : <<include>>
-UC_StartAudit --> UC_Nlp : <<include>>
-UC_StartAudit --> UC_Kpis : <<include>>
-UC_ViewAudit --> UC_Recommendations : <<include>>
+UC_StartAudit --> UC_TrackAudit : <<include>>
 UC_AuditPdf --> UC_ViewAudit : <<include>>
+UC_CreateRedmineTickets --> UC_ViewAudit : <<include>>
 UC_CreateRedmineTickets --> Redmine
 
-ScannerActor --> UC_Crawl
-ScannerActor --> UC_Analyze
-NlpWorkerActor --> UC_Nlp
-VisualActor --> UC_VisualCompare
-UC_Kpis --> UC_VisualCompare : <<extend>>
+UC_PrepareActivity --> UC_LoadRedmine : <<include>>
+UC_PrepareActivity --> UC_FilterTickets : <<include>>
+UC_PrepareActivity --> UC_ReviewActivity : <<include>>
+UC_ActivityPdf --> UC_PrepareActivity : <<include>>
+UC_Snapshot --> UC_PrepareActivity : <<include>>
+UC_LoadRedmine --> Redmine
 
-UC_ActivityDashboard --> UC_FilterRedmine : <<include>>
-UC_ActivityPdf --> UC_FilterRedmine : <<include>>
-UC_FilterRedmine --> Redmine
-UC_Snapshot --> UC_ActivityDashboard : <<include>>
-
-UC_CreateWorkflow --> UC_DiscoverForms : <<include>>
-UC_EditWorkflow --> UC_ConnectNodes : <<include>>
-UC_AiEdit --> AIProvider
-UC_AiEdit --> UC_ApplyPatch : <<include>>
-UC_PrepareCampaign --> UC_CreateWorkflow : <<include>>
-UC_RunScenario --> UC_CreateWorkflow : <<include>>
-FormWorker --> UC_RunScenario
-UC_FormResults --> UC_RunScenario : <<include>>
+UC_ShareReport --> UC_AuditPdf : <<extend>>
+UC_ShareReport --> UC_ActivityPdf : <<extend>>
+UC_ClientView --> UC_ShareReport : <<include>>
+UC_ClientDownload --> UC_ClientView : <<extend>>
 
 @enduml
 ```

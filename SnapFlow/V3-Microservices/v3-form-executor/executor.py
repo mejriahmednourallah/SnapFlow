@@ -36,6 +36,15 @@ class GraphValidationError(RuntimeError):
 
 EDGE_BRANCH_KEYS = {"default", "success", "failure", "true", "false"}
 
+CAPTCHA_PROVIDER_CONFIGURATION_ERRORS = frozenset(
+    {
+        "ERROR_ZERO_BALANCE",
+        "ERROR_KEY_DOES_NOT_EXIST",
+        "ERROR_IP_NOT_ALLOWED",
+        "ERROR_ACCOUNT_SUSPENDED",
+    }
+)
+
 
 def _baseline_signature(submission: dict[str, Any] | None) -> dict[str, Any]:
     observation = submission or {}
@@ -96,6 +105,12 @@ def _submission_observation_summary(
             "rejection_messages": (semantic.get("rejection_messages") or [])[:8],
         },
     }
+
+
+def _captcha_failure_status(captcha_error_code: str | None) -> str:
+    if captcha_error_code in CAPTCHA_PROVIDER_CONFIGURATION_ERRORS:
+        return "error"
+    return "blocked"
 
 
 @dataclass
@@ -810,12 +825,20 @@ class FormExecutor:
                                     }
                                 )
                             else:
+                                failure_status = _captcha_failure_status(
+                                    captcha_result.provider_error_code
+                                )
+                                failure_kind = (
+                                    "captcha_solver_unavailable"
+                                    if failure_status == "error"
+                                    else "captcha_unsolvable"
+                                )
                                 reason = (
-                                    f"captcha_unsolvable:{captcha_info.captcha_type}:"
+                                    f"{failure_kind}:{captcha_info.captcha_type}:"
                                     f"{captcha_result.error or 'unknown'}"
                                 )
                                 outcome = StepOutcome(
-                                    status="blocked",
+                                    status=failure_status,
                                     output={
                                         "challenge_type": "captcha",
                                         "captcha_type": captcha_info.captcha_type,
@@ -823,11 +846,16 @@ class FormExecutor:
                                         "captcha_solve_attempted": (
                                             captcha_result.error != "no_captcha_api_key_configured"
                                         ),
-                                        "blocked_reason": reason,
+                                        "blocked_reason": reason if failure_status == "blocked" else None,
+                                        "error_reason": reason if failure_status == "error" else None,
                                         **provider_details,
                                     },
                                     error_code=reason,
-                                    error_message=f"Execution blocked by CAPTCHA: {reason}",
+                                    error_message=(
+                                        f"CAPTCHA solver unavailable: {reason}"
+                                        if failure_status == "error"
+                                        else f"Execution blocked by CAPTCHA: {reason}"
+                                    ),
                                     captcha_detected=True,
                                     captcha_type=captcha_info.captcha_type,
                                     captcha_solved=False,

@@ -41,6 +41,7 @@ permissions:
 
 env:
   FAIL_ON_SEVERITY: HIGH,CRITICAL
+  TRIVY_IMAGE: aquasec/trivy:0.72.0
 
 jobs:
   detect-changes:
@@ -119,11 +120,63 @@ jobs:
 
       - name: Trivy image scan
         run: |
+          mkdir -p trivy-results
           docker run --rm \
             -v /var/run/docker.sock:/var/run/docker.sock \
+            -v "${{ github.workspace }}:/repo" \
             -v "$HOME/.cache/trivy:/root/.cache" \
-            aquasec/trivy:latest image \
+            "$TRIVY_IMAGE" image \
+            --severity "$FAIL_ON_SEVERITY" \
+            --exit-code 0 \
+            --ignore-unfixed \
+            --format table \
+            "${{ matrix.tag }}"
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v "${{ github.workspace }}:/repo" \
+            -v "$HOME/.cache/trivy:/root/.cache" \
+            "$TRIVY_IMAGE" image \
+            --severity "$FAIL_ON_SEVERITY" \
+            --exit-code 0 \
+            --ignore-unfixed \
+            --format sarif \
+            --output "/repo/trivy-results/${{ matrix.image }}.sarif" \
+            "${{ matrix.tag }}"
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v "${{ github.workspace }}:/repo" \
+            -v "$HOME/.cache/trivy:/root/.cache" \
+            "$TRIVY_IMAGE" image \
             --severity "$FAIL_ON_SEVERITY" \
             --exit-code 1 \
             --ignore-unfixed \
+            --format json \
+            --output "/repo/trivy-results/${{ matrix.image }}.json" \
             "${{ matrix.tag }}"
+
+      - name: Trivy image summary
+        if: always()
+        run: |
+          {
+            echo "## Trivy Image - ${{ matrix.image }}"
+            echo
+            echo "| Target | CVE | Severity | Package | Installed | Fixed |"
+            echo "|---|---|---|---|---|---|"
+            if [ -s "trivy-results/${{ matrix.image }}.json" ]; then
+              jq -r '
+                [.Results[]? as $r | $r.Vulnerabilities[]? |
+                  ["`" + ($r.Target // "-") + "`", (.VulnerabilityID // "-"), (.Severity // "-"), (.PkgName // "-"), (.InstalledVersion // "-"), (.FixedVersion // "-")]
+                  | @tsv] | .[]
+              ' "trivy-results/${{ matrix.image }}.json" | while IFS=$'\t' read -r target cve sev pkg installed fixed; do
+                echo "| $target | $cve | $sev | $pkg | $installed | $fixed |"
+              done
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload Trivy image artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-image-${{ matrix.image }}
+          path: trivy-results/
+          if-no-files-found: ignore
