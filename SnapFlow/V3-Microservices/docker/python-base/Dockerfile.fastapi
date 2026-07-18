@@ -12,6 +12,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /opt/base
 COPY requirements.fastapi.txt .
 RUN pip install --upgrade pip wheel==0.46.2 jaraco.context==6.1.0 \
-    && pip install --no-cache-dir --default-timeout=300 --retries=10 -r requirements.fastapi.txt
+    && pip install --no-cache-dir --default-timeout=300 --retries=10 -r requirements.fastapi.txt \
+    && pip install --upgrade --no-cache-dir wheel==0.46.2 jaraco.context==6.1.0 \
+    && python -c "import pathlib, shutil, site; [shutil.rmtree(p, ignore_errors=True) for b in site.getsitepackages() for n in ('wheel-0.45.1.dist-info','jaraco.context-5.3.0.dist-info') for p in pathlib.Path(b).glob(n)]"
 
 WORKDIR /app
