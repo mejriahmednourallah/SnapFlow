@@ -101,10 +101,10 @@ jobs:
             command: python -m pip_audit -r requirements.txt
           - ecosystem: nlp-worker-pip
             path: SnapFlow/V3-Microservices/v3-nlp-worker
-            command: python -m pip_audit -r requirements.txt
+            command: python -m pip_audit -r requirements.txt --no-deps --disable-pip --progress-spinner off
           - ecosystem: visual-regression-pip
             path: SnapFlow/V3-Microservices/v3-visual-regression
-            command: python -m pip_audit -r requirements.txt
+            command: python -m pip_audit -r requirements.txt --no-deps --disable-pip --progress-spinner off
           - ecosystem: form-executor-pip
             path: SnapFlow/V3-Microservices/v3-form-executor
             command: python -m pip_audit -r requirements.txt
