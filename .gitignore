@@ -7,5 +7,22 @@ graphify-out/
 # Pytest cache
 pytest-cache-files-*/
 
+# Local test/tool caches
+.tmp-*/
+.tmp*/
+**/.pytest_cache/
+**/.pytest_tmp*/
+**/__pycache__/
+**/.coverage
+**/.coverage.*
+**/htmlcov/
+
+# Local coverage outputs
+**/coverage
+**/coverage.out
+
+# Supabase local/link state
+**/supabase/.temp/
+
 # CLAUDE.md (generated)
 CLAUDE.md

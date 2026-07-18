@@ -46,20 +46,23 @@ jobs:
           docker run --rm -v "${{ github.workspace }}:/repo" -v "$HOME/.cache/trivy:/root/.cache" "$TRIVY_IMAGE" config \
             --severity HIGH,CRITICAL \
             --exit-code 0 \
+            --ignorefile /repo/.trivyignore \
             --format table \
-            /repo/SnapFlow/k8s /repo/SnapFlow/V3-Microservices
+            /repo/SnapFlow
           docker run --rm -v "${{ github.workspace }}:/repo" -v "$HOME/.cache/trivy:/root/.cache" "$TRIVY_IMAGE" config \
             --severity HIGH,CRITICAL \
             --exit-code 0 \
+            --ignorefile /repo/.trivyignore \
             --format sarif \
             --output /repo/trivy-results/config.sarif \
-            /repo/SnapFlow/k8s /repo/SnapFlow/V3-Microservices
+            /repo/SnapFlow
           docker run --rm -v "${{ github.workspace }}:/repo" -v "$HOME/.cache/trivy:/root/.cache" "$TRIVY_IMAGE" config \
             --severity HIGH,CRITICAL \
             --exit-code 1 \
+            --ignorefile /repo/.trivyignore \
             --format json \
             --output /repo/trivy-results/config.json \
-            /repo/SnapFlow/k8s /repo/SnapFlow/V3-Microservices
+            /repo/SnapFlow
 
       - name: Trivy config summary
         if: always()

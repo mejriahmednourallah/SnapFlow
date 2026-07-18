@@ -1,5 +1,5 @@
 # Stage 1: Build the Go binary
-FROM golang:alpine AS builder
+FROM golang:1.25-alpine3.22 AS builder
 RUN apk add --no-cache git
 WORKDIR /app
 COPY go.mod go.sum ./
@@ -19,7 +19,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build -o /v3-scanner-go .
 
 # Stage 2: Minimal runtime — browser rendering is delegated to v3-browser-pool.
 # Chromium is no longer installed here; set BROWSER_POOL_URL to enable the pool.
-FROM alpine:3.19
+FROM alpine:3.22
 RUN apk add --no-cache ca-certificates tzdata
 WORKDIR /app
 COPY --from=builder /v3-scanner-go .

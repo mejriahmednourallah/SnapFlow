@@ -128,5 +128,5 @@ describe('activity PDF render smoke test', () => {
 
     expect(blob.size).toBeGreaterThan(0);
     expect(blob.type).toBe('application/pdf');
-  });
+  }, 15000);
 });

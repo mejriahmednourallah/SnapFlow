@@ -64,6 +64,9 @@ services:
       DB_USER: snapflow
       DB_PASS: snapflow
       POLL_INTERVAL: "3"
+      NLP_SEMANTIC_ENABLED: "${NLP_SEMANTIC_ENABLED:-false}"
+      NLP_SEMANTIC_MODEL: "${NLP_SEMANTIC_MODEL:-sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2}"
+      NLP_SEMANTIC_MAX_CHARS: "${NLP_SEMANTIC_MAX_CHARS:-6000}"
     restart: unless-stopped
 
   # ─── Aggregator API ─────────────────────────────────────────────────

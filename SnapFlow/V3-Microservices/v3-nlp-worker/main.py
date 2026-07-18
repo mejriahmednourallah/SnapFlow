@@ -36,6 +36,11 @@ except Exception:  # pragma: no cover - optional dependency
     language_tool_python = None
 
 try:
+    from sentence_transformers import SentenceTransformer
+except Exception:  # pragma: no cover - optional dependency
+    SentenceTransformer = None
+
+try:
     import json5
 except Exception:  # pragma: no cover - optional dependency
     json5 = None
@@ -55,6 +60,12 @@ DB_NAME = os.getenv("DB_NAME", "snapflow_v3")
 DB_USER = os.getenv("DB_USER", "snapflow")
 DB_PASS = os.getenv("DB_PASS", "snapflow")
 POLL_INTERVAL = int(os.getenv("POLL_INTERVAL", "3"))  # seconds between DB polls
+NLP_SEMANTIC_ENABLED = os.getenv("NLP_SEMANTIC_ENABLED", "false").lower() in {"1", "true", "yes", "on"}
+NLP_SEMANTIC_MODEL = os.getenv(
+    "NLP_SEMANTIC_MODEL",
+    "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+)
+NLP_SEMANTIC_MAX_CHARS = int(os.getenv("NLP_SEMANTIC_MAX_CHARS", "6000"))
 
 # French + English stopwords
 STOP_WORDS = set()
@@ -272,6 +283,8 @@ _SPACY_NLP = None
 _SPACY_LOAD_FAILED = False
 _LT_FR = None
 _LT_LOAD_FAILED = False
+_SEMANTIC_MODEL = None
+_SEMANTIC_LOAD_FAILED = False
 
 ENTITY_PROTECTED_LABELS = {"PER", "PERSON", "ORG", "LOC", "GPE", "PRODUCT"}
 TYPO_BRAND_WHITELIST = {
@@ -337,6 +350,115 @@ def _load_language_tool_fr():
         _LT_LOAD_FAILED = True
         _LT_FR = None
     return _LT_FR
+
+
+def _load_semantic_model():
+    global _SEMANTIC_MODEL, _SEMANTIC_LOAD_FAILED
+    if not NLP_SEMANTIC_ENABLED:
+        return None
+    if _SEMANTIC_MODEL is not None or _SEMANTIC_LOAD_FAILED:
+        return _SEMANTIC_MODEL
+    if SentenceTransformer is None:
+        _SEMANTIC_LOAD_FAILED = True
+        logger.warning("Semantic enrichment disabled: sentence-transformers is not installed.")
+        return None
+    try:
+        _SEMANTIC_MODEL = SentenceTransformer(NLP_SEMANTIC_MODEL)
+        logger.info("Semantic enrichment model loaded: %s", NLP_SEMANTIC_MODEL)
+    except Exception as e:
+        _SEMANTIC_LOAD_FAILED = True
+        _SEMANTIC_MODEL = None
+        logger.warning(
+            "Semantic enrichment model '%s' failed to load: %s. "
+            "NLP worker will continue without semantic enrichment.",
+            NLP_SEMANTIC_MODEL,
+            e,
+        )
+    return _SEMANTIC_MODEL
+
+
+def _vector_to_list(vector) -> list[float]:
+    if hasattr(vector, "tolist"):
+        vector = vector.tolist()
+    if vector and isinstance(vector[0], list):
+        vector = vector[0]
+    return [float(value) for value in (vector or [])]
+
+
+def _cosine_similarity(vector_a, vector_b) -> float | None:
+    a = _vector_to_list(vector_a)
+    b = _vector_to_list(vector_b)
+    if not a or not b or len(a) != len(b):
+        return None
+    dot = sum(x * y for x, y in zip(a, b))
+    norm_a = math.sqrt(sum(x * x for x in a))
+    norm_b = math.sqrt(sum(y * y for y in b))
+    if norm_a == 0 or norm_b == 0:
+        return None
+    return round(max(0.0, min(1.0, dot / (norm_a * norm_b))), 4)
+
+
+def _semantic_pair_similarity(model, left: str, right: str) -> float | None:
+    left = (left or "").strip()
+    right = (right or "").strip()
+    if not left or not right:
+        return None
+    embeddings = model.encode([left, right], convert_to_numpy=True)
+    return _cosine_similarity(embeddings[0], embeddings[1])
+
+
+def build_semantic_enrichment(title_text: str, meta_desc: str, h1_text: str, body_text: str) -> dict | None:
+    """Return optional MiniLM semantic alignment signals without changing KPI logic."""
+    if not NLP_SEMANTIC_ENABLED:
+        return None
+
+    started = time.monotonic()
+    body = (body_text or "").strip()[:max(NLP_SEMANTIC_MAX_CHARS, 0)]
+    result = {
+        "enabled": True,
+        "available": False,
+        "model": NLP_SEMANTIC_MODEL,
+        "title_body_similarity": None,
+        "meta_body_similarity": None,
+        "h1_body_similarity": None,
+        "semantic_alignment_score": None,
+        "text_chars_used": len(body),
+        "elapsed_ms": 0,
+    }
+
+    if not body:
+        result["reason"] = "insufficient_body_text"
+        return result
+
+    model = _load_semantic_model()
+    if model is None:
+        result["reason"] = "model_unavailable"
+        result["elapsed_ms"] = int((time.monotonic() - started) * 1000)
+        return result
+
+    try:
+        result["title_body_similarity"] = _semantic_pair_similarity(model, title_text, body)
+        result["meta_body_similarity"] = _semantic_pair_similarity(model, meta_desc, body)
+        result["h1_body_similarity"] = _semantic_pair_similarity(model, h1_text, body)
+        scores = [
+            value
+            for value in (
+                result["title_body_similarity"],
+                result["meta_body_similarity"],
+                result["h1_body_similarity"],
+            )
+            if isinstance(value, (int, float))
+        ]
+        if scores:
+            result["semantic_alignment_score"] = round(sum(scores) / len(scores) * 100)
+        result["available"] = True
+    except Exception as e:
+        result["reason"] = f"inference_failed:{type(e).__name__}"
+        logger.warning("Semantic enrichment inference failed: %s", e)
+    finally:
+        result["elapsed_ms"] = int((time.monotonic() - started) * 1000)
+
+    return result
 
 
 def _extract_protected_entity_tokens(text: str) -> set[str]:
@@ -2213,6 +2335,9 @@ def process_pending_pages():
             first_para_tag = soup.find("p")
             first_para = first_para_tag.get_text(" ", strip=True)[:300] if first_para_tag else ""
             base_domain = urlparse(url).netloc
+            semantic_enrichment = build_semantic_enrichment(title_text, meta_desc, h1_text, text)
+            if semantic_enrichment is not None:
+                nlp_result["semantic_enrichment"] = semantic_enrichment
 
             nlp_result["seo_kpis"] = {
                 "h1_quality": check_h1_quality(soup, title_text),

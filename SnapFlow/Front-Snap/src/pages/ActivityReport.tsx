@@ -14,6 +14,8 @@ import { TicketHistorySheet } from '@/components/activity/TicketHistorySheet';
 import { PdfExportModal } from '@/components/activity/pdf/PdfExportModal';
 import { PDF_THEMES } from '@/components/pdf/pdfStyles';
 import type { ActivityPdfOptions } from '@/components/activity/pdf/pdfTypes';
+import { fetchActivityPdfBrandDefaults } from '@/lib/appSettings';
+import { hasProjectPerimeterBlocks, normalizeProjectPerimeterBlocks, type ProjectPerimeterBlock } from '@/lib/projectPerimeters';
 import { format } from 'date-fns';
 import { fr } from 'date-fns/locale';
 import { formatDateTime } from '@/lib/dateFormat';
@@ -86,6 +88,7 @@ const ActivityReport = () => {
   const [statuses, setStatuses] = useState<FilterOption[]>([]);
   const [trackers, setTrackers] = useState<FilterOption[]>([]);
   const [savedReports, setSavedReports] = useState<SavedActivityReport[]>([]);
+  const [perimeterBlocks, setPerimeterBlocks] = useState<ProjectPerimeterBlock[]>([]);
   const [activeView, setActiveView] = useState<'tickets' | 'saved' | 'compare' | 'dashboard'>('tickets');
   const [selectedForCompare, setSelectedForCompare] = useState<string[]>([]);
   const [historyIssueId, setHistoryIssueId] = useState<number | null>(null);
@@ -122,15 +125,20 @@ const ActivityReport = () => {
   useEffect(() => {
     if (!user || !projectId) return;
     const init = async () => {
-      const [projRes, filterOptions, reports] = await Promise.all([
+      const [projRes, filterOptions, reports, defaults, perimeterRes] = await Promise.all([
         supabase.from('projects').select('*').eq('id', projectId).single(),
         fetchIssueFilters(),
         fetchActivityReports(projectId),
+        fetchActivityPdfBrandDefaults(),
+        supabase.from('project_perimeter_blocks').select('*').eq('project_id', projectId).order('display_order'),
       ]);
       setProject(projRes.data || null);
       setStatuses(filterOptions.statuses);
       setTrackers(filterOptions.trackers);
       setSavedReports(reports);
+      setPdfBrandLeft(defaults.left);
+      setPdfBrandRight(defaults.right);
+      setPerimeterBlocks(normalizeProjectPerimeterBlocks(perimeterRes.data as Array<Record<string, unknown>> | null));
     };
     init();
   }, [user, projectId]);
@@ -299,6 +307,7 @@ const ActivityReport = () => {
           trackerLabel: filters.tracker ? trackers.find(t => String(t.id) === filters.tracker)?.name || filters.tracker : undefined,
         },
         options,
+        perimeterBlocks,
       });
       setPdfModalOpen(false);
       toast({ title: 'PDF telecharge', description: `${exportIssues.length} tickets exportes.` });
@@ -359,6 +368,7 @@ const ActivityReport = () => {
         setPdfContactWeb={setPdfContactWeb}
         pdfContactWeb2={pdfContactWeb2}
         setPdfContactWeb2={setPdfContactWeb2}
+        hasPerimeterBlocks={hasProjectPerimeterBlocks(perimeterBlocks)}
         isExporting={isExporting}
         doExportPDF={doExportActivityPDF}
       />

@@ -129,6 +129,7 @@ jobs:
             --severity "$FAIL_ON_SEVERITY" \
             --exit-code 0 \
             --ignore-unfixed \
+            --ignorefile /repo/.trivyignore \
             --format table \
             "${{ matrix.tag }}"
           docker run --rm \
@@ -139,6 +140,7 @@ jobs:
             --severity "$FAIL_ON_SEVERITY" \
             --exit-code 0 \
             --ignore-unfixed \
+            --ignorefile /repo/.trivyignore \
             --format sarif \
             --output "/repo/trivy-results/${{ matrix.image }}.sarif" \
             "${{ matrix.tag }}"
@@ -150,6 +152,7 @@ jobs:
             --severity "$FAIL_ON_SEVERITY" \
             --exit-code 1 \
             --ignore-unfixed \
+            --ignorefile /repo/.trivyignore \
             --format json \
             --output "/repo/trivy-results/${{ matrix.image }}.json" \
             "${{ matrix.tag }}"

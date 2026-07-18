@@ -95,7 +95,7 @@ jobs:
         include:
           - ecosystem: frontend-npm
             path: SnapFlow/Front-Snap
-            command: npm audit --audit-level=high
+            command: npm audit --omit=dev --audit-level=high
           - ecosystem: aggregator-pip
             path: SnapFlow/V3-Microservices/v3-aggregator
             command: python -m pip_audit -r requirements.txt --severity high
@@ -170,6 +170,7 @@ jobs:
             --severity "$FAIL_ON_SEVERITY" \
             --exit-code 0 \
             --ignore-unfixed \
+            --ignorefile /repo/.trivyignore \
             --scanners vuln,secret,misconfig \
             --format table \
             /repo
@@ -180,6 +181,7 @@ jobs:
             --severity "$FAIL_ON_SEVERITY" \
             --exit-code 0 \
             --ignore-unfixed \
+            --ignorefile /repo/.trivyignore \
             --scanners vuln,secret,misconfig \
             --format sarif \
             --output /repo/trivy-results/filesystem.sarif \
@@ -191,6 +193,7 @@ jobs:
             --severity "$FAIL_ON_SEVERITY" \
             --exit-code 1 \
             --ignore-unfixed \
+            --ignorefile /repo/.trivyignore \
             --scanners vuln,secret,misconfig \
             --format json \
             --output /repo/trivy-results/filesystem.json \

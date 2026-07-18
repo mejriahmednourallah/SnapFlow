@@ -44,10 +44,27 @@ backend/venv/
 
 # Coverage
 coverage/
+coverage
+coverage.out
+.coverage
+.coverage.*
+htmlcov/
+
+# Local test/tool caches and scratch artifacts
+.tmp-*/
+.tmp*/
+.pytest_cache/
+.pytest_tmp*/
+**/.pytest_cache/
+**/.pytest_tmp*/
 
 # Misc
 .cache/
 .parcel-cache/
+
+# Supabase local/link state
+supabase/.temp/
+**/supabase/.temp/
 
 # Generated docker-compose files (tenant stacks)
 # But keep traefik config

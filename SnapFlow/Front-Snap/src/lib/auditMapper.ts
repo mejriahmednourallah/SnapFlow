@@ -1036,6 +1036,23 @@ function fallbackRiskByFamily(finding: AuditFinding): string {
   }
 }
 
+function rgpdBusinessIssue(finding: AuditFinding): string {
+  const source = normalizeForComparison(`${finding.id} ${finding.sourceKpi ?? ''} ${finding.title} ${finding.description ?? ''}`);
+  if (/cookie|consent|traceur|tracker|pre consent/.test(source)) {
+    return 'Les visiteurs ne disposent pas d un choix clair avant le depot de cookies ou traceurs.';
+  }
+  if (/privacy|confidentialite|policy|politique/.test(source)) {
+    return 'La page qui explique l utilisation des donnees personnelles est absente, difficile a trouver ou incomplete.';
+  }
+  if (/retention|conservation|duree/.test(source)) {
+    return 'La duree de conservation des donnees n est pas indiquee clairement aux visiteurs.';
+  }
+  if (/rights|droits|dpo|access|rectification|effacement|opposition/.test(source)) {
+    return 'Les visiteurs ne voient pas clairement comment exercer leurs droits sur leurs donnees.';
+  }
+  return 'Les informations de protection des donnees personnelles ne sont pas assez claires pour les visiteurs.';
+}
+
 function fallbackRecommendationByFamily(finding: AuditFinding): string {
   if (isServerVersionFinding(finding)) {
     return 'Verifier la configuration du serveur et exposer une version exploitable uniquement dans un contexte de diagnostic securise.';
@@ -1058,7 +1075,7 @@ function fallbackRecommendationByFamily(finding: AuditFinding): string {
     case 'ai':
       return 'Rendre les contenus publics plus faciles a explorer et a comprendre par les moteurs generatifs.';
     case 'rgpd':
-      return 'Rendre les informations de protection des donnees plus visibles et plus completes.';
+      return 'Clarifier les informations visibles, expliquer les choix du visiteur et completer les mentions de protection des donnees.';
     case 'content':
       return 'Completer le contenu, clarifier les appels a l action et supprimer les zones trop faibles.';
     case 'ux':
@@ -1149,7 +1166,7 @@ function fallbackIssueByFamily(finding: AuditFinding): string {
       return 'Un signal AI Friendly a ete mesure pour evaluer la facilite d exploration et de comprehension par les moteurs generatifs.';
     }
     case 'rgpd':
-      return 'Une information attendue sur la protection des donnees est absente ou incomplete.';
+      return rgpdBusinessIssue(finding);
     case 'content':
       return 'Une partie du contenu manque de clarte, de profondeur ou d action proposee.';
     case 'ux':

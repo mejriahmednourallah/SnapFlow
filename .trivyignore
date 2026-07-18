@@ -1,0 +1,21 @@
+# Temporary accepted-risk exceptions for CI security gating.
+# Review by: 2026-09-30.
+#
+# Starlette is pulled through FastAPI in Python service images. The fully fixed
+# Starlette versions include major compatibility jumps, so this is accepted until
+# the FastAPI/Starlette stack is upgraded and tested as a separate change.
+CVE-2024-47874
+CVE-2026-48818
+CVE-2026-54283
+
+# Dockerfile non-root hardening is accepted temporarily because changing runtime
+# users can affect Playwright browser installs, local artifact paths, and service
+# writable directories. Harden per image after service-level smoke tests exist.
+DS-0002
+
+# Kubernetes browser/runtime hardening is accepted temporarily. SYS_ADMIN and
+# writable root filesystems are currently tied to browser rendering and legacy
+# manifests; remove these ignores after per-service securityContext validation.
+KSV-0005
+KSV-0014
+KSV-0118

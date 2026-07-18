@@ -30,6 +30,11 @@ interface Project {
   redmine_url?: string | null;
 }
 
+interface Client {
+  id: string;
+  name: string;
+}
+
 interface Assignment {
   project_id: string;
   user_id: string;
@@ -110,6 +115,8 @@ const normalizeRedmineProject = (project: any): RedmineProject => {
   };
 };
 
+const HOLDING_CLIENT_NAME = 'A classer';
+
 const AdminProjects = () => {
   const { user, isAdmin, userRole } = useAuth();
   const navigate = useNavigate();
@@ -118,6 +125,7 @@ const AdminProjects = () => {
   const { toast } = useToast();
 
   const [profiles, setProfiles] = useState<Profile[]>([]);
+  const [clients, setClients] = useState<Client[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [latestAudits, setLatestAudits] = useState<AuditSummary[]>([]);
@@ -149,9 +157,10 @@ const AdminProjects = () => {
   const [redmineSearch, setRedmineSearch] = useState('');
 
   const fetchData = async () => {
-    const [profilesRes, redmineIdentitiesRes, projectsRes, assignmentsRes, auditsRes, schedulesRes] = await Promise.all([
+    const [profilesRes, redmineIdentitiesRes, clientsRes, projectsRes, assignmentsRes, auditsRes, schedulesRes] = await Promise.all([
       supabase.from('profiles').select('id, email, full_name'),
       supabase.from('redmine_user_identities').select('user_id, redmine_login, redmine_display_name'),
+      supabase.from('clients').select('id, name').order('name'),
       supabase.from('projects').select('*'),
       supabase.from('project_assignments').select('*'),
       supabase.from('audits').select('project_id, report_data, created_at, status').order('created_at', { ascending: false }),
@@ -163,6 +172,7 @@ const AdminProjects = () => {
       redmine_login: identitiesByUser.get(profile.id)?.redmine_login ?? null,
       redmine_display_name: identitiesByUser.get(profile.id)?.redmine_display_name ?? null,
     })));
+    setClients((clientsRes.data || []) as Client[]);
     setProjects(projectsRes.data || []);
     setAssignments(assignmentsRes.data || []);
 
@@ -277,11 +287,25 @@ const AdminProjects = () => {
   const currentUserProfile = user?.id ? profiles.find((p) => p.id === user.id) : null;
   const canImportRedmine = isAdmin || ['charge', 'charge_de_projet', 'testeur', 'rapporteur'].includes(String(userRole || '').toLowerCase());
 
+  const ensureHoldingClient = async (): Promise<string> => {
+    const existing = clients.find((client) => client.name === HOLDING_CLIENT_NAME);
+    if (existing) return existing.id;
+    const { data: client, error } = await supabase
+      .from('clients')
+      .insert({ name: HOLDING_CLIENT_NAME })
+      .select('id, name')
+      .single();
+    if (error) throw error;
+    setClients(prev => [...prev, client as Client]);
+    return client!.id;
+  };
+
   const handleAddProject = async (e: React.FormEvent) => {
     e.preventDefault();
     setAdding(true);
     try {
-      const { data: proj, error } = await supabase.from('projects').insert({ url: newUrl, site_name: newName }).select().single();
+      const clientId = await ensureHoldingClient();
+      const { data: proj, error } = await supabase.from('projects').insert({ url: newUrl, site_name: newName, client_id: clientId }).select().single();
       if (error) throw error;
       if (newAssignee) {
         await supabase.from('project_assignments').insert({ project_id: proj.id, user_id: newAssignee });

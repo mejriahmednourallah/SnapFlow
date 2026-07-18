@@ -69,13 +69,17 @@ jobs:
           cache-dependency-path: SnapFlow/Front-Snap/package-lock.json
       - run: npm ci
       - name: Require live test secrets
+        id: live_secrets
         shell: bash
         run: |
-          test -n "$VITE_SUPABASE_URL"
-          test -n "$VITE_SUPABASE_PUBLISHABLE_KEY"
-          test -n "$SNAPFLOW_TEST_USER_EMAIL"
-          test -n "$SNAPFLOW_TEST_USER_PASSWORD"
+          if [[ -z "$VITE_SUPABASE_URL" || -z "$VITE_SUPABASE_PUBLISHABLE_KEY" || -z "$SNAPFLOW_TEST_USER_EMAIL" || -z "$SNAPFLOW_TEST_USER_PASSWORD" ]]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "Live project sync skipped: required Supabase test secrets are not configured." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
       - run: npm test -- projectSync.live
+        if: steps.live_secrets.outputs.skip != 'true'
 
   all-containers:
     name: Full Container Scan (${{ matrix.image }})
