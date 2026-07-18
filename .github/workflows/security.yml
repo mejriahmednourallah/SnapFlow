@@ -39,7 +39,7 @@ env:
   SERVICES_DIR: SnapFlow/V3-Microservices
   NODE_VERSION: "24"
   PYTHON_VERSION: "3.11"
-  GO_VERSION: "1.25.8"
+  GO_VERSION: "1.25.12"
   FAIL_ON_SEVERITY: ${{ github.event.inputs.fail_on_severity || 'HIGH,CRITICAL' }}
   TRIVY_IMAGE: aquasec/trivy:0.72.0
 
@@ -98,16 +98,16 @@ jobs:
             command: npm audit --omit=dev --audit-level=high
           - ecosystem: aggregator-pip
             path: SnapFlow/V3-Microservices/v3-aggregator
-            command: python -m pip_audit -r requirements.txt --severity high
+            command: python -m pip_audit -r requirements.txt
           - ecosystem: nlp-worker-pip
             path: SnapFlow/V3-Microservices/v3-nlp-worker
-            command: python -m pip_audit -r requirements.txt --severity high
+            command: python -m pip_audit -r requirements.txt
           - ecosystem: visual-regression-pip
             path: SnapFlow/V3-Microservices/v3-visual-regression
-            command: python -m pip_audit -r requirements.txt --severity high
+            command: python -m pip_audit -r requirements.txt
           - ecosystem: form-executor-pip
             path: SnapFlow/V3-Microservices/v3-form-executor
-            command: python -m pip_audit -r requirements.txt --severity high
+            command: python -m pip_audit -r requirements.txt
           - ecosystem: scanner-go
             path: SnapFlow/V3-Microservices/v3-scanner-go
             command: govulncheck ./...

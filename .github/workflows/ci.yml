@@ -38,7 +38,7 @@ permissions:
 env:
   NODE_VERSION: "24"
   PYTHON_VERSION: "3.11"
-  GO_VERSION: "1.25.8"
+  GO_VERSION: "1.25.12"
   FRONTEND_DIR: SnapFlow/Front-Snap
   SERVICES_DIR: SnapFlow/V3-Microservices
   VITE_SUPABASE_URL: http://127.0.0.1:54321
