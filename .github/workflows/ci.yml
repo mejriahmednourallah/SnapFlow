@@ -394,8 +394,6 @@ jobs:
         uses: actions/setup-python@v6
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-          cache: pip
-          cache-dependency-path: ${{ matrix.path }}/requirements.txt
 
       - name: Install service dependencies
         run: |
