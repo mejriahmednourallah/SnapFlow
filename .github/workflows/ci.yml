@@ -232,6 +232,7 @@ jobs:
           name: coverage-summary-frontend-${{ matrix.group }}
           path: ${{ env.FRONTEND_DIR }}/.coverage-summary/*.md
           if-no-files-found: ignore
+          include-hidden-files: true
 
       - name: Summary
         if: always()
@@ -298,6 +299,7 @@ jobs:
           name: coverage-summary-frontend-full-vitest
           path: ${{ env.FRONTEND_DIR }}/.coverage-summary/*.md
           if-no-files-found: ignore
+          include-hidden-files: true
 
   go-tests:
     name: Stage 3 - Go Tests (${{ matrix.service }})
@@ -349,6 +351,7 @@ jobs:
           name: coverage-summary-go-${{ matrix.service }}
           path: ${{ matrix.path }}/.coverage-summary/*.md
           if-no-files-found: ignore
+          include-hidden-files: true
 
       - name: Summary
         if: always()
@@ -446,6 +449,7 @@ jobs:
           name: coverage-summary-python-${{ matrix.service }}
           path: ${{ matrix.path }}/.coverage-summary/*.md
           if-no-files-found: ignore
+          include-hidden-files: true
 
       - name: Summary
         if: always()
