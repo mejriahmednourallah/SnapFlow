@@ -188,8 +188,50 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Run Vitest group
-        run: npm test -- ${{ matrix.pattern }}
+      - name: Run Vitest group with coverage
+        run: |
+          mkdir -p .coverage-summary
+          npx vitest run ${{ matrix.pattern }} --coverage --coverage.reporter=json-summary --coverage.reporter=text-summary
+
+      - name: Write coverage summary
+        if: always()
+        env:
+          FRONTEND_GROUP: ${{ matrix.group }}
+          FRONTEND_PATTERN: ${{ matrix.pattern }}
+        run: |
+          mkdir -p .coverage-summary
+          node <<'NODE'
+          const fs = require('node:fs');
+          const group = process.env.FRONTEND_GROUP || 'unknown';
+          const pattern = process.env.FRONTEND_PATTERN || '';
+          const path = 'coverage/coverage-summary.json';
+          let total = 'not generated';
+          let statements = '';
+          let branches = '';
+          let functions = '';
+          let lines = '';
+          if (fs.existsSync(path)) {
+            const data = JSON.parse(fs.readFileSync(path, 'utf8'));
+            const t = data.total || {};
+            statements = t.statements?.pct ?? '';
+            branches = t.branches?.pct ?? '';
+            functions = t.functions?.pct ?? '';
+            lines = t.lines?.pct ?? '';
+            total = lines;
+          }
+          const md = [
+            `| Frontend | ${group} | ${total} | ${statements} | ${branches} | ${functions} | ${lines} | \`${pattern}\` |`,
+          ].join('\n') + '\n';
+          fs.writeFileSync(`.coverage-summary/frontend-${group}.md`, md);
+          NODE
+
+      - name: Upload coverage summary
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: coverage-summary-frontend-${{ matrix.group }}
+          path: ${{ env.FRONTEND_DIR }}/.coverage-summary/*.md
+          if-no-files-found: ignore
 
       - name: Summary
         if: always()
@@ -219,8 +261,43 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Run complete Vitest suite
-        run: npm test
+      - name: Run complete Vitest suite with coverage
+        run: |
+          mkdir -p .coverage-summary
+          npx vitest run --coverage --coverage.reporter=json-summary --coverage.reporter=text-summary
+
+      - name: Write coverage summary
+        if: always()
+        run: |
+          mkdir -p .coverage-summary
+          node <<'NODE'
+          const fs = require('node:fs');
+          const path = 'coverage/coverage-summary.json';
+          let total = 'not generated';
+          let statements = '';
+          let branches = '';
+          let functions = '';
+          let lines = '';
+          if (fs.existsSync(path)) {
+            const data = JSON.parse(fs.readFileSync(path, 'utf8'));
+            const t = data.total || {};
+            statements = t.statements?.pct ?? '';
+            branches = t.branches?.pct ?? '';
+            functions = t.functions?.pct ?? '';
+            lines = t.lines?.pct ?? '';
+            total = lines;
+          }
+          const md = `| Frontend | full-vitest | ${total} | ${statements} | ${branches} | ${functions} | ${lines} | \`npx vitest run --coverage\` |\n`;
+          fs.writeFileSync('.coverage-summary/frontend-full-vitest.md', md);
+          NODE
+
+      - name: Upload coverage summary
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: coverage-summary-frontend-full-vitest
+          path: ${{ env.FRONTEND_DIR }}/.coverage-summary/*.md
+          if-no-files-found: ignore
 
   go-tests:
     name: Stage 3 - Go Tests (${{ matrix.service }})
@@ -250,8 +327,28 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
           cache-dependency-path: ${{ matrix.path }}/go.sum
 
-      - name: Run Go tests
-        run: go test ./...
+      - name: Run Go tests with coverage
+        run: |
+          mkdir -p .coverage-summary
+          go test ./... -covermode=atomic -coverprofile=coverage.out
+          go tool cover -func=coverage.out | tee coverage.txt
+
+      - name: Write coverage summary
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p .coverage-summary
+          total="$(awk '/^total:/ {print $3}' coverage.txt 2>/dev/null || true)"
+          total="${total:-not generated}"
+          echo "| Go | ${{ matrix.service }} | $total |  |  |  | $total | \`go test ./... -coverprofile=coverage.out\` |" > ".coverage-summary/go-${{ matrix.service }}.md"
+
+      - name: Upload coverage summary
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: coverage-summary-go-${{ matrix.service }}
+          path: ${{ matrix.path }}/.coverage-summary/*.md
+          if-no-files-found: ignore
 
       - name: Summary
         if: always()
@@ -303,14 +400,52 @@ jobs:
           if [ -f requirements.txt ]; then
             python -m pip install -r requirements.txt
           fi
-          python -m pip install "pytest==8.3.5" "pytest-asyncio==0.24.0" "httpx==0.27.2"
+          python -m pip install "pytest==8.3.5" "pytest-asyncio==0.24.0" "pytest-cov==5.0.0" "httpx==0.27.2"
 
       - name: Install Playwright browsers
         if: contains(matrix.service, 'visual') || contains(matrix.service, 'form-executor')
         run: python -m playwright install --with-deps chromium
 
-      - name: Run pytest
-        run: ${{ matrix.command }}
+      - name: Run pytest with coverage
+        run: |
+          mkdir -p .coverage-summary
+          python -m pytest tests -q --cov=. --cov-report=term-missing --cov-report=xml:coverage.xml --cov-report=json:coverage.json
+
+      - name: Write coverage summary
+        if: always()
+        run: |
+          mkdir -p .coverage-summary
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          service = os.environ.get("PYTHON_SERVICE", "unknown")
+          command = os.environ.get("PYTHON_COMMAND", "python -m pytest tests -q --cov=.")
+          path = Path("coverage.json")
+          total = statements = branches = functions = lines = "not generated"
+          if path.exists():
+              data = json.loads(path.read_text(encoding="utf-8"))
+              totals = data.get("totals", {})
+              line_pct = totals.get("percent_covered_display", totals.get("percent_covered", ""))
+              total = lines = str(line_pct)
+              statements = str(line_pct)
+              branches = str(totals.get("percent_covered_display", totals.get("percent_covered", "")))
+              functions = ""
+          row = f"| Python | {service} | {total} | {statements} | {branches} | {functions} | {lines} | `{command}` |\n"
+          Path(f".coverage-summary/python-{service}.md").write_text(row, encoding="utf-8")
+          PY
+        env:
+          PYTHON_SERVICE: ${{ matrix.service }}
+          PYTHON_COMMAND: ${{ matrix.command }}
+
+      - name: Upload coverage summary
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: coverage-summary-python-${{ matrix.service }}
+          path: ${{ matrix.path }}/.coverage-summary/*.md
+          if-no-files-found: ignore
 
       - name: Summary
         if: always()
@@ -375,6 +510,14 @@ jobs:
       - security-checks
     if: always()
     steps:
+      - name: Download coverage summaries
+        uses: actions/download-artifact@v6
+        continue-on-error: true
+        with:
+          pattern: coverage-summary-*
+          path: coverage-summaries
+          merge-multiple: true
+
       - name: Final test table
         shell: bash
         run: |
@@ -390,6 +533,22 @@ jobs:
             echo "| Go Matrix | ${{ needs.go-tests.result }} |"
             echo "| Python Matrix | ${{ needs.python-tests.result }} |"
             echo "| Security Checks | ${{ needs.security-checks.result }} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Final coverage table
+        shell: bash
+        run: |
+          {
+            echo
+            echo "## Coverage Summary"
+            echo
+            echo "| Runtime | Suite / Service | Total / Lines % | Statements % | Branches % | Functions % | Lines % | Command |"
+            echo "|---|---|---:|---:|---:|---:|---:|---|"
+            if compgen -G "coverage-summaries/*.md" > /dev/null; then
+              cat coverage-summaries/*.md
+            else
+              echo "| unavailable | no coverage artifacts found |  |  |  |  |  |  |"
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Fail if required stages failed
