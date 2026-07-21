@@ -10,7 +10,7 @@ param(
   [string]$CsvUrlColumn = "url",
   [string[]]$ManualUrls = @(),
   [int]$Limit = 20,
-  [int]$MaxPages = 10,
+  [int]$MaxPages = 100,
   [int]$HeadlessConcurrency = 1,
   [int]$PollIntervalSeconds = 3,
   [int]$TimeoutSeconds = 1800,
