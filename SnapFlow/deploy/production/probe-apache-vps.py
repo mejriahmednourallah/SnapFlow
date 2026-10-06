@@ -149,6 +149,9 @@ threading.Event().wait()
 
 
 def execute_modes(root, source, base, route, wetty, realm, user, password, network, results):
+        # A deliberately conflicting broad Alias reproduces the API vhost's
+        # first-match hazard. Specific challenge routing must win over it.
+        source = source.replace('ProxyPreserveHost On', 'ProxyPreserveHost On\nAlias /.well-known/ /test/denied/')
         for mode, vhost_port in (('acme','443'),('acme','80'),('stack','443'),('stack','80')):
             candidate = module.patch(source, 'snapflow.medianet.space', '/test/webroot', mode=='stack', '/test/wetty.conf', [route])
             assert module.patch(candidate, 'snapflow.medianet.space', '/test/webroot', mode=='stack', '/test/wetty.conf', [route]) == candidate, 'Patch must be idempotent'

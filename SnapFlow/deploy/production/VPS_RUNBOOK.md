@@ -15,8 +15,9 @@ email confirmation is enabled to conceal the missing SMTP service.
   authenticated terminal proxy. Stack mode also checks six Supabase routes,
   an actual WebSocket 101 handshake, forwarded HTTPS scheme, seed-function 403
   and HTTP redirects that exempt the terminal/challenge paths.
-- Three scoped Apache checks pass in Linux, including rollback of both vhost
-  files on a simulated syntax failure. Four cleanup scope/abort checks pass.
+- Five scoped Apache checks pass in Linux, including rollback of both vhost
+  files on a simulated syntax failure, alias precedence and restrictive umask.
+  Four cleanup scope/abort checks pass.
 - Test containers/networks are removed. These tests do not establish real VPS
   TLS trust, certificate renewal, application acceptance or scan capacity.
 
@@ -34,6 +35,17 @@ proxies in place. Stack mode replaces the two known legacy application proxy
 blocks with ordered vhost-level routes and explicitly includes the existing
 protected terminal config before the frontend catch-all. Unknown proxy contents
 abort preparation before writes. See [Apache ordering](https://httpd.apache.org/docs/2.4/mod/mod_proxy.html#proxypass).
+
+Oct 6 live attempt: both vhosts applied with Syntax OK and protected files
+unchanged. Frontend challenge checks passed; API challenge returned 403, so
+renewal and cleanup did not run. The follow-up moves the specific challenge
+Alias before the API's broad Alias and makes only the two public challenge
+directories traversable under restrictive umask. Existing root-owned challenge
+directories created with 0700 are corrected; application parent modes and
+private runtime files are unchanged. Symlinked challenge directories abort.
+These two defects are reproduced/covered locally; the exact VPS 403 cause and
+successful renewal remain subject to the repeated server probe. See
+[Alias precedence](https://httpd.apache.org/docs/2.4/mod/mod_alias.html#alias).
 
 ## 1. Fetch and repair challenges/certificate
 

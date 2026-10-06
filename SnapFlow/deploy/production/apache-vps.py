@@ -83,7 +83,9 @@ def patch(source, host, webroot, stack=False, wetty_include=None, wetty_routes=(
                          + f'        ProxyPass http://localhost:3030{route}\n'
                          + f'        ProxyPassReverse http://localhost:3030{route}\n    </Location>\n')
             body += '    # END SNAPFLOW OWNED TERMINAL\n'
-        return opening + body.rstrip() + '\n' + acme_block(webroot) + closing
+        # Alias uses first-match ordering. The specific challenge must precede
+        # the API vhost's pre-existing broad /.well-known Alias.
+        return opening + '\n' + acme_block(webroot) + body.strip('\n') + '\n' + closing
     result = VHOST.sub(replace, source)
     if sorted(ports) != ['443', '80']:
         raise ValueError('Expected exactly HTTP and HTTPS vhosts')
@@ -194,13 +196,36 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
+def challenge_directory(webroot):
+    """Make only the two public challenge directories traversable by Apache.
+
+    Private export/release files retain umask 077. Do not chmod application
+    parents or follow challenge-directory symlinks into unrelated locations.
+    """
+    base = Path(webroot).resolve(strict=True)
+    current = base
+    for component in ('.well-known', 'acme-challenge'):
+        current = current/component
+        if current.is_symlink():
+            raise RuntimeError('Challenge directory is a symlink; inspect before repair')
+        created = not current.exists()
+        if created:
+            current.mkdir(mode=0o755)
+        if not current.is_dir():
+            raise RuntimeError('Challenge path is not a directory')
+        stat = current.stat()
+        if created or stat.st_uid == 0:
+            # chmod after mkdir is required when invoked with restrictive umask.
+            os.chmod(current, stat.st_mode & 0o7777 | 0o055)
+    return current
+
+
 def probe():
     opener = urllib.request.build_opener(NoRedirect, urllib.request.ProxyHandler({}))
     identifier = 'snapflow-owned-' + uuid.uuid4().hex
     payload = (identifier + '\n').encode()
     for host, webroot in HOSTS.values():
-        directory = Path(webroot)/'.well-known/acme-challenge'
-        directory.mkdir(parents=True, exist_ok=True)
+        directory = challenge_directory(webroot)
         path = directory/identifier
         with path.open('xb') as handle:
             handle.write(payload)
@@ -208,9 +233,12 @@ def probe():
         try:
             for destination in ('127.0.0.1', host):
                 request = urllib.request.Request(f'http://{destination}/.well-known/acme-challenge/{identifier}', headers={'Host': host})
-                with opener.open(request, timeout=20) as response:
-                    if response.status != 200 or response.read(1024) != payload:
-                        raise RuntimeError(f'Challenge bytes incorrect for {host}')
+                try:
+                    with opener.open(request, timeout=20) as response:
+                        if response.status != 200 or response.read(1024) != payload:
+                            raise RuntimeError(f'Challenge bytes incorrect for {host} via {destination}')
+                except urllib.error.HTTPError as error:
+                    raise RuntimeError(f'Challenge HTTP {error.code} for {host} via {destination}') from None
                 missing = urllib.request.Request(f'http://{destination}/.well-known/acme-challenge/{identifier}-missing', headers={'Host': host})
                 try:
                     opener.open(missing, timeout=20).close()

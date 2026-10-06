@@ -30,6 +30,34 @@ class ApacheScope(unittest.TestCase):
             with self.assertRaises(ValueError):
                 module.patch(source,'snapflow.medianet.space','/var/www/front')
 
+    def test_specific_alias_precedes_existing_broad_alias(self):
+        source = vhosts('snapflow-api.medianet.space').replace('# EXISTING APPLICATION',
+                'Alias /.well-known /var/www/api/.well-known/\n# EXISTING APPLICATION')
+        candidate = module.patch(source,'snapflow-api.medianet.space','/var/www/api')
+        for block in module.VHOST.finditer(candidate):
+            self.assertLess(block.group(0).index('Alias /.well-known/acme-challenge/'),
+                            block.group(0).index('Alias /.well-known '))
+        self.assertEqual(module.patch(candidate,'snapflow-api.medianet.space','/var/www/api'),candidate)
+
+    @unittest.skipUnless(os.name=='posix','Linux permission behavior')
+    def test_restrictive_umask_and_preexisting_root_directories(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            parent_mode = root.stat().st_mode
+            previous = os.umask(0o077)
+            try:
+                directory = module.challenge_directory(root)
+                self.assertEqual(directory.stat().st_mode & 0o777,0o755)
+                self.assertEqual(directory.parent.stat().st_mode & 0o777,0o755)
+                self.assertEqual(root.stat().st_mode,parent_mode)
+                directory.chmod(0o700)
+                directory.parent.chmod(0o700)
+                module.challenge_directory(root)
+                self.assertEqual(directory.stat().st_mode & 0o777,0o755)
+                self.assertEqual(directory.parent.stat().st_mode & 0o777,0o755)
+            finally:
+                os.umask(previous)
+
     @unittest.skipUnless(os.name=='posix','Atomic POSIX owner/mode check runs in the disposable Linux container')
     def test_syntax_failure_restores_both_files(self):
         with tempfile.TemporaryDirectory() as temporary:

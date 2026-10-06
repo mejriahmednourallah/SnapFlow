@@ -7,7 +7,14 @@ not successful live route tests or an applied VPS patch.
 Implementation update: the VPS profile and two-phase scoped Apache repair are
 now implemented and tested locally. See the commands and exact validation scope
 in [VPS_RUNBOOK.md](../../../deploy/production/VPS_RUNBOOK.md). SMTP is explicitly
-deferred at the user's request. No VPS command result has been received yet.
+deferred at the user's request. The first live VPS result is recorded below.
+
+Live repair update (Oct 6): the user ran release `265598c`. Both vhosts passed
+syntax/reload with protected files unchanged; the frontend hostname passed exact
+challenge-byte and missing-file checks. The API hostname returned HTTP 403.
+Renewal stopped before running, and cleanup remains pending. The follow-up fixes
+specific-before-broad Alias ordering and public challenge-directory permissions
+under umask 077, with new regression coverage; real VPS verification is pending.
 
 ## Confirmed state
 
@@ -96,6 +103,7 @@ allowlist. Apache's TLS vhost must forward the HTTPS scheme. See
 6. Measure 150/300/500-page capacity with both databases and Wetty running.
    Existing browser/model/default promotion gates remain unchanged.
 
-No VPS cleanup, certificate renewal, routing patch or deployment was performed
-by this review. The old public `/api/` mapping is not proof of a working new
+The ACME routing patch has been applied on the VPS; its API-host challenge check
+still needs to pass. VPS cleanup, certificate renewal and new-stack deployment
+remain pending. The old public `/api/` mapping is not proof of a working new
 Supabase-to-microservices connection.
