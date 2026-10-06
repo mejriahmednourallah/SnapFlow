@@ -93,6 +93,29 @@ def env_file(path):
     return values
 
 
+def readable_container_inputs(upstream):
+    """Bind-mounted public bootstrap/code needs access for container service UIDs.
+
+    The enclosing private runtime stays 0700 and credentials/imports stay 0600.
+    Host users cannot traverse that runtime; container mounts expose only their
+    intended input subtree. Never chmod database data or follow symlinks.
+    """
+    if os.name != 'posix':
+        return
+    paths = []
+    data = upstream / 'volumes/db/data'
+    for name in ('db', 'api', 'pooler', 'functions', 'snippets'):
+        root = upstream / 'volumes' / name
+        if not root.exists():
+            continue
+        paths.extend(p for p in [root, *root.rglob('*')]
+                     if p != data and data not in p.parents)
+    if any(path.is_symlink() for path in paths):
+        raise ValueError('Container input symlink refused; preserve private runtime boundaries')
+    for path in paths:
+        path.chmod(0o755 if path.is_dir() or path.suffix == '.sh' else 0o644)
+
+
 def token(role, secret):
     encode = lambda obj: base64.urlsafe_b64encode(json.dumps(obj, separators=(',', ':')).encode()).rstrip(b'=')
     now = int(time.time())
@@ -174,7 +197,11 @@ def configure(runtime, profile='rehearsal', public_origin=None, skip_smtp=False)
                     mount = 'storage-data:' + tail
                 else:
                     absolute = (upstream / source).resolve()
-                    if not absolute.exists(): absolute.mkdir(parents=True, exist_ok=True)
+                    if not absolute.exists():
+                        if source == './volumes/snippets':
+                            absolute.mkdir(parents=True, exist_ok=True)
+                        else:
+                            raise ValueError('Pinned container input missing: ' + source)
                     mount = absolute.as_posix() + ':' + tail
             mounts.append(mount)
         service['volumes'] = mounts
@@ -268,6 +295,7 @@ def configure(runtime, profile='rehearsal', public_origin=None, skip_smtp=False)
         profiles=['fixture'], labels={'snapflow.rehearsal':'production'})
     snap['networks'] = {'default':{},'bridge':{'external':True,'name':network}}
     (runtime/'snapflow.compose.yml').write_text(yaml.safe_dump(snap, sort_keys=False), encoding='utf-8')
+    readable_container_inputs(upstream)
     dump(descriptor, {'profile':profile,'project':project,'network':network,'public_origin':public,'smtp_deferred':profile=='vps'})
     print(json.dumps(dict(configured=True, profile=profile, public_origin=public, credentials_reused=reused, secrets_printed=False)))
 

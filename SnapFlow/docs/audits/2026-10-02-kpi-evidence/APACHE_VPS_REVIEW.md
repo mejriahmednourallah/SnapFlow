@@ -25,6 +25,17 @@ post-build disk/memory statistics or explicit final Wetty status are included.
 Supabase bootstrap/health, Cloud import and SnapFlow startup remain pending.
 Build completion does not establish application correctness or scan capacity.
 
+Live bootstrap failure (Oct 6, attachment `6e535e9d`): PostgreSQL initialization
+was incomplete: `_supabase` was missing and `authenticator` had no password.
+All seven bind-mounted SQL inputs were mode 0600, UID/GID 1002; the image's
+postgres UID is 100. Linux container probes reproduced unreadable inputs and
+then passed a full cold bootstrap after input-only permission normalization.
+The deployment fix retains runtime/env/import privacy, gives container inputs
+read/execute access as appropriate, and provides a guarded empty-destination
+`repair-bootstrap` phase. Five Linux profile checks and fifteen orchestration
+checks pass; actual VPS recovery remains pending. Wetty/Apache are outside the
+repair scope. Snapshot resources were 24 GB disk free and 5.3 GiB available RAM.
+
 Live repair update (Oct 6): the user ran release `265598c`. Both vhosts passed
 syntax/reload with protected files unchanged; the frontend hostname passed exact
 challenge-byte and missing-file checks. The API hostname returned HTTP 403.

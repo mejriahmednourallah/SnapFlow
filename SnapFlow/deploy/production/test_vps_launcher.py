@@ -35,6 +35,10 @@ class VPSPhases(unittest.TestCase):
         self.mounts = [{'Destination': '/b', 'Source': '/private/b'},
                        {'Destination': '/a', 'Source': '/private/a'}]
         self.import_marker = dict(assertions='passed', counts={'users':12, 'public_tables':31}, verified_tables=63)
+        self.destination_users = 0
+        self.public_tables = 0
+        self.data_volume_owner = 'snapflow-production-supabase'
+        self.data_consumers = b'owned-db\n'
 
         def run(args, **kwargs):
             args = [str(a) for a in args]
@@ -46,6 +50,14 @@ class VPSPhases(unittest.TestCase):
                                          networks={'wetty_default': {'EndpointID': 'unchanged'}})).encode()
             elif args[:3] == ['docker', 'image', 'inspect']:
                 stdout = ('owned-' + args[3]).encode()
+            elif args[:2] == ['docker', 'inspect']:
+                stdout = json.dumps(dict(id='owned-db', labels={'com.docker.compose.project':'snapflow-production-supabase',
+                    'com.docker.compose.service':'supabase-db'}, mounts=[{'Destination':'/var/lib/postgresql/data',
+                    'Type':'volume','Name':'snapflow-production-supabase_supabase-data'}])).encode()
+            elif args[:3] == ['docker', 'volume', 'inspect']:
+                stdout = self.data_volume_owner.encode()
+            elif args[:2] == ['docker', 'ps']:
+                stdout = self.data_consumers
             elif args[:3] == ['docker', 'network', 'inspect']:
                 stdout = self.network_owner.encode()
             elif len(args) > 2 and args[1].endswith('rehearse.py') and args[2] == 'restore':
@@ -57,7 +69,9 @@ class VPSPhases(unittest.TestCase):
                 if tail[:1] == ['ps'] and tail[-1] == 'db' and self.running_db:
                     stdout = b'running-db'
                 if 'auth.users' in ' '.join(tail):
-                    stdout = b'0\n'
+                    stdout = b't\n' if 'to_regclass' in ' '.join(tail) else str(self.destination_users).encode()
+                if 'information_schema.tables' in ' '.join(tail):
+                    stdout = str(self.public_tables).encode()
                 if 'to_regclass' in kwargs.get('input', b'').decode():
                     stdout = b't\n'
                 if 'COUNT(*)' in kwargs.get('input', b'').decode():
@@ -170,6 +184,39 @@ class VPSPhases(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'Import marker'):
             self.launcher.execute()
         self.assertEqual(self.compose_calls(), [])
+
+    def test_bootstrap_repair_resets_only_empty_owned_database(self):
+        self.options.action = 'repair-bootstrap'
+        self.launcher.execute()
+        removals = [args for args, _ in self.calls if args[:2] == ['docker', 'rm'] or args[:3] == ['docker', 'volume', 'rm']]
+        self.assertEqual(removals, [['docker', 'rm', 'owned-db'],
+                                   ['docker', 'volume', 'rm', 'snapflow-production-supabase_supabase-data']])
+        configure = next(i for i, (args, _) in enumerate(self.calls) if 'configure' in args)
+        reset = next(i for i, (args, _) in enumerate(self.calls) if args[:3] == ['docker', 'volume', 'rm'])
+        self.assertLess(configure, reset)
+        self.assertFalse(any('down' in args or 'prune' in args for args, _ in self.calls))
+
+    def test_bootstrap_repair_refuses_imported_or_populated_database(self):
+        self.options.action = 'repair-bootstrap'
+        cases = ('marker', 'users', 'tables', 'owner', 'consumers')
+        for case in cases:
+            with self.subTest(case=case):
+                self.calls.clear()
+                marker = self.runtime / 'import-complete.json'
+                marker.unlink(missing_ok=True)
+                self.destination_users = 0
+                self.public_tables = 0
+                self.data_volume_owner = 'snapflow-production-supabase'
+                self.data_consumers = b'owned-db\n'
+                if case == 'marker': marker.write_text(json.dumps(self.import_marker))
+                if case == 'users': self.destination_users = 1
+                if case == 'tables': self.public_tables = 1
+                if case == 'owner': self.data_volume_owner = 'wetty'
+                if case == 'consumers': self.data_consumers = b'owned-db\nunrelated\n'
+                with self.assertRaises(ValueError):
+                    self.launcher.execute()
+                self.assertFalse(any(args[:2] == ['docker', 'rm'] or args[:3] == ['docker', 'volume', 'rm']
+                                     or 'configure' in args or 'stop' in args for args, _ in self.calls))
 
     def test_mount_order_ignored_but_network_change_detected(self):
         before = self.launcher.wetty_snapshot()

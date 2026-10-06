@@ -162,6 +162,54 @@ class VPSLauncher:
         self.network()
         self.compose('supabase', 'up', '-d', '--wait', '--wait-timeout', '300')
 
+    def repair_bootstrap(self):
+        """Recreate only an empty, owned Supabase DB after failed first init."""
+        descriptor = self.descriptor()
+        if (self.runtime / 'import-complete.json').exists():
+            raise ValueError('Imported destination cannot be reset by bootstrap repair')
+        # Verify destination data and all Docker ownership before changing anything.
+        psql = ['exec', '-T', 'supabase-db', 'psql', '-X', '-v', 'ON_ERROR_STOP=1',
+                '-U', 'supabase_admin', '-d', 'postgres', '-Atc']
+        exists = self.compose('supabase', *psql, "SELECT to_regclass('auth.users') IS NOT NULL;", capture=True).stdout.strip()
+        if exists not in (b't', b'f'):
+            raise ValueError('Cannot prove destination Auth state; no reset performed')
+        if exists == b't':
+            count = self.compose('supabase', *psql, 'SELECT count(*) FROM auth.users;', capture=True).stdout.strip()
+            if count != b'0':
+                raise ValueError('Destination contains users; no reset performed')
+        tables = self.compose('supabase', *psql,
+                              "SELECT count(*) FROM information_schema.tables WHERE table_schema='public' AND table_type='BASE TABLE';",
+                              capture=True).stdout.strip()
+        if tables != b'0':
+            raise ValueError('Destination contains public application tables; no reset performed')
+        project = descriptor['project'] + '-supabase'
+        container = project + '-supabase-db-1'
+        metadata = json.loads(self.run(['docker', 'inspect', container, '--format',
+                                       '{"id":{{json .Id}},"labels":{{json .Config.Labels}},"mounts":{{json .Mounts}}}'], capture=True).stdout)
+        labels = metadata['labels']
+        if labels.get('com.docker.compose.project') != project or labels.get('com.docker.compose.service') != 'supabase-db':
+            raise ValueError('Unexpected DB container ownership; no reset performed')
+        mounts = [m for m in metadata['mounts'] if m['Destination'] == '/var/lib/postgresql/data']
+        expected = project + '_supabase-data'
+        if len(mounts) != 1 or mounts[0].get('Type') != 'volume' or mounts[0].get('Name') != expected:
+            raise ValueError('Unexpected Supabase data mount; no reset performed')
+        owner = self.run(['docker', 'volume', 'inspect', expected, '--format',
+                          '{{index .Labels "com.docker.compose.project"}}'], capture=True).stdout.decode().strip()
+        if owner != project:
+            raise ValueError('Unexpected data volume ownership; no reset performed')
+        consumers = self.run(['docker', 'ps', '-aq', '--no-trunc', '--filter', 'volume=' + expected], capture=True).stdout.decode().splitlines()
+        if consumers != [metadata['id']]:
+            raise ValueError('Supabase data volume has unexpected consumers; no reset performed')
+        before = self.wetty_snapshot()
+        self.tool('configure', '--profile', 'vps', '--public-origin', descriptor['public_origin'], '--skip-smtp')
+        self.compose('supabase', 'stop')
+        self.check_wetty(before)
+        self.run(['docker', 'rm', metadata['id']])
+        self.check_wetty(before)
+        self.run(['docker', 'volume', 'rm', expected])
+        self.supabase()
+        print('Empty Supabase bootstrap recreated with existing destination keys; import remains pending.', flush=True)
+
     def verify_import(self):
         marker = json.loads((self.runtime / 'import-complete.json').read_text())
         expected = json.loads((HERE / 'exports/20261005-cloud/migration-summary.json').read_text())
@@ -246,7 +294,8 @@ class VPSLauncher:
         before = self.wetty_snapshot()
         failed = False
         try:
-            getattr(self, self.options.action if self.options.action != 'import' else 'import_cloud')()
+            action = {'import': 'import_cloud', 'repair-bootstrap': 'repair_bootstrap'}.get(self.options.action, self.options.action)
+            getattr(self, action)()
         except BaseException:
             failed = True
             raise
@@ -271,7 +320,7 @@ class VPSLauncher:
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--vps', action='store_true')
-    parser.add_argument('--action', choices=('build', 'supabase', 'import', 'start', 'status'), default='build')
+    parser.add_argument('--action', choices=('build', 'supabase', 'import', 'start', 'status', 'repair-bootstrap'), default='build')
     parser.add_argument('--runtime', type=Path, default=Path.home() / '.local/share/snapflow-vps')
     parser.add_argument('--public-origin', default='https://snapflow.medianet.space')
     parser.add_argument('--skip-smtp', action='store_true', help='Explicitly defer SMTP for VPS configuration')

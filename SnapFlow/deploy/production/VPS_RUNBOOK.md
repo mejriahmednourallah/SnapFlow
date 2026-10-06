@@ -84,6 +84,49 @@ message and final image-pull/cleanup output. Cleanup reports 1.445 GB cache and
 the first import. The supplied excerpt does not yet establish any of those
 runtime checks or application/scan acceptance.
 
+## Failed first bootstrap: Linux file permissions
+
+The Oct 6 VPS diagnostics confirmed all seven mounted SQL inputs were 0600,
+owned by UID/GID 1002. The pinned PostgreSQL image initializes as UID 100;
+it cannot read those files. The database logged missing `_supabase` and an
+`authenticator` role with no password, consistent with incomplete bootstrap.
+At that time disk had 24 GB free and host available memory was 5.3 GiB; these
+are idle/partial-start observations, not scan-load capacity results.
+
+The configurator now grants container input directories 0755, SQL/code/config
+files 0644 and shell entrypoints 0755. The enclosing private runtime remains
+0700; runtime credentials and decrypted imports remain private. Only the
+intended input trees are changed; database data is excluded and symlinks are
+refused. Missing required bootstrap files are rejected instead of being
+silently created as directories. An initially empty Studio snippets directory
+is still created when required by the pinned configuration.
+
+Existing PostgreSQL data has already been initialized, so changing permissions
+and restarting alone will not replay first-init SQL. For this failed first
+deployment, use the guarded repair after pulling the fix:
+
+```bash
+bash V3-Microservices/run-all.sh --vps --action repair-bootstrap
+```
+
+It requires no import marker, zero Auth users (or no users table), zero public
+application tables, the expected Compose container/volume ownership, and only
+the verified DB container consuming that volume. All checks finish before
+mutation. It corrects the inputs, stops only the generated Supabase stack,
+removes only its verified DB container and
+`snapflow-production-supabase_supabase-data`, then bootstraps/waits again.
+Destination credentials, db-config/storage volumes, SnapFlow's separate audit
+DB, Wetty and Apache are retained. It refuses populated/imported destinations;
+it is not an ordinary redeployment command. No image rebuild is needed.
+
+Validation: five profile checks pass in Linux, including restrictive-umask
+input access and private-file preservation; fifteen launcher checks pass,
+including repair scope and refusal for populated/shared/foreign resources.
+`probe_bootstrap_linux.py` also passed a real, offline PostgreSQL 17.6.1.136
+cold bootstrap with UID-1002 input fixtures, confirming `_supabase` exists and
+`authenticator` has a password. Its owned test containers/volumes were removed.
+The repaired VPS bootstrap and full Supabase health still need live proof.
+
 ## Release validation
 
 - VPS and rehearsal profiles: three checks pass, including credential reuse,

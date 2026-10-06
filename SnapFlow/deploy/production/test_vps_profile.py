@@ -24,6 +24,38 @@ class VPSProfile(unittest.TestCase):
             target = self.runtime/'upstream'/relative
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(upstream/relative, target)
+        for name in ('db', 'api', 'pooler'):
+            shutil.copytree(upstream / 'volumes' / name, self.runtime / 'upstream/volumes' / name)
+
+    @unittest.skipUnless(os.name == 'posix', 'Linux file mode contract')
+    def test_restrictive_umask_allows_container_inputs_but_keeps_secrets_private(self):
+        upstream = self.runtime / 'upstream'
+        for path in (upstream / 'volumes').rglob('*'):
+            path.chmod(0o700 if path.is_dir() else 0o600)
+        import_dir = self.runtime / 'import'
+        import_dir.mkdir(mode=0o700)
+        secret_sql = import_dir / 'data.sql'
+        secret_sql.write_text('private export fixture')
+        secret_sql.chmod(0o600)
+        old_umask = os.umask(0o077)
+        try:
+            module.configure(self.runtime, 'vps', 'https://snapflow.medianet.space', True)
+        finally:
+            os.umask(old_umask)
+        self.assertEqual(self.runtime.stat().st_mode & 0o777, 0o700)
+        self.assertEqual((self.runtime / 'runtime.env').stat().st_mode & 0o777, 0o600)
+        self.assertEqual(secret_sql.stat().st_mode & 0o777, 0o600)
+        self.assertEqual((upstream / 'volumes/db/roles.sql').stat().st_mode & 0o777, 0o644)
+        self.assertEqual((upstream / 'volumes/functions/main').stat().st_mode & 0o777, 0o755)
+        self.assertEqual((upstream / 'volumes/functions/main/index.ts').stat().st_mode & 0o777, 0o644)
+        self.assertEqual((upstream / 'volumes/api/envoy/docker-entrypoint.sh').stat().st_mode & 0o777, 0o755)
+
+    def test_missing_bootstrap_file_refused_instead_of_directory_mount(self):
+        path = self.runtime / 'upstream/volumes/db/roles.sql'
+        path.unlink()
+        with self.assertRaisesRegex(ValueError, 'container input missing'):
+            module.configure(self.runtime, 'vps', 'https://snapflow.medianet.space', True)
+        self.assertFalse(path.exists())
 
     def test_vps_routes_and_repeat_keys(self):
         module.configure(self.runtime, 'vps', 'https://snapflow.medianet.space', True)
