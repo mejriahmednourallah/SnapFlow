@@ -47,6 +47,14 @@ These two defects are reproduced/covered locally; the exact VPS 403 cause and
 successful renewal remain subject to the repeated server probe. See
 [Alias precedence](https://httpd.apache.org/docs/2.4/mod/mod_alias.html#alias).
 
+The repeated VPS run on release `b58d606` passed: the API directory's root-owned
+0700 permissions were confirmed; both challenge probes, staging dry-runs and
+real shared-certificate renewal succeeded. Expiry is January 4, 2027, with both
+SANs retained. Strict loopback and independent public Windows curl checks passed
+for both names; the reload hook passed, the timer was active and Wetty's runtime
+was unchanged. Certificate repair is complete. Proceed to scoped cleanup below;
+the new-stack build/import/startup and application tests are still pending.
+
 ## 1. Fetch and repair challenges/certificate
 
 This deliberately fetches scripts without pulling over the running checkout.

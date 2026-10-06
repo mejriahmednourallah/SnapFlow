@@ -121,13 +121,18 @@ edit/rollback checks, four fake-Docker cleanup checks and four real Apache
 mode/vhost cases pass. The latter also verify WebSocket upgrade, HTTPS scheme,
 protected terminal Digest authentication and ACME/terminal redirect exemptions.
 SMTP was deliberately deferred by the user. These are local preparation results;
-real VPS challenge validation, renewal, cleanup and startup remain pending.
+The subsequent VPS certificate phase passed on release `b58d606`: both
+challenge routes, staging dry-runs, real renewal preserving both SANs, explicit
+reload-hook test and strict HTTPS checks. Expiry is January 4, 2027; the timer
+is active and Wetty's runtime stayed unchanged. Independent public curl from
+Windows returned HTTP 200/TLS_VERIFY=0 for both names. Root-owned 0700 API
+challenge permissions were confirmed by the supplied `namei` output. Scoped
+cleanup, new-stack startup and VPS capacity acceptance remain pending.
 
 - Refresh exact ownership/protected Wetty/vhost configuration before scoped
   cleanup; ensure compatible client Buildx for sequential VPS builds.
-- Repair both Apache ACME routes/expired shared certificate; preserve both
-  SANs and terminal routing. Local HTTP challenge positive/404 tests are not
-  public TLS/renewal proof. Wetty and VPS Docker were untouched.
+- Certificate repair is complete. Verify protected Wetty/resources again during
+  scoped cleanup and preserve renewal configuration during stack replacement.
 - Configure real SMTP and verify delivery. Install destination cron/Vault
   deliberately; local imported schedules/cron launch remain disabled. Groq and
   original Cloud 2Captcha credentials remain unresolved. Redmine password

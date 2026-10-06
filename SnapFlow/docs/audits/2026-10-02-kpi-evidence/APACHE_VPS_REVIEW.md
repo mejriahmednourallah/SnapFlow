@@ -2,7 +2,7 @@
 
 Reviewed 2026-10-06 against the user's latest redacted Apache/container output
 (`67b7f1c1-cb4f-415f-bd8b-bb8a374cf679`). This records configuration evidence,
-not successful live route tests or an applied VPS patch.
+with the live certificate repair results added below.
 
 Implementation update: the VPS profile and two-phase scoped Apache repair are
 now implemented and tested locally. See the commands and exact validation scope
@@ -14,7 +14,19 @@ syntax/reload with protected files unchanged; the frontend hostname passed exact
 challenge-byte and missing-file checks. The API hostname returned HTTP 403.
 Renewal stopped before running, and cleanup remains pending. The follow-up fixes
 specific-before-broad Alias ordering and public challenge-directory permissions
-under umask 077, with new regression coverage; real VPS verification is pending.
+under umask 077, with new regression coverage.
+
+Successful repeat (Oct 6, release `b58d606`): `namei` confirmed the API challenge
+directory was root-owned **0700**, while its parents were traversable. Both
+hostnames then passed exact challenge bytes and missing-file 404, Certbot's
+initial staging dry-run, real renewal and a second dry-run. The renewed shared
+certificate expires **2027-01-04 14:26:43 UTC**, preserving both SANs. Strict
+loopback HTTPS returned HTTP 200 for each hostname. The renewal reload hook
+passed its explicit test, `certbot.timer` was active, and Wetty's runtime was
+unchanged. Independent live curl checks from the local Windows machine also
+returned HTTP 200 with **TLS_VERIFY=0** for both public hostnames, without
+disabling certificate verification. No new-stack application acceptance or VPS
+cleanup is implied by these HTTPS checks.
 
 ## Confirmed state
 
@@ -22,8 +34,8 @@ under umask 077, with new regression coverage; real VPS verification is pending.
   SSL, rewrite, alias, headers and setenvif modules are loaded.
 - Host Apache owns ports **80, 443 and 18080**. The local rehearsal's Apache
   container on port 18080 cannot be copied directly onto this VPS.
-- The shared certificate on disk expired **2026-08-06**. It covers both
-  `snapflow.medianet.space` and `snapflow-api.medianet.space`.
+- The previously expired shared certificate is renewed through **2027-01-04**.
+  It covers both `snapflow.medianet.space` and `snapflow-api.medianet.space`.
 - The old nine SnapFlow and four ticketing containers still run. No self-hosted
   Supabase is present in this snapshot; scoped VPS cleanup is still pending.
 - Aggregator port 8080 is bound to IPv4/IPv6 wildcard addresses. External
@@ -103,7 +115,7 @@ allowlist. Apache's TLS vhost must forward the HTTPS scheme. See
 6. Measure 150/300/500-page capacity with both databases and Wetty running.
    Existing browser/model/default promotion gates remain unchanged.
 
-The ACME routing patch has been applied on the VPS; its API-host challenge check
-still needs to pass. VPS cleanup, certificate renewal and new-stack deployment
-remain pending. The old public `/api/` mapping is not proof of a working new
-Supabase-to-microservices connection.
+The ACME routing patch, both challenge checks and certificate renewal have
+passed on the VPS. Scoped cleanup and new-stack deployment remain pending.
+The old public `/api/` mapping is not proof of a working new Supabase-to-
+microservices connection.

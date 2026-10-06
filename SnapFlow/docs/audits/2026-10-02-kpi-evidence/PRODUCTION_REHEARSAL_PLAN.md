@@ -1,8 +1,9 @@
 # Production Supabase rehearsal and VPS rebuild
 
 Updated 2026-10-06. Local production-style restore/deployment now tested; see
-[PRODUCTION_REHEARSAL_RESULTS.md](PRODUCTION_REHEARSAL_RESULTS.md). Public Apache
-TLS repair, VPS cleanup and VPS rebuild have not run. The earlier CLI-managed
+[PRODUCTION_REHEARSAL_RESULTS.md](PRODUCTION_REHEARSAL_RESULTS.md). Apache challenge
+repair and shared-certificate renewal have passed on the VPS; cleanup and VPS
+rebuild remain pending. The earlier CLI-managed
 local stack remains functional evidence for a different deployment workflow.
 
 The Oct 6 Apache snapshot is reviewed in
@@ -13,8 +14,11 @@ configuration profile and scoped Apache repair are now implemented and locally
 validated; see [VPS_RUNBOOK.md](../../../deploy/production/VPS_RUNBOOK.md).
 The VPS profile requires an HTTPS origin, omits rehearsal Apache/Mailpit and
 does not publish the aggregator. SMTP is deferred at the user's request.
-Certificate repair/cleanup commands are ready for the user to run through Wetty;
-their actual VPS results remain pending.
+The user ran release `b58d606` through Wetty: both challenge checks, dry-runs,
+renewal, HTTPS verification and renewal-hook test passed; the timer is active
+and Wetty's runtime stayed unchanged. The certificate expires January 4, 2027.
+Independent public HTTPS checks also passed from the local machine. Scoped
+cleanup is the next command; its disk/resource results remain pending.
 
 ## Agreed decisions
 
@@ -38,8 +42,9 @@ their actual VPS results remain pending.
 ## Verified VPS findings
 
 Apache owns TCP 80 and 443. Container Nginx processes do not own public TLS.
-The certificate on disk and served certificate both expire on 2026-08-06.
-Certbot 2.1.0 uses the webroot authenticator; repeated October 2-5 renewals fail
+Before the Oct 6 repair, the disk/served certificate expired on 2026-08-06;
+the successful renewal now expires on 2027-01-04. The prior failure investigation:
+Certbot 2.1.0 uses the webroot authenticator; repeated October 2-5 renewals failed
 ACME challenges. Its configured webroots are
 `/var/www/snapflow.medianet.space/build` and
 `/var/www/snapflow-api.medianet.space`. Apache's SnapFlow vhost forwards the
