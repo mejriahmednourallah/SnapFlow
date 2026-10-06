@@ -77,12 +77,16 @@ isolated base image. Disposable containers are removed and build cache is 0 B.
 These tests mock Docker
 operations; they are not a completed VPS build/import or capacity acceptance.
 
-Live progress (Oct 6): the user supplied the VPS launcher's build-complete
-message and final image-pull/cleanup output. Cleanup reports 1.445 GB cache and
-124.5 MB dangling images reclaimed. No final error is shown. Next run the
-`supabase` phase and collect health, free-space/memory and Wetty status before
-the first import. The supplied excerpt does not yet establish any of those
-runtime checks or application/scan acceptance.
+Live progress (Oct 6): the VPS build completed; final cleanup reclaimed
+1.445 GB of build cache and 124.5 MB of dangling images. After the permission
+repair described below, all eleven Supabase services passed startup health
+checks. The first Cloud import passed with twelve users and thirty-one public
+tables; destination credentials were reused, all three application migrations
+were prepared and imported schedules were disabled. The subsequent SnapFlow
+start phase reported all nine services healthy and `Services ready`.
+Final Apache route activation, public login/RLS/Realtime/audit acceptance and
+resource measurements with the full stack running remain pending. Container
+health alone does not establish application correctness or scan capacity.
 
 ## Failed first bootstrap: Linux file permissions
 
@@ -125,7 +129,9 @@ including repair scope and refusal for populated/shared/foreign resources.
 `probe_bootstrap_linux.py` also passed a real, offline PostgreSQL 17.6.1.136
 cold bootstrap with UID-1002 input fixtures, confirming `_supabase` exists and
 `authenticator` has a password. Its owned test containers/volumes were removed.
-The repaired VPS bootstrap and full Supabase health still need live proof.
+The user's subsequent VPS output confirmed repaired bootstrap and all eleven
+Supabase services healthy. Do not rerun `repair-bootstrap` after the successful
+Cloud import; its populated-destination checks intentionally refuse that case.
 
 ## Release validation
 
@@ -304,14 +310,34 @@ Build sequentially with disk checks; start Supabase, restore once, run `prepare`
 before SnapFlow workers, then start SnapFlow. Existing `compose`, `restore` and
 `prepare` actions use the stored VPS project identities. Imported schedules stay
 disabled until their destination jobs are configured. Both databases remain
-separate. Restore/build/startup on the real VPS have not run yet.
+separate. Build, restore, preparation and startup have now passed on the real
+VPS; final public routing and application acceptance remain pending.
 
 Only after both loopback upstreams are healthy, activate the final routes:
 
 ```bash
+sudo python3 deploy/production/apache-vps.py check-wetty
 sudo python3 deploy/production/apache-vps.py stack
 sudo python3 deploy/production/apache-vps.py probe
 ```
+
+The first live stack activation passed syntax but failed the original combined
+file/runtime protection check after reload; its error path restored both vhosts
+and reloaded the previous configuration. The old check hashed raw Docker output,
+which can vary without a runtime change. A disposable local Docker fixture
+reproduced five serialization-only differences across twenty-five inspect calls.
+The Apache guard now compares structured metadata, normalizes only mount order,
+and retains all mount/network values plus restart/OOM/network-mode checks.
+It reports file changes separately from runtime field changes and records private
+before/after snapshots in the root-only Apache backup directory. Rollback emits
+an explicit confirmation. Eleven Linux regression checks pass, including actual
+change refusal and rollback. The earlier VPS failure's precise differing field
+was not recorded, so its cause is not established retrospectively.
+
+`check-wetty` is read-only: five repeated observations print only changed field
+names, protected filenames and a serialization-only count. It refuses actual
+changes. No route, credential, mount path, address or snapshot value is printed.
+Pull the fix, run this check, then retry stack activation; do not bypass the guard.
 
 Then validate public login/RLS/Realtime, Edge-to-aggregator audits, Form Executor
 and report reloads. The loopback socket precheck is not an application health

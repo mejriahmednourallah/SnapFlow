@@ -3,6 +3,7 @@
 acme: add local challenges and protect terminal routing from the root proxy.
 stack: activate the prepared loopback frontend/Supabase routes after startup.
 probe: check exact challenge bytes locally and publicly, plus missing-file 404.
+check-wetty: read-only repeated file/runtime checks; never print protected values.
 """
 import argparse
 import hashlib
@@ -124,13 +125,53 @@ def terminal_check(routes):
                 raise RuntimeError('Protected terminal Digest challenge failed') from None
 
 
-def wetty_identity():
-    result = subprocess.run(['docker','inspect','wetty_wetty_1','--format',
-                             '{{.Id}} {{.Image}} {{.State.Running}} {{.State.StartedAt}} {{json .Mounts}} {{json .NetworkSettings.Networks}}'],
+def wetty_snapshot():
+    fmt = ('{"id":{{json .Id}},"image":{{json .Image}},'
+           '"running":{{json .State.Running}},"started":{{json .State.StartedAt}},'
+           '"restarts":{{json .RestartCount}},"oom":{{json .State.OOMKilled}},'
+           '"mode":{{json .HostConfig.NetworkMode}},"mounts":{{json .Mounts}},'
+           '"networks":{{json .NetworkSettings.Networks}}}')
+    result = subprocess.run(['docker','inspect','wetty_wetty_1','--format',fmt],
                             check=True, capture_output=True)
-    if b' true ' not in result.stdout:
+    data = json.loads(result.stdout)
+    if data['running'] is not True:
         raise RuntimeError('Wetty is not running')
-    return hashlib.sha256(result.stdout).hexdigest()
+    # Docker may enumerate mounts in a different order between inspect calls.
+    # Compare values, retaining every mount and all nested network metadata.
+    data['mounts'] = sorted(data['mounts'], key=lambda item: json.dumps(item, sort_keys=True))
+    return data, result.stdout
+
+
+def wetty_identity():
+    return wetty_snapshot()[0]
+
+
+def changed_fields(before, after):
+    return sorted(key for key in before.keys() | after.keys()
+                  if key not in before or key not in after or before[key] != after[key])
+
+
+def check_wetty(root):
+    """Read-only diagnosis without printing credentials, routes or mount values."""
+    files = protected(root)
+    before, raw_before = wetty_snapshot()
+    serialization_changes = 0
+    runtime_changes = set()
+    file_changes = set()
+    for _ in range(4):
+        time.sleep(.2)
+        after, raw_after = wetty_snapshot()
+        changes = changed_fields(before, after)
+        runtime_changes.update(changes)
+        file_changes.update(Path(name).name for name in changed_fields(files, protected(root)))
+        if not changes and raw_before != raw_after:
+            serialization_changes += 1
+    print(json.dumps({'samples': 5, 'wetty_running': True,
+                      'runtime_changed_fields': sorted(runtime_changes),
+                      'protected_files_changed': sorted(file_changes),
+                      'serialization_only_changes': serialization_changes}))
+    if runtime_changes or file_changes:
+        raise RuntimeError('Wetty protection check detected changes; do not activate Apache')
 
 
 def apply(root, stack=False):
@@ -161,6 +202,11 @@ def apply(root, stack=False):
         file = backup/target.name
         file.write_bytes(original)
         os.chmod(file, 0o600)
+    def save_identity(name, value):
+        file = backup/name
+        file.write_text(json.dumps(value, sort_keys=True))
+        os.chmod(file, 0o600)
+    save_identity('wetty-before.json', identity)
     def write(target, payload, stat):
         fd, temporary = tempfile.mkstemp(prefix='.snapflow-', dir=target.parent)
         try:
@@ -175,17 +221,25 @@ def apply(root, stack=False):
         for target, _, candidate, stat in changes:
             write(target, candidate, stat)
         if protected(root) != before:
-            raise RuntimeError('Protected terminal files changed')
+            raise RuntimeError('Protected terminal files changed before reload')
         run('apache2ctl', '-t')
         run('systemctl', 'reload', 'apache2')
         terminal_check(routes)
-        if protected(root) != before or wetty_identity() != identity:
-            raise RuntimeError('Protected terminal files changed')
+        after = wetty_identity()
+        save_identity('wetty-after.json', after)
+        file_changes = changed_fields(before, protected(root))
+        if file_changes:
+            raise RuntimeError('Protected terminal files changed: ' + ', '.join(Path(name).name for name in file_changes))
+        runtime_changes = changed_fields(identity, after)
+        if runtime_changes:
+            raise RuntimeError('Wetty runtime changed: ' + ', '.join(runtime_changes)
+                               + '; private snapshots: ' + str(backup))
     except BaseException:
         for target, original, _, stat in changes:
             write(target, original, stat)
         run('apache2ctl', '-t')
         run('systemctl', 'reload', 'apache2')
+        print(json.dumps({'rolled_back': True, 'backup': str(backup)}))
         raise
     (backup/'manifest.json').write_text(json.dumps({'mode': 'stack' if stack else 'acme', 'files': [str(t) for t, *_ in changes]}))
     print(json.dumps({'applied': 'stack' if stack else 'acme', 'backup': str(backup), 'protected_files_unchanged': True}))
@@ -253,11 +307,13 @@ def probe():
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('action', choices=['acme', 'probe', 'stack'])
+    parser.add_argument('action', choices=['acme', 'probe', 'stack', 'check-wetty'])
     options = parser.parse_args()
     if os.name != 'posix' or os.geteuid() != 0:
         parser.error('Run with sudo python3 on the Debian VPS')
-    if options.action == 'probe':
+    if options.action == 'check-wetty':
+        check_wetty(Path('/etc/apache2'))
+    elif options.action == 'probe':
         probe()
     else:
         apply(Path('/etc/apache2'), stack=options.action == 'stack')

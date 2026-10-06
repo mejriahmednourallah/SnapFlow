@@ -55,7 +55,37 @@ returned HTTP 200 with **TLS_VERIFY=0** for both public hostnames, without
 disabling certificate verification. No new-stack application acceptance or VPS
 cleanup is implied by these HTTPS checks.
 
-## Confirmed state
+## Successful destination startup (Oct 6)
+
+Subsequent user terminal output confirms all eleven Supabase services healthy
+after the guarded bootstrap repair. Cloud restore passed with twelve users and
+thirty-one public tables, reused destination credentials, prepared all three
+application migrations and disabled imported schedules. SnapFlow then passed
+startup health checks for all nine services and reported `Services ready`.
+Apache stack activation, public application acceptance and full-stack resource
+measurements remain pending. These results do not establish peak scan capacity.
+
+## First live stack activation and guard correction (Oct 6)
+
+Activation passed Apache syntax but failed the combined protected-file/runtime
+comparison after reload. The error path restored the two original vhosts and
+reloaded them; the supplied third `Syntax OK` precedes the final exception.
+It did not proceed to challenge/resource checks. No application activation is
+claimed from this attempt. Supabase and SnapFlow containers were not stopped.
+
+The old guard hashed raw Docker inspect output, including an unordered mount
+array. A disposable local fixture reproduced five serialization-only changes
+over twenty-five real inspect calls with identical structured runtime values.
+The corrected guard compares values, sorts only the mount array, retains all
+mount/network metadata and adds restart/OOM/network-mode checks. Failures now
+distinguish protected files from runtime field changes; private snapshots are
+recorded under the root-only backup directory and rollback is reported.
+Eleven Linux regression checks pass, covering ordering, actual changes and
+rollback. The old failed VPS attempt did not retain its differing field, so
+the exact historical cause remains unconfirmed. The read-only `check-wetty`
+action supplies safe diagnostics before repeating activation.
+
+## Earlier Apache discovery snapshot
 
 - Apache **2.4.68**, configuration **Syntax OK**; proxy, HTTP proxy, WebSocket,
   SSL, rewrite, alias, headers and setenvif modules are loaded.
@@ -143,6 +173,8 @@ allowlist. Apache's TLS vhost must forward the HTTPS scheme. See
    Existing browser/model/default promotion gates remain unchanged.
 
 The ACME routing patch, both challenge checks and certificate renewal have
-passed on the VPS. Scoped cleanup and new-stack deployment remain pending.
+passed on the VPS. New-stack bootstrap, import and service startup have now
+passed; legacy resource removal remains incomplete after its guard stopped
+cleanup. Final Apache stack activation and application acceptance remain pending.
 The old public `/api/` mapping is not proof of a working new Supabase-to-
 microservices connection.
