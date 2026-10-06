@@ -77,6 +77,13 @@ isolated base image. Disposable containers are removed and build cache is 0 B.
 These tests mock Docker
 operations; they are not a completed VPS build/import or capacity acceptance.
 
+Live progress (Oct 6): the user supplied the VPS launcher's build-complete
+message and final image-pull/cleanup output. Cleanup reports 1.445 GB cache and
+124.5 MB dangling images reclaimed. No final error is shown. Next run the
+`supabase` phase and collect health, free-space/memory and Wetty status before
+the first import. The supplied excerpt does not yet establish any of those
+runtime checks or application/scan acceptance.
+
 ## Release validation
 
 - VPS and rehearsal profiles: three checks pass, including credential reuse,

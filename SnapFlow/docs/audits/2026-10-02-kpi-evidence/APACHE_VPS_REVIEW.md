@@ -17,6 +17,14 @@ output confirms release `386f0a2` was pulled, Wetty running with zero restarts,
 and only 7.7 GB available before further cache cleanup. Legacy containers/data
 remain; the real replacement build and startup have not yet been established.
 
+Live build update (Oct 6, user attachment `8087cb8d`): the phased VPS launcher
+reported completed build/image downloads, including the final Supabase Studio
+and audit PostgreSQL pulls. Final cleanup reclaimed 1.445 GB of build cache and
+124.5 MB of dangling images. The supplied tail contains no final error, but no
+post-build disk/memory statistics or explicit final Wetty status are included.
+Supabase bootstrap/health, Cloud import and SnapFlow startup remain pending.
+Build completion does not establish application correctness or scan capacity.
+
 Live repair update (Oct 6): the user ran release `265598c`. Both vhosts passed
 syntax/reload with protected files unchanged; the frontend hostname passed exact
 challenge-byte and missing-file checks. The API hostname returned HTTP 403.
