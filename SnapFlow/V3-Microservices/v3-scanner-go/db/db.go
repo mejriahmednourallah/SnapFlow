@@ -2,6 +2,7 @@ package db
 
 import (
 	"database/sql"
+	_ "embed"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -10,10 +11,13 @@ import (
 	"time"
 	"unicode/utf8"
 
-	_ "github.com/lib/pq"
+	"github.com/lib/pq"
 )
 
 var conn *sql.DB
+
+//go:embed evidence_schema.sql
+var evidenceSchema string
 
 type FormFuzzResultRecord struct {
 	ScanID        string
@@ -66,7 +70,7 @@ func Connect() error {
 				conn.SetMaxOpenConns(10)
 				conn.SetMaxIdleConns(5)
 				if err := ensureScanPagesHTMLColumns(); err != nil {
-					log.Printf("⚠ Could not ensure scan_pages raw/rendered HTML columns: %v", err)
+					return fmt.Errorf("ensure page evidence schema: %w", err)
 				}
 				if err := ensureTelemetryColumn(); err != nil {
 					log.Printf("⚠ Could not ensure scan_telemetry column: %v", err)
@@ -102,8 +106,12 @@ func ensureScanPagesHTMLColumns() error {
 	_, err := conn.Exec(`
 		UPDATE scan_pages
 		SET raw_html = html
-		WHERE raw_html IS NULL AND html IS NOT NULL
+		WHERE raw_html IS NULL AND html IS NOT NULL AND rendered_html IS NULL
 	`)
+	if err != nil {
+		return err
+	}
+	_, err = conn.Exec(evidenceSchema)
 	return err
 }
 
@@ -156,7 +164,7 @@ func ensureFormFuzzerArtifacts() error {
 }
 
 // InsertPage upserts a single scanned page into the database.
-func InsertPage(scanID, domain, pageURL, html string, metrics interface{}) error {
+func InsertPage(scanID, domain, pageURL, html string, metrics interface{}, ready ...bool) error {
 	if conn == nil {
 		return nil // DB not configured, skip silently
 	}
@@ -167,16 +175,45 @@ func InsertPage(scanID, domain, pageURL, html string, metrics interface{}) error
 		return fmt.Errorf("failed to marshal metrics: %v", err)
 	}
 
+	nlpReady := len(ready) == 0 || ready[0]
 	_, err = conn.Exec(`
-		INSERT INTO scan_pages (scan_id, domain, url, html, raw_html, metrics)
-		VALUES ($1, $2, $3, $4, $5, $6)
+		INSERT INTO scan_pages (scan_id, domain, url, html, raw_html, metrics, nlp_ready)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
 		ON CONFLICT (scan_id, url)
 		DO UPDATE SET
-			html = EXCLUDED.html,
+			html = COALESCE(scan_pages.rendered_html, EXCLUDED.html),
 			raw_html = EXCLUDED.raw_html,
-			metrics = EXCLUDED.metrics
-	`, scanID, domain, pageURL, safeHTML, safeHTML, string(metricsJSON))
+			metrics = COALESCE(scan_pages.metrics, '{}'::jsonb) || EXCLUDED.metrics,
+			nlp_ready = scan_pages.rendered_html IS NOT NULL OR EXCLUDED.nlp_ready
+	`, scanID, domain, pageURL, safeHTML, safeHTML, string(metricsJSON), nlpReady)
 
+	return err
+}
+
+// ReleaseUnselectedPages allows static analysis only once acquisition planning
+// establishes that these pages will not be rendered. Called again on exit to
+// release unfinished attempts with explicit static-only provenance.
+func ReleaseUnselectedPages(scanID string, selected []string) error {
+	if conn == nil {
+		return nil
+	}
+	_, err := conn.Exec(`UPDATE scan_pages SET nlp_ready=TRUE,
+	  metrics=COALESCE(metrics,'{}'::jsonb) || '{"acquisition":{"status":"static_only","rendered":false}}'::jsonb
+	  WHERE scan_id=$1 AND NOT nlp_ready AND NOT (url=ANY($2))`, scanID, pq.Array(selected))
+	return err
+}
+
+func FinishPageAcquisition(scanID, pageURL, reason string) error {
+	if conn == nil {
+		return nil
+	}
+	observation, err := json.Marshal(map[string]interface{}{"acquisition": map[string]interface{}{
+		"status": "render_failed", "rendered": false, "reason": reason}})
+	if err != nil {
+		return err
+	}
+	_, err = conn.Exec(`UPDATE scan_pages SET nlp_ready=TRUE,
+	  metrics=COALESCE(metrics,'{}'::jsonb) || $3::jsonb WHERE scan_id=$1 AND url=$2`, scanID, pageURL, string(observation))
 	return err
 }
 
@@ -351,47 +388,14 @@ func MergePageMetrics(scanID, pageURL string, extra map[string]interface{}) erro
 		return nil
 	}
 
-	var metricsText string
-	err := conn.QueryRow(
-		`SELECT metrics FROM scan_pages WHERE scan_id = $1 AND url = $2`,
-		scanID, pageURL,
-	).Scan(&metricsText)
+	data, err := json.Marshal(extra)
 	if err != nil {
-		// [D-1] Row may not exist yet due to async InsertPage race.
-		// Wait briefly then retry once rather than silently dropping the data.
-		time.Sleep(200 * time.Millisecond)
-		err2 := conn.QueryRow(
-			`SELECT metrics FROM scan_pages WHERE scan_id = $1 AND url = $2`,
-			scanID, pageURL,
-		).Scan(&metricsText)
-		if err2 != nil {
-			// Row still absent after retry — skip gracefully.
-			return nil
-		}
+		return fmt.Errorf("marshal page metrics: %w", err)
 	}
-
-	var existing map[string]interface{}
-	if metricsText != "" {
-		if err2 := json.Unmarshal([]byte(metricsText), &existing); err2 != nil {
-			existing = map[string]interface{}{}
-		}
-	} else {
-		existing = map[string]interface{}{}
-	}
-
-	for k, v := range extra {
-		existing[k] = v
-	}
-
-	merged, err := json.Marshal(existing)
-	if err != nil {
-		return fmt.Errorf("failed to marshal merged metrics: %v", err)
-	}
-
-	_, err = conn.Exec(
-		`UPDATE scan_pages SET metrics = $1 WHERE scan_id = $2 AND url = $3`,
-		string(merged), scanID, pageURL,
-	)
+	_, err = conn.Exec(`
+        UPDATE scan_pages SET metrics = COALESCE(metrics, '{}'::jsonb) || $1::jsonb
+        WHERE scan_id = $2 AND url = $3
+    `, string(data), scanID, pageURL)
 	return err
 }
 
@@ -404,9 +408,55 @@ func UpdatePageHTML(scanID, pageURL, html string) error {
 	safeHTML := sanitizeDBText(html)
 	_, err := conn.Exec(`
 		UPDATE scan_pages
-		SET rendered_html = $1, html = $1
+		SET rendered_html = $1, html = $1, nlp_ready = TRUE
 		WHERE scan_id = $2 AND url = $3
 	`, safeHTML, scanID, pageURL)
+	return err
+}
+
+// UpdateRenderedObservation publishes the DOM and its matching metrics atomically.
+// Keep the initial raw response and page identity; final navigation URL is evidence.
+func UpdateRenderedObservation(scanID, pageURL, html string, metrics map[string]interface{}) error {
+	if conn == nil {
+		return nil
+	}
+	data, err := json.Marshal(metrics)
+	if err != nil {
+		return fmt.Errorf("marshal rendered observation: %w", err)
+	}
+	result, err := conn.Exec(`UPDATE scan_pages SET rendered_html=$1, html=$1,
+		metrics=COALESCE(metrics,'{}'::jsonb) || $2::jsonb, nlp_ready=TRUE
+		WHERE scan_id=$3 AND url=$4`, sanitizeDBText(html), string(data), scanID, pageURL)
+	if err != nil {
+		return err
+	}
+	updated, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if updated != 1 {
+		return fmt.Errorf("rendered observation has no stored page: %s", pageURL)
+	}
+	return nil
+}
+
+// InsertRenderedPage preserves an unknown original response as NULL.
+func InsertRenderedPage(scanID, domain, pageURL, html string, metrics interface{}, ready ...bool) error {
+	if conn == nil {
+		return nil
+	}
+	data, err := json.Marshal(metrics)
+	if err != nil {
+		return err
+	}
+	nlpReady := len(ready) == 0 || ready[0]
+	_, err = conn.Exec(`
+		INSERT INTO scan_pages(scan_id, domain, url, html, rendered_html, metrics, nlp_ready)
+		VALUES ($1,$2,$3,$4,$4,$5,$6)
+		ON CONFLICT(scan_id,url) DO UPDATE SET
+		  html=EXCLUDED.html, rendered_html=EXCLUDED.rendered_html,
+		  metrics=COALESCE(scan_pages.metrics,'{}'::jsonb) || EXCLUDED.metrics, nlp_ready=EXCLUDED.nlp_ready
+	`, scanID, domain, pageURL, sanitizeDBText(html), string(data), nlpReady)
 	return err
 }
 

@@ -68,7 +68,7 @@ function getAiClientConfig() {
     provider,
     apiUrl: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions',
     apiKey: Deno.env.get('GEMINI_API_KEY') ?? '',
-    modelName: Deno.env.get('FORM_TESTER_GEMINI_MODEL') || 'gemini-2.0-flash',
+    modelName: Deno.env.get('FORM_TESTER_GEMINI_MODEL') || 'gemini-3.5-flash-lite',
     missingMessage: 'GEMINI_API_KEY non configuree',
   };
 }

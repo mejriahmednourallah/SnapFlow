@@ -13,6 +13,7 @@ POST /batch-screenshot     Capture screenshots for a list of URLs in parallel.
 import asyncio
 import base64
 import logging
+import time
 from contextlib import asynccontextmanager
 from typing import List, Optional
 
@@ -42,6 +43,7 @@ app = FastAPI(title="v3-browser-pool", version="1.0.0", lifespan=lifespan)
 # ── Request models ─────────────────────────────────────────────────────────────
 
 class RenderRequest(BaseModel):
+    scan_id: Optional[str] = None
     url:        str
     timeout_ms: Optional[int] = 30000
     # "load" | "domcontentloaded" | "networkidle" | "commit"
@@ -82,6 +84,9 @@ class DiscoverRenderedRequest(BaseModel):
     extract_forms: Optional[bool] = True
     wait_ms: Optional[int] = 30000
     force_chromium: Optional[bool] = False
+    measure_metrics: bool = False
+    capture_projection: bool = False
+    scan_id: Optional[str] = None
 
 
 class SearchProbeRequest(BaseModel):
@@ -99,6 +104,7 @@ async def health():
 
 @app.post("/render")
 async def render(req: RenderRequest):
+    started = time.monotonic()
     result = await _pool.render(
         req.url,
         timeout_ms=req.timeout_ms,
@@ -108,10 +114,18 @@ async def render(req: RenderRequest):
         settle_ms=req.settle_ms if req.settle_ms is not None else 1000,
         profile=req.profile or "desktop",
     )
+    logger.info("scan_id=%s phase=render_finished engine=%s status=%s elapsed_ms=%.1f metrics_available=%s",
+                req.scan_id, result.render_engine, result.status, (time.monotonic()-started)*1000, result.metrics_available)
     return {
         "status":        result.status,
         "url":           result.url,
         "rendered_html": result.rendered_html,
+        "raw_html": result.raw_html,
+        "response_headers": result.response_headers or {},
+        "navigation_status": result.navigation_status,
+        "shadow_dom": result.shadow_dom,
+        "metrics_available": result.metrics_available,
+        "trace_timings_ms": result.trace_timings_ms or {},
         "title":         result.title,
         "page_height":   result.page_height,
         "page_width":    result.page_width,
@@ -160,6 +174,9 @@ async def discover_rendered(req: DiscoverRenderedRequest):
         extract_forms=req.extract_forms if req.extract_forms is not None else True,
         wait_ms=req.wait_ms or 30000,
         force_chromium=bool(req.force_chromium),
+        measure_metrics=req.measure_metrics,
+        capture_projection=req.capture_projection,
+        scan_id=req.scan_id,
     )
     return {
         "status": result.status,
@@ -183,6 +200,13 @@ async def discover_rendered(req: DiscoverRenderedRequest):
         "auth_wall": result.auth_wall,
         "form_exploration": result.form_exploration,
         "confidence": result.confidence,
+        "raw_html": result.raw_html,
+        "response_headers": result.response_headers,
+        "navigation_status": result.navigation_status,
+        "render_metrics": result.render_metrics,
+        "text_projection": result.text_projection,
+        "acquisition_attempts": result.acquisition_attempts,
+        "acquisition_routed": result.acquisition_routed,
         "error": result.error,
     }
 

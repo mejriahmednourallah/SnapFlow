@@ -126,6 +126,39 @@ class TestFormFuzzerKPIInBuildReport(unittest.TestCase):
         }
         return row
 
+    def test_mtld_is_preserved_but_ttr_drives_existing_lexical_kpi_threshold(self):
+        row = self._minimal_page_row()
+        row['nlp_results'] = {
+            'word_count': 300,
+            'content_kpis': {
+                'lexical_diversity': 3.0,
+                'lexical_diversity_method': 'mtld',
+                'lexical_diversity_ttr_debug': .007,
+                'lexical_diversity_token_count': 300,
+            },
+        }
+        main.get_db = lambda: _FakeConn([row], self._minimal_summary_row({}))
+        main._load_form_fuzzer_table_stats = lambda *_args: {}
+        report = main.build_report('scan_form_fuzzer')
+        advanced = report['site_metrics']['content']['advanced_content_kpis']
+        self.assertEqual(advanced['low_lexical_diversity_pages'], 1)
+        self.assertEqual(advanced['avg_lexical_diversity'], .007)
+        evidence = advanced['lexical_diversity_rows'][0]
+        self.assertEqual(evidence['threshold'], .4)
+        self.assertEqual(evidence['source_value'], 3.0)
+        self.assertEqual(evidence['source_method'], 'mtld')
+        self.assertEqual(evidence['method'], 'ttr')
+        kpis = main.build_kpi_centric_report(report)
+        kpi = kpis['axes']['Contenu']['Diversité Lexicale']
+        self.assertEqual(kpi['status'], 'failing')
+
+    def test_legacy_ttr_and_diverse_mtld_remain_on_the_same_report_scale(self):
+        self.assertEqual(main._lexical_diversity_for_report({'lexical_diversity': .8}), .8)
+        self.assertEqual(main._lexical_diversity_for_report({
+            'lexical_diversity': 85.0, 'lexical_diversity_method': 'mtld',
+            'lexical_diversity_ttr_debug': .8}), .8)
+        self.assertIsNone(main._lexical_diversity_for_report({'lexical_diversity': 85.0}))
+
     def _minimal_summary_row(self, form_fuzzer_summary):
         return {
             "domain": "https://example.com",

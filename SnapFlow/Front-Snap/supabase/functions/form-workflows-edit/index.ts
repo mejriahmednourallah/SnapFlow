@@ -51,7 +51,7 @@ function aiConfig() {
     provider,
     apiKey: Deno.env.get('GEMINI_API_KEY') ?? '',
     baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions',
-    model: Deno.env.get('FORM_TESTER_GEMINI_MODEL') || 'gemini-2.0-flash',
+    model: Deno.env.get('FORM_TESTER_GEMINI_MODEL') || 'gemini-3.5-flash-lite',
   };
 }
 

@@ -17,7 +17,7 @@ if (!supabaseUrl || !serviceRoleKey) {
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const frontDir = path.resolve(scriptDir, '..');
-const loginFile = path.join(frontDir, 'supabase', '.local-login.json');
+const loginFile = process.env.SNAPFLOW_LOGIN_FILE || path.join(frontDir, 'supabase', '.local-login.json');
 
 const randomToken = randomBytes(5).toString('hex');
 const email = `local-admin+${randomToken}@snapflow.local`;
@@ -55,11 +55,18 @@ async function grantAdminRole(userId) {
 
 async function createDemoProject(userId) {
   const siteName = `Local Demo ${randomToken}`;
-  const siteUrl = 'https://example.com';
+  const siteUrl = process.env.SNAPFLOW_DEMO_URL || 'https://example.com';
+
+  const { data: client, error: clientError } = await supabase
+    .from('clients')
+    .insert({ name: `Local Client ${randomToken}` })
+    .select('id')
+    .single();
+  if (clientError) throw new Error(`Failed to create demo client: ${clientError.message}`);
 
   const { data: project, error: projectError } = await supabase
     .from('projects')
-    .insert({ site_name: siteName, url: siteUrl })
+    .insert({ site_name: siteName, url: siteUrl, client_id: client.id })
     .select('id, site_name, url')
     .single();
 
@@ -105,8 +112,10 @@ try {
 
   console.log('');
   console.log('Local admin ready');
-  console.log(`Email    : ${email}`);
-  console.log(`Password : ${password}`);
+  if (process.env.SNAPFLOW_PRIVATE_LOGIN !== '1') {
+    console.log(`Email    : ${email}`);
+    console.log(`Password : ${password}`);
+  }
   console.log(`Role     : admin`);
   console.log(`Project  : ${project.site_name} (${project.url})`);
   console.log(`Redmine  : ${redmineBaseUrl || 'not configured'} (${hasRedmineApiKey ? 'API key configured' : 'API key missing'})`);

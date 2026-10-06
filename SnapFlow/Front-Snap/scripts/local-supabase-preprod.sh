@@ -15,7 +15,7 @@ V3_DIR="$ROOT_DIR/V3-Microservices"
 
 SUPABASE_ENV_FILE="$FRONT_DIR/supabase/.env.local"
 V3_ENV_FILE="$V3_DIR/.env.local"
-SCANNER_BASE_URL="${SCANNER_BASE_URL:-http://host.docker.internal:8080}"
+SCANNER_BASE_URL="${SCANNER_BASE_URL:-http://aggregator:8080}"
 DB_PASS="${DB_PASS:-snapflow}"
 DEFAULT_REDMINE_BASE_URL="https://maintenance.medianet.tn"
 
@@ -32,7 +32,12 @@ Options:
   -h, --help           Show this help.
 
 Environment overrides:
-  SCANNER_BASE_URL     Defaults to http://host.docker.internal:8080.
+  SCANNER_BASE_URL     Defaults to http://aggregator:8080 on the shared private network.
+  SUPABASE_PUBLIC_URL  Browser-facing Supabase origin; defaults to local CLI API_URL.
+  FORM_EXECUTOR_SUPABASE_URL
+                      Defaults to http://supabase-kong:8000 on the private network.
+  FORM_EXECUTOR_DATABASE_URL
+                      Defaults to the local supabase-db alias with fresh CLI credentials.
   DB_PASS              Defaults to snapflow for V3 local preprod Postgres.
   REDMINE_BASE_URL     Defaults to https://maintenance.medianet.tn.
   REDMINE_API_KEY      Admin API key used by local Redmine Edge Functions.
@@ -78,12 +83,13 @@ read_env_value() {
       continue
     fi
 
-    line="$(grep -E "^${key}=" "$file" | tail -n 1 || true)"
+    line="$(grep -E "^[[:space:]]*${key}[[:space:]]*=" "$file" | tail -n 1 || true)"
     if [ -z "$line" ]; then
       continue
     fi
 
     value="${line#*=}"
+    value="$(printf '%s' "$value" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
     value="${value%\"}"
     value="${value#\"}"
     value="${value%\'}"
@@ -146,14 +152,10 @@ wait_for_supabase_status() {
 }
 
 reset_local_database() {
-  if npx supabase db reset --local --yes; then
-    return 0
-  fi
-
-  echo "Supabase db reset returned a non-zero status after migrations."
-  echo "This can happen on Windows when the CLI receives a transient 502 while containers restart."
-  echo "Checking whether local Supabase is healthy before continuing..."
-  wait_for_supabase_status
+  # A reachable API does not prove that all application migrations succeeded.
+  # Keep the real reset exit status; do not generate env files or serve functions
+  # after an unsuccessful setup.
+  npx supabase db reset --local --yes
 }
 
 write_env_files() {
@@ -170,10 +172,10 @@ write_env_files() {
 # Used by: cd V3-Microservices && ./run-all.sh --local
 
 DB_PASS=$DB_PASS
-VITE_SUPABASE_URL=$api_url
+VITE_SUPABASE_URL=${SUPABASE_PUBLIC_URL:-$api_url}
 VITE_SUPABASE_PUBLISHABLE_KEY=$anon_key
-FORM_EXECUTOR_DATABASE_URL=postgresql://postgres:postgres@host.docker.internal:54322/postgres
-FORM_EXECUTOR_SUPABASE_URL=http://host.docker.internal:54321
+FORM_EXECUTOR_DATABASE_URL=${FORM_EXECUTOR_DATABASE_URL:-postgresql://postgres:postgres@supabase-db:5432/postgres}
+FORM_EXECUTOR_SUPABASE_URL=${FORM_EXECUTOR_SUPABASE_URL:-http://supabase-kong:8000}
 SUPABASE_SERVICE_ROLE_KEY=$service_role_key
 FORM_EXECUTOR_ARTIFACT_BUCKET=form-test-artifacts
 REDMINE_BASE_URL=$REDMINE_BASE_URL
@@ -192,7 +194,7 @@ EOF
 # Used by: npx supabase functions serve --env-file supabase/.env.local --no-verify-jwt
 
 SUPABASE_URL=$api_url
-FORM_TESTER_PUBLIC_STORAGE_ORIGIN=$api_url
+FORM_TESTER_PUBLIC_STORAGE_ORIGIN=${SUPABASE_PUBLIC_URL:-$api_url}
 SUPABASE_ANON_KEY=$anon_key
 SUPABASE_SERVICE_ROLE_KEY=$service_role_key
 SCANNER_BASE_URL=$SCANNER_BASE_URL
@@ -235,18 +237,13 @@ cleanup_environment() {
     docker compose -p snapflow-local-preprod -f docker-compose.preprod.yml down --volumes --remove-orphans
   )
 
-  echo "Stopping all local Supabase instances and deleting backups/volumes..."
-  npx supabase stop --all --no-backup --yes
-
-  echo "Removing stale Supabase volumes by prefix..."
-  while IFS= read -r volume_name; do
-    case "$volume_name" in
-      supabase_db_*|supabase_storage_*|supabase_edge_runtime_*)
-        docker volume rm "$volume_name" >/dev/null || true
-        echo "Removed volume: $volume_name"
-        ;;
-    esac
-  done < <(docker volume ls --format '{{.Name}}')
+  echo "Stopping this project's Supabase instance and deleting its data..."
+  # The CLI reads this Front-Snap/supabase/config.toml project. Do not stop all
+  # CLI projects or remove volumes belonging to another application.
+  local project_id
+  project_id="$(read_env_value project_id "$FRONT_DIR/supabase/config.toml")"
+  require_value project_id "$project_id"
+  npx supabase stop --project-id "$project_id" --no-backup --yes
 }
 
 seed_random_admin() {
@@ -263,13 +260,11 @@ seed_random_admin() {
     REDMINE_LOGIN_RATE_LIMIT_SALT="$REDMINE_LOGIN_RATE_LIMIT_SALT" \
     node "./scripts/seed-local-admin.mjs"; then
     return 0
+  else
+    local seed_exit=$?
+    echo "Random admin seed failed; authenticated preprod setup is incomplete." >&2
+    return "$seed_exit"
   fi
-
-  echo ""
-  echo "Random admin seed failed, but local Supabase is already running."
-  echo "Continuing to serve Edge Functions."
-  echo "To retry the seed manually from Front-Snap:"
-  echo "  SUPABASE_URL=\"$api_url\" SUPABASE_SERVICE_ROLE_KEY=\"<service-role-key>\" node ./scripts/seed-local-admin.mjs"
 }
 
 if [ "$CLEAN" = true ]; then

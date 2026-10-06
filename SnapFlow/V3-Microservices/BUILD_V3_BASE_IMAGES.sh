@@ -5,9 +5,12 @@ set -euo pipefail
 NO_CACHE=false
 PULL=false
 REBUILD_BASE=false
+CPU_ONLY=false
 
 FASTAPI_TAG="snapflow/v3-python-fastapi-base:latest"
 HEAVY_TAG="snapflow/v3-python-heavy-base:latest"
+NLP_TAG="snapflow/v3-python-nlp-base:latest"
+BROWSER_TAG="snapflow/v3-python-browser-base:latest"
 
 log() {
     printf '[%s] %s\n' "$(date '+%H:%M:%S')" "$*"
@@ -24,6 +27,9 @@ for arg in "$@"; do
         -rebuildbase|--rebuildbase|--rebuild-base)
             REBUILD_BASE=true
             ;;
+        -cpuonly|--cpu-only)
+            CPU_ONLY=true
+            ;;
     esac
 done
 
@@ -35,7 +41,8 @@ if [ ! -d "$BASE_DIR" ]; then
     exit 1
 fi
 
-if [ ! -f "$BASE_DIR/Dockerfile.fastapi" ] || [ ! -f "$BASE_DIR/Dockerfile.heavy" ]; then
+if [ ! -f "$BASE_DIR/Dockerfile.fastapi" ] || [ ! -f "$BASE_DIR/Dockerfile.heavy" ] ||
+   [ ! -f "$BASE_DIR/Dockerfile.nlp" ] || [ ! -f "$BASE_DIR/Dockerfile.browser" ]; then
     echo "Missing V3 base Dockerfiles under $BASE_DIR"
     exit 1
 fi
@@ -56,6 +63,9 @@ log "Flags: rebuild_base=$REBUILD_BASE no_cache=$NO_CACHE pull=$PULL"
 
 BUILD_FASTAPI=true
 BUILD_HEAVY=true
+BUILD_NLP=true
+BUILD_BROWSER=true
+if [ "$CPU_ONLY" = true ]; then BUILD_HEAVY=false; fi
 
 if [ "$REBUILD_BASE" != true ]; then
     if image_exists "$FASTAPI_TAG"; then
@@ -63,19 +73,24 @@ if [ "$REBUILD_BASE" != true ]; then
     else
         log "Plan: build missing $FASTAPI_TAG"
     fi
-    if image_exists "$HEAVY_TAG"; then
+    if [ "$CPU_ONLY" = true ]; then
+        log "Plan: skip visual/GPU base (--cpu-only)."
+    elif image_exists "$HEAVY_TAG"; then
         BUILD_HEAVY=false
     else
         log "Plan: build missing $HEAVY_TAG"
     fi
 
-    if [ "$BUILD_FASTAPI" = false ] && [ "$BUILD_HEAVY" = false ]; then
+    if image_exists "$NLP_TAG"; then BUILD_NLP=false; fi
+    if image_exists "$BROWSER_TAG"; then BUILD_BROWSER=false; fi
+    if [ "$BUILD_FASTAPI" = false ] && [ "$BUILD_HEAVY" = false ] &&
+       [ "$BUILD_NLP" = false ] && [ "$BUILD_BROWSER" = false ]; then
         log "V3 base images already exist. Reusing cached images."
         log "Use --rebuildbase to rebuild them; combine with --no-cache for a cacheless base rebuild."
         exit 0
     fi
 else
-    log "Plan: --rebuildbase was passed, so both base images will be rebuilt."
+    log "Plan: rebuild all selected base images; cpu_only=$CPU_ONLY."
 fi
 
 COMMON_BUILD_ARGS=()
@@ -85,8 +100,8 @@ fi
 
 # IMPORTANT:
 # - `--pull` is safe/desired for Docker Hub public bases (Dockerfile.fastapi).
-# - `--pull` must NOT be applied to Dockerfile.heavy because its parent image
-#   is local (`snapflow/v3-python-fastapi-base:latest`) and forcing pull can
+# - `--pull` must NOT be applied to child bases because their parent images
+#   are local (fastapi for NLP/browser, browser for visual/GPU) and forcing pull can
 #   trigger Docker Hub auth/lookups for a local-only tag.
 FASTAPI_BUILD_ARGS=("${COMMON_BUILD_ARGS[@]}")
 HEAVY_BUILD_ARGS=("${COMMON_BUILD_ARGS[@]}")
@@ -113,7 +128,16 @@ if ! image_exists "$FASTAPI_TAG"; then
     exit 1
 fi
 
-if [ "$BUILD_HEAVY" = true ]; then
+if [ "$BUILD_NLP" = true ]; then
+    docker build --progress=plain "${COMMON_BUILD_ARGS[@]}" -f "$BASE_DIR/Dockerfile.nlp" -t "$NLP_TAG" "$BASE_DIR"
+fi
+if [ "$BUILD_BROWSER" = true ]; then
+    docker build --progress=plain "${COMMON_BUILD_ARGS[@]}" -f "$BASE_DIR/Dockerfile.browser" -t "$BROWSER_TAG" "$BASE_DIR"
+fi
+
+if [ "$CPU_ONLY" = true ]; then
+    log "Visual/GPU base skipped; NLP and browser CPU bases are ready."
+elif [ "$BUILD_HEAVY" = true ]; then
     log "Building $HEAVY_TAG"
     log "Context: $BASE_DIR"
     log "Dockerfile: Dockerfile.heavy"

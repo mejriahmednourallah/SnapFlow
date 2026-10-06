@@ -62,7 +62,9 @@ Deno.serve(async (req) => {
       });
     }
 
-    const { url, kpis, axes, timeout = 25, async_mode = false, max_pages = 100 } = body || {};
+    const configuredBudget = Number(Deno.env.get('DEFAULT_SCAN_MAX_PAGES') || '100');
+    const defaultBudget = Number.isSafeInteger(configuredBudget) && configuredBudget > 0 ? configuredBudget : 100;
+    const { url, kpis, axes, timeout = 25, async_mode = false, max_pages = defaultBudget } = body || {};
 
     if (!url) {
       return new Response(JSON.stringify({ error: 'url is required' }), {

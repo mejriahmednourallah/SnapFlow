@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -144,7 +145,11 @@ func watchScan(client *api.Client, scanID string, timeoutSec int) error {
 }
 
 func init() {
-	scanCmd.Flags().IntVar(&maxPages, "max-pages", 150, "Max pages to crawl")
+	budget := 150
+	if configured, err := strconv.Atoi(os.Getenv("DEFAULT_SCAN_MAX_PAGES")); err == nil && configured > 0 {
+		budget = configured
+	}
+	scanCmd.Flags().IntVar(&maxPages, "max-pages", budget, "Max pages to crawl")
 	scanCmd.Flags().BoolVar(&watch, "watch", false, "Poll status until complete")
 	scanCmd.Flags().IntVar(&timeout, "timeout", 900, "Seconds to wait when --watch")
 

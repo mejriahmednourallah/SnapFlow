@@ -1,0 +1,14 @@
+{
+  "scope": "Expected results for the existing page-type/language word-count policy. Authored before implementation; not labels of general semantic content quality.",
+  "cases": [
+    {"id": "en_contact", "page_type": "contact", "language": "en", "word_count": 95, "threshold": 80, "thin": false, "judge_reason": "A contact page has its own existing 80-word benchmark; imposing 300 changes the producer rule."},
+    {"id": "en_landing", "page_type": "landing", "language": "en", "word_count": 180, "threshold": 150, "thin": false, "judge_reason": "A landing page exceeds its existing benchmark, even though it is below 300."},
+    {"id": "en_news", "page_type": "news", "language": "en", "word_count": 350, "threshold": 500, "thin": true, "judge_reason": "The producer measures a 150-word deficit against its news benchmark. The global 300 rule misses that result."},
+    {"id": "en_faq", "page_type": "faq", "language": "en", "word_count": 350, "threshold": 400, "thin": true, "judge_reason": "The existing FAQ benchmark is 400; this is contract consistency, not a claim that all 350-word FAQs lack value."},
+    {"id": "en_other", "page_type": "other", "language": "en", "word_count": 225, "threshold": 200, "thin": false, "judge_reason": "The producer's other-page benchmark is met; the aggregator must not replace it with 300."},
+    {"id": "fr_landing", "page_type": "landing", "language": "fr", "word_count": 130, "threshold": 127, "thin": false, "judge_reason": "Wire the already-defined French multiplier to the detected language; do not invent a new coefficient."},
+    {"id": "ar_contact", "page_type": "contact", "language": "ar", "word_count": 70, "threshold": 64, "thin": false, "judge_reason": "The existing Arabic contact policy is 64 words; preserve the language and benchmark as evidence."},
+    {"id": "fr_product", "page_type": "product", "language": "fr", "word_count": 260, "threshold": 255, "thin": false, "judge_reason": "The established French product rule passes this count; a fixed 300-word consumer contradicts it."},
+    {"id": "ar_product_boundary", "page_type": "product", "language": "ar", "word_count": 240, "threshold": 240, "thin": false, "judge_reason": "The existing comparison is strictly below the benchmark; equality is not a deficit."}
+  ]
+}

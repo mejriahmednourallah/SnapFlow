@@ -8,6 +8,8 @@ import uuid
 import json
 import time
 import re
+import math
+import ipaddress
 import threading
 import asyncio
 import logging
@@ -26,6 +28,7 @@ from pydantic import BaseModel
 
 from classifier import build_recommendations
 from kpi_builder import build_kpi_centric_report
+from scan_admission import ScanAdmission
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [AGG] %(message)s")
 logger = logging.getLogger(__name__)
@@ -51,6 +54,10 @@ BROWSER_POOL_URL = os.getenv("BROWSER_POOL_URL", "http://v3-browser-pool:8084")
 MULTI_BROWSER_FALLBACK_TIMEOUT = int(os.getenv("MULTI_BROWSER_FALLBACK_TIMEOUT", "20"))
 DEFAULT_HEADLESS_CONCURRENCY = int(os.getenv("DEFAULT_HEADLESS_CONCURRENCY", "24"))
 MAX_HEADLESS_CONCURRENCY = int(os.getenv("MAX_HEADLESS_CONCURRENCY", "48"))
+SCANNER_HTTP_TIMEOUT_SEC = int(os.getenv("SCANNER_HTTP_TIMEOUT_SEC", "1830"))
+DEFAULT_SCAN_MAX_PAGES = max(1, int(os.getenv("DEFAULT_SCAN_MAX_PAGES", "150")))
+SCAN_ADMISSION_ENABLED = os.getenv("SCAN_ADMISSION_ENABLED", "false").lower() in ("1", "true", "yes")
+_admission_started = False
 
 
 def _clamp_headless_concurrency(value: Optional[int]) -> int:
@@ -296,7 +303,7 @@ def _load_previous_quality_drift_artifact(scan_url: str, exclude_scan_id: str) -
         return None, None
     try:
         conn = get_db()
-        cur = conn.cursor(psycopg2.extras.RealDictCursor)
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         cur.execute(
             """
             SELECT scan_id, quality_drift_artifact::text AS quality_drift_artifact
@@ -381,13 +388,15 @@ def _persist_scan_state(scan_id: str, state: dict) -> None:
         conn.close()
     except Exception as exc:
         logger.warning("[A-1] Could not persist scan state for %s: %s", scan_id, exc)
+        if SCAN_ADMISSION_ENABLED:
+            raise
 
 
 def _load_scan_state_from_db(scan_id: str) -> Optional[dict]:
     """[A-1] Reload scan state from DB after a restart."""
     try:
         conn = get_db()
-        cur = conn.cursor(psycopg2.extras.RealDictCursor)
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         cur.execute(
             "SELECT state_json::text AS state_json FROM scan_state WHERE scan_id = %s",
             (scan_id,),
@@ -399,6 +408,8 @@ def _load_scan_state_from_db(scan_id: str) -> Optional[dict]:
             return _jsonb_object(row.get("state_json"))
     except Exception as exc:
         logger.warning("[A-1] Could not reload scan state for %s: %s", scan_id, exc)
+        if SCAN_ADMISSION_ENABLED:
+            raise
     return None
 
 
@@ -432,12 +443,13 @@ def _persist_kpi_payload(scan_id: str, payload: dict, scan_url: Optional[str] = 
         conn.close()
     except Exception as exc:
         logger.warning("Could not persist KPI payload for %s: %s", scan_id, exc)
+        raise
 
 
 def _load_persisted_kpi_payload(scan_id: str) -> Optional[dict]:
     try:
         conn = get_db()
-        cur = conn.cursor(psycopg2.extras.RealDictCursor)
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         cur.execute(
             """
             SELECT
@@ -592,6 +604,13 @@ def create_scan_entry(scan_id: str, req: "ScanRequest"):
 
 
 def get_scan_entry(scan_id: str) -> Optional[dict]:
+    if SCAN_ADMISSION_ENABLED:
+        # A different dispatcher process may have advanced a queued job.
+        db_state = _load_scan_state_from_db(scan_id)
+        if db_state:
+            with scans_lock:
+                scans[scan_id] = db_state
+            return dict(db_state)
     with scans_lock:
         scan = scans.get(scan_id)
         if scan:
@@ -606,6 +625,12 @@ def get_scan_entry(scan_id: str) -> Optional[dict]:
 
 
 def update_scan_entry(scan_id: str, **updates):
+    with scans_lock:
+        needs_reload = scan_id not in scans
+    if needs_reload:
+        # A restarted/other dispatcher can claim a durable pending job which
+        # this process never created. Load it before applying RUNNING/FAILED.
+        get_scan_entry(scan_id)
     with scans_lock:
         if scan_id in scans:
             scans[scan_id].update(updates)
@@ -633,6 +658,8 @@ def azure_heartbeat_loop(site_name: str, interval_seconds: int):
 def startup_heartbeat():
     global _heartbeat_started
     _ensure_scan_state_table()  # [A-1] idempotent table creation
+    if SCAN_ADMISSION_ENABLED:
+        _start_admission_dispatcher()
     logger.info("KPI mode: new (legacy path removed)")
     with scans_lock:
         if _heartbeat_started:
@@ -662,7 +689,7 @@ class ScanStatus(str, Enum):
 
 class ScanRequest(BaseModel):
     url: str
-    max_pages: Optional[int] = 150
+    max_pages: Optional[int] = DEFAULT_SCAN_MAX_PAGES
     headless_concurrency: Optional[int] = DEFAULT_HEADLESS_CONCURRENCY
     enable_visual_regression: Optional[bool] = False
     visual_baseline_scan_id: Optional[str] = None
@@ -690,7 +717,9 @@ def count_pages(scan_id: str) -> tuple[int, int]:
         conn = get_db()
         cur = conn.cursor()
         cur.execute(
-            "SELECT COUNT(*), COUNT(nlp_results) FROM scan_pages WHERE scan_id = %s",
+            """SELECT COUNT(*), COUNT(*) FILTER (WHERE nlp_results IS NOT NULL AND nlp_revision = content_revision
+              AND NOT COALESCE(nlp_results#>'{spelling_scope,provider_failures}' ?| ARRAY['fr','en','ar'],FALSE))
+              FROM scan_pages WHERE scan_id = %s""",
             (scan_id,)
         )
         total, nlp_done = cur.fetchone()
@@ -698,7 +727,8 @@ def count_pages(scan_id: str) -> tuple[int, int]:
         conn.close()
         return int(total or 0), int(nlp_done or 0)
     except Exception:
-        return 0, 0
+        logger.exception("Could not count current NLP revisions for %s", scan_id)
+        raise
 
 
 def _j(val) -> dict:
@@ -2403,7 +2433,7 @@ def _load_scan_page_rows(scan_id: str) -> list[dict]:
         conn = get_db()
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         cur.execute(
-            "SELECT url, metrics, nlp_results FROM scan_pages WHERE scan_id = %s ORDER BY id ASC",
+            "SELECT url, metrics, CASE WHEN nlp_revision = content_revision THEN nlp_results END AS nlp_results FROM scan_pages WHERE scan_id = %s ORDER BY id ASC",
             (scan_id,),
         )
         rows = [dict(row) for row in cur.fetchall()]
@@ -2419,13 +2449,94 @@ def evaluate_footer_rgpd_alignment_for_scan(scan_id: str, scan_url: str) -> dict
     return evaluate_footer_rgpd_alignment(scan_id, scan_url, _load_scan_page_rows(scan_id))
 
 
+def _thin_content_for_report(nlp: dict) -> Optional[dict]:
+    """Consume the worker's measured policy; retain compatibility with old rows.
+
+    Missing counts are not zero-word observations. A present producer result
+    must agree with the measured count; never silently replace it with 300.
+    """
+    count = nlp.get("word_count")
+    if (isinstance(count, bool) or not isinstance(count, (int, float)) or
+            not math.isfinite(count) or count < 0 or int(count) != count):
+        return None
+    count = int(count)
+    seo = _safe_dict(nlp.get("seo_kpis"))
+    if "thin_content_by_type" in seo:
+        measured = _safe_dict(seo.get("thin_content_by_type"))
+        threshold = measured.get("word_count_threshold")
+        thin = measured.get("thin_vs_page_type")
+        if (isinstance(threshold, bool) or not isinstance(threshold, int) or threshold < 0 or
+                not isinstance(thin, bool) or thin != (count < threshold)):
+            return None
+        source = "nlp.page_type_word_benchmark"
+    else:
+        # Older stored analyses have counts but no page-type producer result.
+        threshold, thin, source = 300, count < 300, "legacy_word_count"
+    return dict(word_count=count, thin_vs_page_type=thin,
+                word_count_threshold=threshold, word_count_gap=max(0, threshold-count),
+                page_type=nlp.get("page_type"), language=nlp.get("content_language"),
+                rule_source=source)
+
+
+def _related_passage_for_report(nlp: dict, page_url: str, query_key: str) -> Optional[dict]:
+    """Project the opt-in worker observation without using it as a verdict.
+
+    Offsets refer to stripped extracted text, never to HTML or Markdown bytes.
+    Keep this separate from failing-page rows: relevance proves neither factual
+    support nor a structural H1/meta problem.
+    """
+    semantic = _safe_dict(nlp.get("semantic_enrichment"))
+    retrieval = _safe_dict(semantic.get("passage_retrieval"))
+    match = _safe_dict(_safe_dict(retrieval.get("matches")).get(query_key))
+    if (semantic.get("available") is not True or retrieval.get("available") is not True or
+            retrieval.get("source") != "extracted_content_text" or retrieval.get("normalization") != "strip"):
+        return None
+    text, query = match.get("text"), match.get("query")
+    start, end = match.get("char_start"), match.get("char_end")
+    score = match.get("similarity")
+    digest = retrieval.get("text_sha256")
+    if (not isinstance(text, str) or not text or not isinstance(query, str) or not query.strip() or
+            any(isinstance(value, bool) or not isinstance(value, int) for value in (start, end)) or
+            start < 0 or end - start != len(text) or
+            isinstance(score, bool) or not isinstance(score, (int, float)) or not math.isfinite(score) or
+            not -1 <= score <= 1 or not isinstance(digest, str) or not re.fullmatch(r"[a-f0-9]{64}", digest)):
+        return None
+    return dict(page_url=page_url, content_revision=nlp.get("content_revision"),
+                model=semantic.get("model"), source="extracted_content_text", normalization="strip",
+                offset_unit="unicode_codepoints",
+                text_sha256=digest, query=query, text=text, char_start=start, char_end=end,
+                token_start=match.get("token_start"), token_end=match.get("token_end"),
+                similarity=score, complete=retrieval.get("complete"),
+                total_tokens=retrieval.get("total_tokens"), processed_tokens=retrieval.get("processed_tokens"),
+                interpretation="topic relevance only; not factual support")
+
+
+def _lexical_diversity_for_report(content_kpis: dict) -> Optional[float]:
+    """Return TTR in the units of the existing report threshold (0.4).
+
+    The worker emits MTLD as lexical_diversity and preserves TTR separately.
+    Comparing MTLD (token-span units) directly to a 0-1 TTR threshold hides
+    repetitive pages. Preserve MTLD as evidence, evaluate the captured TTR.
+    """
+    method = str(content_kpis.get("lexical_diversity_method") or "").lower()
+    if method == "mtld":
+        value = content_kpis.get("lexical_diversity_ttr_debug")
+    elif method in {"", "ttr"}:
+        value = content_kpis.get("lexical_diversity")
+    else:
+        return None
+    if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) and 0 <= value <= 1:
+        return float(value)
+    return None
+
+
 def build_report(scan_id: str, enrichment_artifacts: Optional[dict] = None) -> dict:
     """Build the Plan A three-tier scan report from DB data."""
     try:
         conn = get_db()
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         cur.execute(
-            "SELECT url, metrics, nlp_results FROM scan_pages WHERE scan_id = %s ORDER BY id ASC",
+            "SELECT url, metrics, CASE WHEN nlp_revision = content_revision THEN nlp_results END AS nlp_results FROM scan_pages WHERE scan_id = %s ORDER BY id ASC",
             (scan_id,)
         )
         page_rows = cur.fetchall()
@@ -2715,9 +2826,12 @@ def build_report(scan_id: str, enrichment_artifacts: Optional[dict] = None) -> d
     typo_pages = 0
     typo_density_total = 0.0
     typo_density_samples = []
+    spelling_evaluation = dict(evaluated_pages=0, partial_pages=0, unknown_pages=0, legacy_pages=0)
     seo_non_clean_url_rows = []
     seo_external_link_rows = []
     seo_h1_quality_rows = []
+    seo_h1_related_passages = []
+    seo_meta_related_passages = []
     seo_meta_nlp_rows = []
     seo_llms_rows_by_url = {}
     ai_schema_rows = []
@@ -2727,6 +2841,10 @@ def build_report(scan_id: str, enrichment_artifacts: Optional[dict] = None) -> d
     perf_console_error_rows = []
     content_freshness_rows = []
     content_thin_rows = []
+    content_quality_affected_urls = set()
+    thin_content_evaluation = dict(evaluated_pages=0, page_type_evaluated_pages=0,
+                                   legacy_evaluated_pages=0, excluded_utility_pages=0,
+                                   unknown_pages=0)
     content_cta_rows = []
     content_broken_structure_rows = []
     content_lexical_rows = []
@@ -2747,8 +2865,8 @@ def build_report(scan_id: str, enrichment_artifacts: Optional[dict] = None) -> d
     utility_page_tokens = ("cart", "panier", "checkout", "commande", "order", "payment", "paiement", "login", "connexion", "account", "mon-compte", "search", "recherche")
 
     def _is_utility_page(page_url: str, nlp_payload: dict) -> bool:
-        url_text = str(page_url or "").lower()
-        if any(token in url_text for token in utility_page_tokens):
+        route_parts = urlparse(str(page_url or "")).path.lower().strip("/").split("/")
+        if any(part in utility_page_tokens for part in route_parts):
             return True
         page_type = str(_safe_dict(nlp_payload).get("page_type") or "").lower()
         return page_type in {"cart", "checkout", "login", "account", "search"}
@@ -3178,32 +3296,54 @@ def build_report(scan_id: str, enrichment_artifacts: Optional[dict] = None) -> d
             if nlp.get("page_type") == "product":
                 nlp_product_pages += 1
             is_utility_content_page = _is_utility_page(page_url, nlp)
-            if nlp.get("content_type_hint") == "stuffed":
+            thin_evidence = _thin_content_for_report(nlp)
+            is_thin = False
+            if is_utility_content_page:
+                thin_content_evaluation["excluded_utility_pages"] += 1
+            elif thin_evidence is None:
+                thin_content_evaluation["unknown_pages"] += 1
+            else:
+                thin_content_evaluation["evaluated_pages"] += 1
+                source_key = ("page_type_evaluated_pages" if thin_evidence["rule_source"] ==
+                              "nlp.page_type_word_benchmark" else "legacy_evaluated_pages")
+                thin_content_evaluation[source_key] += 1
+                is_thin = thin_evidence["thin_vs_page_type"]
+            is_stuffed = nlp.get("content_type_hint") == "stuffed"
+            if is_stuffed:
                 nlp_keyword_stuffing_pages += 1
                 context_keyword_stuffing_pages.append(page_url)
-                content_thin_rows.append({
-                    "page_url": page_url,
-                    "word_count": nlp.get("word_count"),
-                    "typo_density": nlp.get("typo_density"),
-                    "stuffing_signal": True,
-                    "snippet": _evidence_snippet(_safe_dict(_safe_dict(nlp.get("content_kpis")).get("above_fold")).get("above_fold_snippet")),
-                })
-            if (nlp.get("word_count") or 0) < 300 and not is_utility_content_page:
+            if is_thin:
                 nlp_thin_content_pages += 1
-                content_thin_rows.append({
-                    "page_url": page_url,
-                    "word_count": nlp.get("word_count"),
-                    "typo_density": nlp.get("typo_density"),
-                    "stuffing_signal": nlp.get("content_type_hint") == "stuffed",
-                    "snippet": _evidence_snippet(_safe_dict(_safe_dict(nlp.get("content_kpis")).get("above_fold")).get("above_fold_snippet")),
-                })
             typo_density = float(nlp.get("typo_density", 0.0) or 0.0)
+            scope = _safe_dict(nlp.get("spelling_scope"))
+            measured_spelling = True
+            if scope:
+                measured_spelling = bool(scope.get("checked_word_count", 0))
+                if scope.get("status") != "evaluated":
+                    spelling_evaluation["partial_pages" if measured_spelling else "unknown_pages"] += 1
+                else:
+                    spelling_evaluation["evaluated_pages"] += 1
+            else:
+                spelling_evaluation["legacy_pages"] += 1
             # Count typo-affected pages only at the failing threshold.
             # Tiny non-zero densities are often benign/noise and can inflate page counts.
-            if typo_density >= 0.08:
+            if measured_spelling and typo_density >= 0.08:
                 typo_pages += 1
                 typo_density_total += typo_density
                 typo_density_samples.extend(nlp.get("typo_samples", [])[:3])
+
+            if is_thin or is_stuffed or (measured_spelling and typo_density >= 0.08):
+                content_quality_affected_urls.add(page_url)
+                content_thin_rows.append({
+                    "page_url": page_url,
+                    **(thin_evidence or {"word_count": nlp.get("word_count")}),
+                    "thin_content_signal": is_thin,
+                    "typo_density": typo_density if measured_spelling else None,
+                    "typo_signal": measured_spelling and typo_density >= 0.08,
+                    "spelling_scope": scope,
+                    "stuffing_signal": is_stuffed,
+                    "snippet": _evidence_snippet(_safe_dict(_safe_dict(nlp.get("content_kpis")).get("above_fold")).get("above_fold_snippet")),
+                })
 
             stem = nlp.get("dominant_keyword_stem")
             kw = nlp.get("dominant_keyword")
@@ -3266,6 +3406,12 @@ def build_report(scan_id: str, enrichment_artifacts: Optional[dict] = None) -> d
                 })
 
             # Nested NLP KPI aggregation (flat-safe)
+            for key, destination in (("h1_body_similarity", seo_h1_related_passages),
+                                     ("meta_body_similarity", seo_meta_related_passages)):
+                if len(destination) < 200:
+                    related = _related_passage_for_report(nlp, page_url, key)
+                    if related is not None:
+                        destination.append(related)
             seo_kpis = _j(nlp.get("seo_kpis"))
             if seo_kpis:
                 h1_quality = _j(seo_kpis.get("h1_quality"))
@@ -3379,7 +3525,7 @@ def build_report(scan_id: str, enrichment_artifacts: Optional[dict] = None) -> d
                         })
                 if llms_kpi.get("llms_txt_present"):
                     nlp_seo_llms_present_pages += 1
-                llms_url = llms_kpi.get("llms_url") or f"https://{base_domain}/llms.txt"
+                llms_url = llms_kpi.get("llms_url") or f"https://{urlparse(page_url).netloc}/llms.txt"
                 if llms_url and llms_url not in seo_llms_rows_by_url:
                     useful_lines = _safe_list(llms_kpi.get("useful_lines"))
                     seo_llms_rows_by_url[llms_url] = {
@@ -3412,7 +3558,7 @@ def build_report(scan_id: str, enrichment_artifacts: Optional[dict] = None) -> d
                         "page_type": nlp.get("page_type"),
                         "snippet": _evidence_snippet(_safe_dict(content_kpis.get("above_fold")).get("above_fold_snippet")),
                     })
-                lex_div = content_kpis.get("lexical_diversity")
+                lex_div = _lexical_diversity_for_report(content_kpis)
                 if isinstance(lex_div, (int, float)):
                     lexical_diversity_sum += float(lex_div)
                     lexical_diversity_count += 1
@@ -3423,6 +3569,9 @@ def build_report(scan_id: str, enrichment_artifacts: Optional[dict] = None) -> d
                             "lexical_diversity": round(float(lex_div), 4),
                             "token_count": content_kpis.get("lexical_diversity_token_count"),
                             "threshold": 0.4,
+                            "method": "ttr",
+                            "source_method": content_kpis.get("lexical_diversity_method") or "ttr",
+                            "source_value": content_kpis.get("lexical_diversity"),
                         })
                 reading_kpi = _j(content_kpis.get("reading_time"))
                 if isinstance(reading_kpi.get("reading_time_minutes"), (int, float)):
@@ -3752,6 +3901,7 @@ def build_report(scan_id: str, enrichment_artifacts: Optional[dict] = None) -> d
                 "h1_missing_pages": nlp_seo_h1_missing_pages,
                 "h1_multiple_pages": nlp_seo_h1_multiple_pages,
                 "rows": seo_h1_quality_rows[:200],
+                "related_passages": seo_h1_related_passages,
             },
             "nlp_seo_meta_kpi": {
                 "title_too_long_pages": nlp_seo_title_too_long_pages,
@@ -3762,6 +3912,7 @@ def build_report(scan_id: str, enrichment_artifacts: Optional[dict] = None) -> d
                     if row.get("issue") in {"title_too_long", "meta_too_short", "meta_too_long"}
                 }),
                 "meta_missing_owned_by": "seo_meta_tags",
+                "related_passages": seo_meta_related_passages,
                 "rows": seo_meta_nlp_rows[:200],
             },
             "nlp_seo_ai_readiness_kpi": {
@@ -3905,13 +4056,17 @@ def build_report(scan_id: str, enrichment_artifacts: Optional[dict] = None) -> d
             "nlp_not_evaluated_pages": nlp_not_evaluated_pages,
             "pages_with_keyword_stuffing": nlp_keyword_stuffing_pages,
             "pages_thin_content_nlp": nlp_thin_content_pages,
+            "thin_content_evaluation": thin_content_evaluation,
+            "pages_with_content_quality_issues": len(content_quality_affected_urls),
+            "content_quality_affected_urls": sorted(content_quality_affected_urls),
             "thin_content_rows": content_thin_rows[:200],
             "cannibalized_keywords": cannibalized_keywords,
             "typo_detection": {
                 "pages_with_typos": typo_pages,
-                "avg_typo_density": avg_typo_density,
+                "avg_typo_density": avg_typo_density if any(spelling_evaluation[key] for key in ('evaluated_pages','partial_pages','legacy_pages')) else None,
                 "sample_tokens": list(dict.fromkeys(typo_density_samples))[:10],
-                "passed": avg_typo_density < 0.08,
+                "passed": False if typo_pages else (None if spelling_evaluation['unknown_pages'] or spelling_evaluation['partial_pages'] else True),
+                "evaluation": spelling_evaluation,
             },
             "audience_segments": {
                 "counts": dict(audience_segment_counts),
@@ -3925,6 +4080,7 @@ def build_report(scan_id: str, enrichment_artifacts: Optional[dict] = None) -> d
                 "formal_tone_pages": nlp_content_formal_tone_pages,
                 "commercial_tone_pages": nlp_content_commercial_tone_pages,
                 "avg_lexical_diversity": avg_lexical_diversity,
+                "lexical_diversity_method": "ttr",
                 "avg_reading_time_minutes": avg_reading_time_minutes,
                 "cta_rows": content_cta_rows[:200],
                 "broken_structure_rows": content_broken_structure_rows[:200],
@@ -4015,6 +4171,17 @@ def _enrichment_result(future, label: str) -> dict:
         return {"status": "not_available", "reason": f"{label}_failed: {exc}"}
 
 
+def _scanner_allowed_domains(url: str) -> list[str]:
+    host = (urlparse(url).hostname or "").lower().removeprefix("www.")
+    if not host:
+        raise ValueError("Scan URL has no hostname")
+    try:
+        ipaddress.ip_address(host)
+    except ValueError:
+        return [host] if host == "localhost" else [host, f"www.{host}"]
+    return [host]
+
+
 def run_scanner(scan_id: str, url: str, max_pages: int, headless_concurrency: int):
     """Triggers the Go scanner API via HTTP."""
     update_scan_entry(scan_id, status=ScanStatus.RUNNING)
@@ -4023,9 +4190,7 @@ def run_scanner(scan_id: str, url: str, max_pages: int, headless_concurrency: in
     footer_future = None
 
     # Extract domains for colly limit rules
-    domain = url.split("://")[-1].split("/")[0]
-    base_domain = domain.replace("www.", "")
-    domains = [f"{base_domain}", f"www.{base_domain}"]
+    domains = _scanner_allowed_domains(url)
 
     payload = {
         "scan_id": scan_id,
@@ -4046,7 +4211,7 @@ def run_scanner(scan_id: str, url: str, max_pages: int, headless_concurrency: in
         for scanner_base in scanner_candidates:
             try:
                 logger.info("Trying scanner endpoint: %s", scanner_base)
-                response = requests.post(f"{scanner_base}/scan", json=payload, timeout=900)
+                response = requests.post(f"{scanner_base}/scan", json=payload, timeout=SCANNER_HTTP_TIMEOUT_SEC)
                 response.raise_for_status()
                 if scanner_base != primary_scanner:
                     logger.warning(
@@ -4057,6 +4222,11 @@ def run_scanner(scan_id: str, url: str, max_pages: int, headless_concurrency: in
                 break
             except requests.exceptions.RequestException as e:
                 attempt_errors.append(f"{scanner_base}: {e}")
+                response = None
+                if isinstance(e, requests.exceptions.ReadTimeout):
+                    # A request was accepted; retrying another endpoint could
+                    # launch the same audit while its scanner still runs.
+                    raise
 
         if response is None:
             update_scan_entry(scan_id, status=ScanStatus.FAILED)
@@ -4109,11 +4279,76 @@ def run_scanner(scan_id: str, url: str, max_pages: int, headless_concurrency: in
             return
         update_scan_entry(scan_id, status=ScanStatus.COMPLETE, nlp_partiel=nlp_partiel)
         logger.info(f"Scan {scan_id} complet avec {total} pages (nlp_partiel={nlp_partiel}).")
+    except Exception as exc:
+        update_scan_entry(scan_id, status=ScanStatus.FAILED, error=str(exc)[:500])
+        logger.exception("Scan execution failed for %s", scan_id)
     finally:
         enrichment_pool.shutdown(wait=False, cancel_futures=True)
 
 
 # ─── Endpoints ────────────────────────────────────────────────────────────────
+
+def _admission_loop():
+    admission = ScanAdmission(get_db, max(2400, SCANNER_HTTP_TIMEOUT_SEC + 600))
+    schema_ready = False
+    while True:
+        try:
+            if not schema_ready:
+                admission.ensure()
+                schema_ready = True
+            job = admission.claim()
+            if job is None:
+                time.sleep(2)
+                continue
+            scan_id, request = job
+            stopped = threading.Event()
+
+            def renew():
+                while not stopped.wait(15):
+                    try:
+                        if not admission.heartbeat(scan_id):
+                            logger.error("Admission ownership lost scan_id=%s", scan_id)
+                            return
+                    except Exception:
+                        logger.exception("Admission heartbeat failed scan_id=%s", scan_id)
+
+            keeper = threading.Thread(target=renew, daemon=True)
+            keeper.start()
+            try:
+                logger.info("Admission acquired scan_id=%s max_pages=%s", scan_id, request["max_pages"])
+                run_scanner(scan_id, request["url"], request["max_pages"], request["headless_concurrency"])
+            finally:
+                stopped.set()
+                keeper.join(timeout=5)
+                state = get_scan_entry(scan_id) or {}
+                admission.finish(scan_id, state.get("status", "failed"))
+        except Exception:
+            logger.exception("Scan admission dispatcher failed; pending jobs remain persisted")
+            time.sleep(5)
+
+
+def _start_admission_dispatcher():
+    global _admission_started
+    with scans_lock:
+        if not _admission_started:
+            _admission_started = True
+            threading.Thread(target=_admission_loop, daemon=True).start()
+
+
+def _enqueue_scan(scan_id, req, headless_concurrency):
+    admission = ScanAdmission(get_db)
+    try:
+        admission.ensure()
+        state = get_scan_entry(scan_id)
+        if not isinstance(state, dict):
+            raise RuntimeError("scan admission state is unavailable")
+        admission.enqueue(scan_id, {"url": req.url, "max_pages": req.max_pages or DEFAULT_SCAN_MAX_PAGES,
+                                   "headless_concurrency": headless_concurrency}, state)
+    except Exception as exc:
+        update_scan_entry(scan_id, status=ScanStatus.FAILED, error="scan admission persistence failed")
+        raise HTTPException(status_code=503, detail="scan admission persistence failed") from exc
+    _start_admission_dispatcher()
+
 
 def _proxy_rendered_discovery(req: DiscoverRenderedRequest) -> dict:
     parsed = urlparse(req.url)
@@ -4166,9 +4401,12 @@ async def start_scan(req: ScanRequest):
     create_scan_entry(scan_id, req)
     headless_concurrency = _clamp_headless_concurrency(req.headless_concurrency)
     logger.info(f"Starting async scan {scan_id} for {req.url} with headless_concurrency={headless_concurrency}")
+    if SCAN_ADMISSION_ENABLED:
+        await asyncio.to_thread(_enqueue_scan, scan_id, req, headless_concurrency)
+        return {"scan_id": scan_id, "status": ScanStatus.PENDING}
     thread = threading.Thread(
         target=run_scanner,
-        args=(scan_id, req.url, req.max_pages or 150, headless_concurrency),
+        args=(scan_id, req.url, req.max_pages or DEFAULT_SCAN_MAX_PAGES, headless_concurrency),
         daemon=True,
     )
     thread.start()
@@ -4186,13 +4424,15 @@ async def start_scan_sync(req: ScanRequest):
     logger.info(f"Starting SYNC scan {scan_id} for {req.url} with headless_concurrency={headless_concurrency}")
     
     # Keep response synchronous for caller, while avoiding event-loop blocking.
-    await asyncio.to_thread(
-        run_scanner,
-        scan_id,
-        req.url,
-        req.max_pages or 150,
-        headless_concurrency,
-    )
+    if SCAN_ADMISSION_ENABLED:
+        await asyncio.to_thread(_enqueue_scan, scan_id, req, headless_concurrency)
+        while True:
+            state = await asyncio.to_thread(get_scan_entry, scan_id)
+            if state and state["status"] in (ScanStatus.COMPLETE, ScanStatus.FAILED):
+                break
+            await asyncio.sleep(1)
+    else:
+        await asyncio.to_thread(run_scanner, scan_id, req.url, req.max_pages or DEFAULT_SCAN_MAX_PAGES, headless_concurrency)
     
     scan = get_scan_entry(scan_id)
     if not scan:

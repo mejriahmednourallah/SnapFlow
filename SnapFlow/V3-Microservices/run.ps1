@@ -36,7 +36,17 @@ $obscuraEnabled = -not $NoObscura
 $composeArgs = @()
 if ($obscuraEnabled) {
     $env:ENABLE_OBSCURA_DISCOVERY = "true"
+    $env:OBSCURA_RENDER_ENABLED = "true"
+    if (-not $env:OBSCURA_CDP_TOKEN) {
+        $tokenBytes = New-Object byte[] 32
+        $generator = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+        try { $generator.GetBytes($tokenBytes) } finally { $generator.Dispose() }
+        $env:OBSCURA_CDP_TOKEN = ([BitConverter]::ToString($tokenBytes)).Replace('-', '').ToLowerInvariant()
+    }
     $composeArgs += @("--profile", "obscura")
+} else {
+    $env:ENABLE_OBSCURA_DISCOVERY = "false"
+    $env:OBSCURA_RENDER_ENABLED = "false"
 }
 
 # ─── Banner ───────────────────────────────────────────────────────────────────

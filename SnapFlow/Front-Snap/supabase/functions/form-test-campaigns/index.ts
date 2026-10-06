@@ -35,7 +35,7 @@ function parseJsonObject(value: string): Record<string, unknown> {
 async function interpretExecution(summary: Record<string, unknown>) {
   const apiKey = Deno.env.get('GEMINI_API_KEY') ?? '';
   if (!apiKey) throw new HttpError(503, 'GEMINI_API_KEY non configuree');
-  const model = Deno.env.get('FORM_TESTER_GEMINI_MODEL') || 'gemini-2.0-flash';
+  const model = Deno.env.get('FORM_TESTER_GEMINI_MODEL') || 'gemini-3.5-flash-lite';
   const observation = summary.submission_observation ?? {};
   const prompt = `Tu assistes un operateur de test de formulaire.
 Tu ne rends pas le verdict officiel et tu ne crees jamais une anomalie.

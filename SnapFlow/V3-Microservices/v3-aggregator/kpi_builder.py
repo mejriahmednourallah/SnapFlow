@@ -4,6 +4,7 @@ Converts raw report data to axis/sub-axis/KPI structure
 All output in French for easy client consumption
 """
 from datetime import datetime
+import json
 import re
 from typing import Optional
 from urllib.parse import urlparse
@@ -1026,7 +1027,7 @@ def _build_client_summary_v2(kpi_id: str, status: str, evidence_quality: str, pa
         "seo_url_structure": f"{d.get('node_style_url_count', ps)} URL(s) utilisent un format /node/id peu favorable au référencement.",
         "seo_heading_structure": f"La structure des titres est incorrecte sur {ps} page(s), affaiblissant la hiérarchie sémantique.",
         "seo_internal_linking": f"Le maillage interne est insuffisant sur {ps} page(s), limitant la distribution du PageRank.",
-        "content_thin":     f"{ps} page(s) contiennent un volume de texte insuffisant pour obtenir un bon positionnement.",
+        "content_thin":     f"Contenu insuffisant : {d.get('pages_thin_content_nlp', 0)} page(s) ; fautes : {d.get('pages_with_typos', 0)} ; sur-optimisation : {d.get('pages_with_keyword_stuffing', 0)}.",
         "content_missing_cta": f"{ps} page(s) transactionnelles n'ont pas de bouton ou lien d'appel à l'action clairement identifié.",
         "content_cannibalization": f"{ps} cluster(s) de pages ciblent les mêmes mots-clés, créant une compétition interne.",
         "perf_desktop_speed": f"Le temps de chargement desktop est au-dessus des seuils recommandés (LCP : {d.get('lcp_ms', '?')} ms).",
@@ -1077,7 +1078,7 @@ def _build_technical_summary_v2(kpi_id: str, status: str, evidence_quality: str,
         "seo_alt_tags":     f"{d.get('images_missing_alt', '?')} image(s) sans attribut ALT détectée(s) lors du crawl.",
         "seo_duplication":  f"Taux de duplication : {d.get('duplicate_content_rate_pct', 0):.1f}% — {d.get('duplicate_page_count', 0)} page(s) concernée(s).",
         "seo_url_structure": f"{d.get('node_style_url_count', '?')} URL(s) avec pattern /node/[id] ou query string non normalisé.",
-        "content_thin":     f"{d.get('pages_thin_content_nlp', '?')} page(s) < 300 mots (NLP), {d.get('pages_with_keyword_stuffing', 0)} avec keyword stuffing.",
+        "content_thin":     f"{d.get('pages_thin_content_nlp', '?')} page(s) sous le repère NLP appliqué à leur type, {d.get('pages_with_keyword_stuffing', 0)} avec keyword stuffing.",
         "perf_desktop_speed": f"LCP moyen : {d.get('lcp_ms', '?')} ms, FCP : {d.get('fcp_ms', '?')} ms, CLS : {d.get('cls', '?')}.",
         "perf_console_errors": f"{d.get('homepage_console_error_count', '?')} erreur(s) JS détectée(s) en console sur la page d'accueil.",
         "eco_index_score":  f"Eco Index moyen : {d.get('avg_eco_index', '?')}/100.",
@@ -1255,7 +1256,9 @@ def _unique_digest_rows(rows: list[dict], columns: list[str] | None = None, limi
         item = _clean_digest_row(row, columns)
         if not item:
             continue
-        key = tuple(sorted(item.items()))
+        # Masked/missing-field markers can be nested objects. Canonical JSON
+        # permits deduplication without changing the digest masking policy.
+        key = json.dumps(item, sort_keys=True, ensure_ascii=False, default=str)
         if key in seen:
             continue
         seen.add(key)
@@ -1527,7 +1530,9 @@ _EVIDENCE_COVERAGE_REGISTRY = {
     },
     "content_thin": {
         "proof_type": "rows",
-        "csv_columns": ["page_url", "word_count", "typo_density", "stuffing_signal", "snippet"],
+        "csv_columns": ["page_url", "word_count", "typo_density", "stuffing_signal", "snippet",
+                        "page_type", "language", "word_count_threshold", "word_count_gap",
+                        "thin_content_signal", "typo_signal", "rule_source"],
         "missing_reason": "Les pages de contenu fin/qualite faible ne sont pas enumerees.",
     },
     "content_cannibalization": {
@@ -3809,6 +3814,17 @@ def _build_contract_constat(kpi_id: str, kpi_name: str, status: str, kpi_type: s
         suffix = f" Exemples : {', '.join(urls[:2])}." if urls else ""
         return f"{missing_count} page(s) manquent de liens contextuels dans la zone de contenu principale.{suffix}"
 
+    if kpi_id == "content_thin":
+        thin = _safe_int(data.get("pages_thin_content_nlp"))
+        typos = _safe_int(data.get("pages_with_typos"))
+        stuffed = _safe_int(data.get("pages_with_keyword_stuffing"))
+        if status == "not_evaluated":
+            return "La qualité du contenu n'a pas pu être évaluée à partir des preuves disponibles."
+        if status == "passing":
+            return "Les observations disponibles ne remontent aucune page sous son repère NLP, avec une densité élevée de fautes ou du keyword stuffing."
+        return (f"{thin} page(s) sous leur repère NLP, {typos} page(s) avec une densité élevée de fautes "
+                f"et {stuffed} page(s) avec du keyword stuffing : {pages_affected} page(s) distincte(s) concernée(s).")
+
     base_constat = _generate_constat({
         "status": status,
         "type": kpi_type,
@@ -5487,21 +5503,23 @@ def build_kpi_centric_report(report: dict) -> dict:
             }
         },
         "Contenu Fin et Qualité": {
-            "info": f"Contenu fin (NLP <300 mots): {int(content.get('pages_thin_content_nlp', 0) or 0)} pages, Fautes: {int(content.get('typo_detection', {}).get('pages_with_typos', 0) or 0)} pages, Keyword stuffing: {int(content.get('pages_with_keyword_stuffing', 0) or 0)} pages",
+            "info": f"Contenu fin (repère NLP par type de page): {int(content.get('pages_thin_content_nlp', 0) or 0)} pages, Fautes: {int(content.get('typo_detection', {}).get('pages_with_typos', 0) or 0)} pages, Keyword stuffing: {int(content.get('pages_with_keyword_stuffing', 0) or 0)} pages",
             "impact": "Contenu mince = mauvais classement SEO, mauvaise UX, taux de rebond élevé",
-            "pages_affected": max(
+            "pages_affected": content.get("pages_with_content_quality_issues", max(
                 int(content.get("pages_thin_content_nlp", 0) or 0),
                 int(content.get("typo_detection", {}).get("pages_with_typos", 0) or 0),
                 int(content.get("pages_with_keyword_stuffing", 0) or 0),
-            ),
-            "pages_affected_urls": [],
-            "status": "failing" if int(content.get("pages_thin_content_nlp", 0) or 0) > 0 or int(content.get("typo_detection", {}).get("pages_with_typos", 0) or 0) > 0 or int(content.get("pages_with_keyword_stuffing", 0) or 0) > 0 else "passing",
+            )),
+            "pages_affected_urls": _safe_list(content.get("content_quality_affected_urls")),
+            "status": "failing" if int(content.get("pages_thin_content_nlp", 0) or 0) > 0 or int(content.get("typo_detection", {}).get("pages_with_typos", 0) or 0) > 0 or int(content.get("pages_with_keyword_stuffing", 0) or 0) > 0 else ("not_available" if any(content.get("typo_detection", {}).get("evaluation", {}).get(key, 0) for key in ("partial_pages", "unknown_pages")) else "passing"),
             "type": "recommendation" if int(content.get("pages_thin_content_nlp", 0) or 0) > 0 or int(content.get("typo_detection", {}).get("pages_with_typos", 0) or 0) > 0 or int(content.get("pages_with_keyword_stuffing", 0) or 0) > 0 else None,
             "severity": None,
             "data": {
                 "pages_thin_content_nlp": int(content.get("pages_thin_content_nlp", 0) or 0),
                 "pages_with_typos": int(content.get("typo_detection", {}).get("pages_with_typos", 0) or 0),
                 "pages_with_keyword_stuffing": int(content.get("pages_with_keyword_stuffing", 0) or 0),
+                "evaluation": _safe_dict(content.get("thin_content_evaluation")),
+                "spelling_evaluation": _safe_dict(content.get("typo_detection", {}).get("evaluation")),
                 "rows": _safe_list(content.get("thin_content_rows")),
             }
         },

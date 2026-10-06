@@ -1,6 +1,20 @@
 package main
 
-import "testing"
+import (
+	"reflect"
+	"testing"
+)
+
+func TestSanitizeDomainsUsesHostnamesForPortTargets(t *testing.T) {
+	got := sanitizeDomains([]string{"preprod-fixture:18991", "https://EXAMPLE.com:8443/path", "example.com", "[::1]:8080", "::1"})
+	want := []string{"preprod-fixture", "example.com", "::1"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("domain scope must contain hostnames, got %v", got)
+	}
+	if !isHostAllowedForCrawl("preprod-fixture", got) || isHostAllowedForCrawl("outside.test", got) {
+		t.Fatal("explicit port target must be in scope without admitting another host")
+	}
+}
 
 func TestExpandAllowedDomainsForCanonicalRedirect(t *testing.T) {
 	allowed := []string{"albarakabank.com.tn", "www.albarakabank.com.tn"}

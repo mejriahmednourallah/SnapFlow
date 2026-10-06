@@ -937,7 +937,9 @@ type probeResult struct {
 // Rule: 200 => exposed, 401/403 => forbidden (warning), >=500 => server_errors (fail).
 //
 // HEAD is issued first. When HEAD returns an ambiguous status (not 200, 401,
-// 403, 404, or 5xx) a follow-up GET is sent. If HEAD=403 but GET=200 the GET
+// 403, 404, or other 5xx) a follow-up GET is sent. A 501 response means
+// the server does not implement HEAD, so GET must measure the resource.
+// If HEAD=403 but GET=200 the GET
 // result wins; if HEAD=200 but GET=404 the GET result wins. This prevents false
 // verdicts on servers that handle HEAD differently from GET.
 func probeWordlistPaths(baseURL string, paths []string) probeResult {
@@ -963,7 +965,7 @@ func probeWordlistPaths(baseURL string, paths []string) probeResult {
 			code == http.StatusForbidden ||
 			code == http.StatusNotFound ||
 			code == http.StatusGone ||
-			code >= http.StatusInternalServerError
+			(code >= http.StatusInternalServerError && code != http.StatusNotImplemented)
 	}
 
 	var wg sync.WaitGroup
@@ -1213,6 +1215,15 @@ func probeWordlistPathsGET(baseURL string, paths []string) []sensitiveFileDetail
 			resp, err := client.Do(req)
 			if err != nil {
 				return
+			}
+			if method == http.MethodHead && (resp.StatusCode == http.StatusMethodNotAllowed || resp.StatusCode == http.StatusNotImplemented) {
+				// Unsupported HEAD says nothing about file existence. Measure it
+				// with GET before publishing exposure or server-error evidence.
+				resp.Body.Close()
+				resp, err = client.Get(baseURL + p)
+				if err != nil {
+					return
+				}
 			}
 			defer resp.Body.Close()
 

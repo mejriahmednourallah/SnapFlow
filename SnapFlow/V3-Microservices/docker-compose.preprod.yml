@@ -48,11 +48,14 @@ services:
       BROWSER_POOL_TIMEOUT_MS: "240000"
       SCANNER_REQUEST_TIMEOUT_SEC: "30"
       SCANNER_TIMEOUT: "1800"
+      DEFAULT_SCAN_MAX_PAGES: ${DEFAULT_SCAN_MAX_PAGES:-100}
       HEADLESS_SAMPLE_RATIO: "1.0"
-      RENDERED_DISCOVERY_MAX_PAGES: "100"
+      RENDERED_DISCOVERY_MAX_PAGES: "0"
       RENDERED_DISCOVERY_MAX_LINKS: "200"
       RENDERED_DISCOVERY_TIMEOUT_MS: "90000"
-      ENABLE_OBSCURA_PARALLEL_DISCOVERY: "true"
+      ENABLE_OBSCURA_PARALLEL_DISCOVERY: ${ENABLE_OBSCURA_DISCOVERY:-false}
+      SCANNER_PARALLELISM: ${SCANNER_PARALLELISM:-150}
+      CAPTURE_TEXT_PROJECTION: "true"
       OBSCURA_BLOCKED_CRAWL_CONCURRENCY: "3"
       OBSCURA_DISCOVERY_MAX_LINKS_PER_PAGE: "200"
       OBSCURA_PARALLEL_DISCOVERY_JOIN_MS: "5000"
@@ -60,6 +63,11 @@ services:
       ENABLE_PORT_SCAN: "true"
       PORT_SCAN_TIMEOUT_MS: "900"
       PORT_SCAN_PORTS: "21,22,25,53,80,443,3306,5432,6379,8080,8443,3389"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8081/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
     restart: unless-stopped
 
   # ─── NLP Worker ─────────────────────────────────────────────────────
@@ -70,6 +78,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      languagetool:
+        condition: service_healthy
     environment:
       DB_HOST: db
       DB_PORT: "5432"
@@ -77,6 +87,18 @@ services:
       DB_USER: snapflow
       DB_PASS: ${DB_PASS:-snapflow}
       POLL_INTERVAL: "3"
+      LANGUAGETOOL_SERVER_URL: http://languagetool:8086
+    restart: unless-stopped
+
+  languagetool:
+    build: ./docker/languagetool
+    environment:
+      JAVA_TOOL_OPTIONS: ${LANGUAGETOOL_JAVA_OPTIONS:--Xmx768m}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8086/v2/languages', timeout=3).read()"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
     restart: unless-stopped
 
   # ─── Aggregator API ─────────────────────────────────────────────────
@@ -100,6 +122,14 @@ services:
       BROWSER_POOL_URL: http://v3-browser-pool:8084
       DEFAULT_HEADLESS_CONCURRENCY: "8"
       MAX_HEADLESS_CONCURRENCY: "8"
+      SCAN_ADMISSION_ENABLED: "true"
+      SCANNER_HTTP_TIMEOUT_SEC: "1830"
+      DEFAULT_SCAN_MAX_PAGES: ${DEFAULT_SCAN_MAX_PAGES:-150}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=3).read()"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
     restart: unless-stopped
 
   # ─── Browser Pool (Playwright) ──────────────────────────────────────
@@ -109,8 +139,8 @@ services:
     # No host port — internal only
     environment:
       CHROME_NO_SANDBOX: "true"
-      BROWSER_POOL_WORKERS: "4"
-      BROWSER_POOL_CONCURRENCY: "8"
+      BROWSER_POOL_WORKERS: ${BROWSER_POOL_WORKERS:-4}
+      BROWSER_POOL_CONCURRENCY: ${BROWSER_POOL_CONCURRENCY:-8}
       BROWSER_POOL_RECYCLE_AFTER: "50"
       BROWSER_POOL_DEFAULT_TIMEOUT_MS: "60000"
       BROWSER_POOL_ACQUIRE_TIMEOUT_S: "60"
@@ -120,8 +150,9 @@ services:
       BROWSER_POOL_SCREENSHOT_LOAD_STATE_TIMEOUT_MS: "8000"
       BROWSER_POOL_RENDER_WAIT_UNTIL: "domcontentloaded"
       BROWSER_POOL_RENDER_SETTLE_MS: "2000"
-      ENABLE_OBSCURA_DISCOVERY: ${ENABLE_OBSCURA_DISCOVERY:-true}
-      OBSCURA_RENDER_ENABLED: ${OBSCURA_RENDER_ENABLED:-true}
+      ENABLE_OBSCURA_DISCOVERY: ${ENABLE_OBSCURA_DISCOVERY:-false}
+      OBSCURA_RENDER_ENABLED: ${OBSCURA_RENDER_ENABLED:-false}
+      OBSCURA_ACQUISITION_ROUTER_ENABLED: ${OBSCURA_ACQUISITION_ROUTER_ENABLED:-false}
       OBSCURA_MAX_SESSIONS: "4"
       OBSCURA_DISCOVERY_CONCURRENCY: "3"
       OBSCURA_RENDER_FALLBACK_CONCURRENCY: "2"
@@ -129,9 +160,6 @@ services:
       ENABLE_OBSCURA_FORM_FUZZING: "false"
       OBSCURA_CDP_URL: http://obscura:9222
     restart: unless-stopped
-    depends_on:
-      obscura:
-        condition: service_started
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:8084/health || exit 1"]
       interval: 10s
@@ -177,6 +205,7 @@ services:
 
   # ─── Visual Regression ─────────────────────────────────────────────
   obscura:
+    profiles: ["obscura"]
     image: ${OBSCURA_IMAGE:-h4ckf0r0day/obscura:latest}
     environment:
       CHROME_NO_SANDBOX: "true"
@@ -201,6 +230,11 @@ services:
         condition: service_healthy
       v3-browser-pool:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8083/health', timeout=3).read()"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
     restart: unless-stopped
 
   # ─── Frontend (React SPA via Nginx) ─────────────────────────────────
@@ -213,6 +247,11 @@ services:
         VITE_SUPABASE_PUBLISHABLE_KEY: ${VITE_SUPABASE_PUBLISHABLE_KEY}
     ports:
       - "127.0.0.1:3000:3000"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:3000/"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
     restart: unless-stopped
 
 volumes:

@@ -2,6 +2,9 @@
 __pycache__/
 *.py[cod]
 .gocache/
+.gocache*/
+.pytest_tmp*/
+*.exe
 .mypy_cache/
 .ruff_cache/
 .coverage

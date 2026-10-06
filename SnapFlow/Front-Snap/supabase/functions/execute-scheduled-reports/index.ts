@@ -19,17 +19,36 @@ Deno.serve(async (req) => {
   try {
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-    const anonKey = Deno.env.get('SUPABASE_ANON_KEY')!;
 
     const serviceClient = createClient(supabaseUrl, serviceKey);
+    const bearer = req.headers.get('Authorization')?.replace(/^Bearer\s+/i, '');
+    let callerId: string | null = null;
+    let isAdmin = false;
+    if (bearer !== serviceKey) {
+      if (!bearer) return new Response(JSON.stringify({ error: 'Authentication required' }), {
+        status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+      const { data: caller, error: authError } = await serviceClient.auth.getUser(bearer);
+      if (authError || !caller.user) return new Response(JSON.stringify({ error: 'Invalid user session' }), {
+        status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+      callerId = caller.user.id;
+      const { data: adminRole, error: roleError } = await serviceClient.rpc('has_role', {
+        _user_id: callerId, _role: 'admin',
+      });
+      if (roleError) throw roleError;
+      isAdmin = Boolean(adminRole);
+    }
 
     // Fetch all active schedules that are due
     const now = new Date().toISOString();
-    const { data: dueSchedules, error: fetchError } = await serviceClient
+    let dueQuery = serviceClient
       .from('report_schedules')
       .select('*')
       .eq('is_active', true)
       .lte('next_run_at', now);
+    if (callerId && !isAdmin) dueQuery = dueQuery.eq('created_by', callerId);
+    const { data: dueSchedules, error: fetchError } = await dueQuery;
 
     if (fetchError) {
       console.error('Failed to fetch schedules:', fetchError);
@@ -63,7 +82,7 @@ Deno.serve(async (req) => {
         if (schedule.report_type === 'audit') {
           await executeAudit(supabaseUrl, serviceClient, schedule);
         } else if (schedule.report_type === 'activity') {
-          await executeActivity(supabaseUrl, anonKey, serviceClient, schedule);
+          await executeActivity(supabaseUrl, serviceKey, serviceClient, schedule);
         } else if (schedule.report_type === 'mystery_visit') {
           await executeAudit(supabaseUrl, serviceClient, schedule);
         } else {
@@ -198,7 +217,10 @@ async function executeAudit(
       },
       body: JSON.stringify({
         url: project.url,
-        max_pages: 100
+        max_pages: (() => {
+          const value = Number(Deno.env.get('DEFAULT_SCAN_MAX_PAGES') || '100');
+          return Number.isSafeInteger(value) && value > 0 ? value : 100;
+        })()
       }),
     });
 

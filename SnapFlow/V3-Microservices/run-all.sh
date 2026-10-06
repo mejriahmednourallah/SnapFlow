@@ -13,7 +13,7 @@ NO_CACHE=false
 REBUILD_BASE=false
 FORCE_RECREATE=false
 DOWN=false
-OBSCURA=true
+OBSCURA=false
 
 log() {
   printf '[%s] %s\n' "$(date '+%H:%M:%S')" "$*"
@@ -90,6 +90,12 @@ done
 
 if [ "$OBSCURA" = true ]; then
   export ENABLE_OBSCURA_DISCOVERY=true
+  export OBSCURA_RENDER_ENABLED=true
+  export OBSCURA_ACQUISITION_ROUTER_ENABLED=true
+else
+  export ENABLE_OBSCURA_DISCOVERY=false
+  export OBSCURA_RENDER_ENABLED=false
+  export OBSCURA_ACQUISITION_ROUTER_ENABLED=false
 fi
 
 read_env_value() {
@@ -127,8 +133,8 @@ ensure_local_form_executor_env() {
 
   service_role_key="$(read_env_value "SUPABASE_SERVICE_ROLE_KEY" "$supabase_env")"
 
-  append_env_if_missing "$file" "FORM_EXECUTOR_DATABASE_URL" "postgresql://postgres:postgres@host.docker.internal:54322/postgres"
-  append_env_if_missing "$file" "FORM_EXECUTOR_SUPABASE_URL" "http://host.docker.internal:54321"
+  append_env_if_missing "$file" "FORM_EXECUTOR_DATABASE_URL" "postgresql://postgres:postgres@supabase-db:5432/postgres"
+  append_env_if_missing "$file" "FORM_EXECUTOR_SUPABASE_URL" "http://supabase-kong:8000"
   append_env_if_missing "$file" "SUPABASE_SERVICE_ROLE_KEY" "$service_role_key"
   append_env_if_missing "$file" "FORM_EXECUTOR_ARTIFACT_BUCKET" "form-test-artifacts"
 }
@@ -206,7 +212,7 @@ if [ "$DOWN" = true ]; then
   "${compose_cmd[@]}" down --remove-orphans
 fi
 
-log "=== 1/4 Building Python base images ==="
+log "=== 1/5 Building Python base images ==="
 log "Base policy: reuse existing base images; rebuild only if missing or --rebuild-base was passed."
 base_args=()
 if [ "$REBUILD_BASE" = true ]; then
@@ -216,9 +222,9 @@ if [ "$REBUILD_BASE" = true ]; then
   fi
 fi
 log "Command: $SCRIPT_DIR/BUILD_V3_BASE_IMAGES.sh ${base_args[*]:-(no args)}"
-"$SCRIPT_DIR/BUILD_V3_BASE_IMAGES.sh" "${base_args[@]}"
+bash "$SCRIPT_DIR/BUILD_V3_BASE_IMAGES.sh" "${base_args[@]}"
 
-log "=== 2/4 Building service images ==="
+log "=== 2/5 Building service images ==="
 if [ "$NO_CACHE" = true ]; then
   log "Command: ${compose_cmd[*]} build --progress=plain --no-cache"
   "${compose_cmd[@]}" build --progress=plain --no-cache
@@ -227,15 +233,37 @@ else
   "${compose_cmd[@]}" build --progress=plain
 fi
 
-log "=== 3/4 Starting all services ==="
-up_args=(up -d)
+log "=== 3/5 Database readiness and evidence migration ==="
+"${compose_cmd[@]}" up -d --wait --wait-timeout 60 db
+if [ "$LOCAL" = true ]; then
+  supabase_project="$(read_env_value project_id ../Front-Snap/supabase/config.toml)"
+  bash "$SCRIPT_DIR/scripts/connect-local-supabase.sh" "${COMPOSE_PROJECT}_default" "$supabase_project"
+fi
+
+# Refuse ordinary redeployment while a recorded audit is still executing.
+# Pending requests survive the worker stop and resume after startup.
+psql_cmd=(exec -T db sh -c 'psql -X -A -t -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"')
+has_state="$("${compose_cmd[@]}" "${psql_cmd[@]}" <<< "SELECT to_regclass('public.scan_state') IS NOT NULL;")"
+if [ "$has_state" = t ]; then
+  active_audits="$("${compose_cmd[@]}" "${psql_cmd[@]}" <<< "SELECT COUNT(*) FROM scan_state WHERE LOWER(state_json->>'status') IN ('running','nlp_processing');")"
+  if [ "$active_audits" -gt 0 ]; then
+    echo "An audit is still running. Wait for it to finish before redeploying." >&2
+    exit 1
+  fi
+fi
+"${compose_cmd[@]}" stop aggregator scanner nlp-worker
+SNAPFLOW_ENV_FILE="$ENV_FILE" SNAPFLOW_COMPOSE_PROJECT="$COMPOSE_PROJECT" \
+  bash "$SCRIPT_DIR/scripts/apply-evidence-migration.sh"
+
+log "=== 4/5 Starting all services ==="
+up_args=(up -d --wait --wait-timeout 180)
 if [ "$FORCE_RECREATE" = true ]; then
   up_args+=(--force-recreate)
 fi
 log "Command: ${compose_cmd[*]} ${up_args[*]}"
 "${compose_cmd[@]}" "${up_args[@]}"
 
-log "=== 4/4 Status ==="
+log "=== 5/5 Status ==="
 log "Command: ${compose_cmd[*]} ps"
 "${compose_cmd[@]}" ps
 echo ""

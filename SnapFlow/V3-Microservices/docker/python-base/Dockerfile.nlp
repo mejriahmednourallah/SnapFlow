@@ -1,0 +1,21 @@
+FROM snapflow/v3-python-fastapi-base:latest
+
+# Text analysis has no Chromium, visual-comparison or CUDA dependency.
+# LanguageTool needs Java 17+ for the pinned Python wrapper's local server.
+RUN apt-get update && apt-get install -y --no-install-recommends default-jre-headless \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /opt/base
+COPY requirements.nlp.txt .
+RUN pip install --no-cache-dir --default-timeout=300 --retries=10 -r requirements.nlp.txt \
+    && pip install --upgrade --no-cache-dir setuptools==83.0.0 wheel==0.46.2 jaraco.context==6.1.0 \
+    && python -c "import textstat, spacy, nltk, language_tool_python; spacy.load('fr_core_news_sm'); print('NLP dependencies ready')"
+
+# Install linguistic data once at image build, not during the first scan.
+ENV NLTK_DATA=/usr/local/share/nltk_data
+ENV LTP_PATH=/opt/languagetool
+RUN python -c "import nltk; [(_ for _ in ()).throw(RuntimeError('NLTK download failed: '+name)) for name in ('punkt','punkt_tab','stopwords','cmudict') if not nltk.download(name, download_dir='/usr/local/share/nltk_data', quiet=True)]" \
+    && python -c "import nltk, textstat; nltk.data.find('corpora/cmudict'); print('English readability assets ready', textstat.flesch_reading_ease('Visitors enjoy guided tours through the permanent collection.'))" \
+    && python -c "from language_tool_python.download_lt import LocalLanguageTool; LocalLanguageTool.from_version_name('6.8').download()"
+ENV LTP_JAR_DIR_PATH=/opt/languagetool/LanguageTool-6.8
+WORKDIR /app

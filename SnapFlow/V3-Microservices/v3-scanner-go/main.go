@@ -140,13 +140,18 @@ type PhaseTimings struct {
 }
 
 type ScanTelemetry struct {
-	StopReason        string             `json:"stop_reason"`
-	PhaseTimingsMS    PhaseTimings       `json:"phase_timings_ms"`
-	PagesAtStop       int                `json:"pages_at_stop"`
-	BudgetRemainingMS int64              `json:"budget_remaining_ms"`
-	FormFuzzer        formfuzzer.Summary `json:"form_fuzzer"`
+	StopReason        string                 `json:"stop_reason"`
+	PhaseTimingsMS    PhaseTimings           `json:"phase_timings_ms"`
+	PagesAtStop       int                    `json:"pages_at_stop"`
+	BudgetRemainingMS int64                  `json:"budget_remaining_ms"`
+	FormFuzzer        formfuzzer.Summary     `json:"form_fuzzer"`
+	CrawlOutcomes     map[string]interface{} `json:"crawl_outcomes,omitempty"`
 	// Issue 5: headless coverage metadata
 	HeadlessCoveragePct     float64 `json:"headless_coverage_pct"`
+	HeadlessSelected        int     `json:"headless_selected"`
+	HeadlessExecuted        int     `json:"headless_executed"`
+	HeadlessContentCaptured int     `json:"headless_content_captured"`
+	HeadlessMeasured        int     `json:"headless_measured"`
 	PartialHeadlessCoverage bool    `json:"partial_headless_coverage,omitempty"`
 	BlockedRecoveryPartial  bool    `json:"blocked_recovery_partial,omitempty"`
 	RenderedRecoveryPages   int     `json:"rendered_recovery_pages,omitempty"`
@@ -223,8 +228,18 @@ func sanitizeDomains(domains []string) []string {
 	seen := map[string]bool{}
 	for _, d := range domains {
 		d = sanitizeInputText(d)
-		d = strings.TrimPrefix(strings.TrimPrefix(d, "https://"), "http://")
-		d = strings.TrimSuffix(d, "/")
+		if net.ParseIP(d) == nil {
+			candidate := d
+			if !strings.Contains(candidate, "://") {
+				candidate = "//" + strings.TrimPrefix(candidate, "//")
+			}
+			parsed, err := url.Parse(candidate)
+			if err != nil {
+				continue
+			}
+			d = parsed.Hostname()
+		}
+		d = strings.ToLower(strings.Trim(d, " ."))
 		if d == "" || seen[d] {
 			continue
 		}
@@ -462,10 +477,15 @@ func loadHeadlessSampleRatio() float64 {
 	return ratio
 }
 
-// headlessPageCap is the maximum number of pages sent to the headless pool
-// regardless of crawl size or sample ratio. Keeps scan time predictable on
-// large sites while still hitting the 80% target on sites ≤ 125 pages.
-const headlessPageCap = 100
+// The requested scan scope already bounds pages. An operator may explicitly
+// set a smaller measurement budget, but there is no unrelated hard 100-page cap.
+func headlessPageBudget(pages int) int {
+	limit := envInt("HEADLESS_MAX_PAGES", 0)
+	if limit <= 0 || limit > pages {
+		return pages
+	}
+	return limit
+}
 
 // minReliableContentHashConfidence is the minimum confidence accepted when
 // computing site-wide duplication rates. Lower-quality hashes are excluded to
@@ -663,14 +683,14 @@ func handleScan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if payload.MaxPages <= 0 {
-		payload.MaxPages = 100
+		payload.MaxPages = max(1, envInt("DEFAULT_SCAN_MAX_PAGES", 100))
 	}
 	if payload.HeadlessConcurrency <= 0 {
 		payload.HeadlessConcurrency = 4
 	}
 	if len(payload.Domains) == 0 {
-		if u, err := url.Parse(payload.URL); err == nil && u.Host != "" {
-			payload.Domains = []string{u.Host}
+		if u, err := url.Parse(payload.URL); err == nil && u.Hostname() != "" {
+			payload.Domains = []string{strings.ToLower(u.Hostname())}
 		}
 	}
 
@@ -717,15 +737,21 @@ func handleScan(w http.ResponseWriter, r *http.Request) {
 }
 
 func startScan(ctx context.Context, config ScannerConfig) {
+	ctx = performance.WithScanID(ctx, config.ScanID)
 	log.Printf("Starting Scan for %s [ID: %s]", config.StartURL, config.ScanID)
 	scanDone := make(chan struct{})
 	defer close(scanDone)
 	startTime := time.Now()
+	defer func() {
+		if err := db.ReleaseUnselectedPages(config.ScanID, []string{}); err != nil {
+			log.Printf("scan_id=%s phase=acquisition_release error=%v", config.ScanID, err)
+		}
+	}()
 	formFuzzerCfg := loadFormFuzzerRuntimeConfig()
 	formBrowserCfg := loadFormBrowserRuntimeConfig()
 	effectiveMaxPages := config.MaxPages
 	if effectiveMaxPages <= 0 {
-		effectiveMaxPages = 100
+		effectiveMaxPages = max(1, envInt("DEFAULT_SCAN_MAX_PAGES", 100))
 	}
 	log.Printf(
 		"Form-fuzzer runtime: enabled=%v env=%s concurrency=%d timeout_sec=%d max_forms=%d profile=%s",
@@ -973,15 +999,20 @@ func startScan(ctx context.Context, config ScannerConfig) {
 	var mu sync.Mutex
 	var dbWg sync.WaitGroup
 	var pageCount int32
+	crawlEvidence := newCrawlOutcomes()
 	var parallelDiscovery *browserpool.DiscoverRenderedResult
 	var parallelDiscoveryErr error
 	parallelDiscoveryDone := make(chan struct{})
+	discoveryOptions := browserpool.DiscoverRenderedOptions{
+		ScanID:            scanID,
+		CaptureProjection: envBool("CAPTURE_TEXT_PROJECTION", false),
+	}
 	if browserpool.IsEnabled() && envBool("ENABLE_OBSCURA_PARALLEL_DISCOVERY", true) {
 		go func() {
 			defer close(parallelDiscoveryDone)
 			maxRenderedLinks := envInt("OBSCURA_DISCOVERY_MAX_LINKS_PER_PAGE", 30)
 			renderedWaitMS := envInt("RENDERED_DISCOVERY_TIMEOUT_MS", 20000)
-			parallelDiscovery, parallelDiscoveryErr = browserpool.DiscoverRendered(ctx, config.StartURL, config.AllowedDomains, maxRenderedLinks, true, renderedWaitMS)
+			parallelDiscovery, parallelDiscoveryErr = browserpool.DiscoverRenderedWithOptions(ctx, config.StartURL, config.AllowedDomains, maxRenderedLinks, true, renderedWaitMS, discoveryOptions)
 		}()
 	} else {
 		close(parallelDiscoveryDone)
@@ -1006,6 +1037,7 @@ func startScan(ctx context.Context, config ScannerConfig) {
 	var discoveredURLCount int32
 	var enqueueSuccessCount int32
 	var enqueueErrorCount int32
+	var enqueueDuplicateCount int32
 	var skippedEmptyCount int32
 	var skippedSchemeCount int32
 	var skippedEmailLikeCount int32
@@ -1026,8 +1058,10 @@ func startScan(ctx context.Context, config ScannerConfig) {
 	}
 
 	c.OnRequest(func(r *colly.Request) {
+		crawlEvidence.start(r.ID, r.URL.String())
 		// Section 2.1: abort all pending requests when scan timeout fires
 		if atomic.LoadInt32(&crawlStopped) == 1 {
+			crawlEvidence.finish(r.ID, r.URL.String(), 0, "aborted_after_stop")
 			r.Abort()
 			return
 		}
@@ -1050,7 +1084,9 @@ func startScan(ctx context.Context, config ScannerConfig) {
 			atomic.AddInt32(&onErrorAlreadyVisitedCount, 1)
 			return
 		}
+		crawlEvidence.finish(r.Request.ID, urlStr, r.StatusCode, "http_or_network_error")
 		if strings.Contains(errStr, "context deadline exceeded") {
+			crawlEvidence.finish(r.Request.ID, urlStr, r.StatusCode, "request_deadline")
 			atomic.AddInt32(&onErrorDeadlineCount, 1)
 			return
 		}
@@ -1124,7 +1160,7 @@ func startScan(ctx context.Context, config ScannerConfig) {
 			logCrawlDebug("↷ skip link: source=%s parent=%s raw=%s reason=binary", source, parentURL, rawLink)
 			return
 		}
-		absLink := e2abs(parentURL, rawLink, baseURL)
+		absLink := pageIdentity(e2abs(parentURL, rawLink, baseURL))
 		if absLink == "" {
 			atomic.AddInt32(&skippedInvalidAbsCount, 1)
 			logCrawlDebug("↷ skip link: source=%s parent=%s raw=%s reason=invalid_absolute", source, parentURL, rawLink)
@@ -1146,11 +1182,16 @@ func startScan(ctx context.Context, config ScannerConfig) {
 		ctx.Put("anchor", strings.TrimSpace(anchorText))
 		ctx.Put("source", source)
 		if err := c.Request("GET", absLink, nil, ctx, nil); err != nil {
+			if strings.Contains(err.Error(), "already visited") {
+				atomic.AddInt32(&enqueueDuplicateCount, 1)
+				return
+			}
 			atomic.AddInt32(&enqueueErrorCount, 1)
 			logCrawlDebug("⚠ enqueue failed: source=%s parent=%s url=%s err=%v", source, parentURL, absLink, err)
 			return
 		}
 		queued := atomic.AddInt32(&enqueueSuccessCount, 1)
+		crawlEvidence.queued(absLink, source)
 		if crawlDebug && (queued <= 25 || queued%25 == 0) {
 			log.Printf("→ enqueued crawl url #%d: source=%s parent=%s url=%s", queued, source, parentURL, absLink)
 		}
@@ -1265,17 +1306,15 @@ func startScan(ctx context.Context, config ScannerConfig) {
 			atomic.StoreInt32(&crawlStopped, 1)
 		}
 		if int(newCount) > effectiveMaxPages {
+			crawlEvidence.finish(r.Request.ID, r.Request.URL.String(), r.StatusCode, "response_over_page_budget")
 			return
 		}
+		crawlEvidence.finish(r.Request.ID, r.Request.URL.String(), r.StatusCode, "response_accepted")
 		atomic.AddInt64(&totalResourceBytes, int64(len(r.Body)))
 		if r.StatusCode == http.StatusGatewayTimeout {
 			atomic.AddInt32(&gatewayTimeoutCount, 1)
 		}
-		targetURL := strings.TrimSpace(r.Request.URL.String())
-
-		if strings.HasSuffix(targetURL, "/") && strings.Count(targetURL, "/") > 3 {
-			targetURL = strings.TrimSuffix(targetURL, "/")
-		}
+		targetURL := pageIdentity(r.Request.URL.String())
 
 		html := string(r.Body)
 		if isCloudflareChallenge(html, r.Headers) {
@@ -1348,8 +1387,11 @@ func startScan(ctx context.Context, config ScannerConfig) {
 		dbWg.Add(1)
 		go func(u, h string, m interface{}) {
 			defer dbWg.Done()
-			if err := db.InsertPage(scanID, baseURL, u, h, m); err != nil {
+			if err := db.InsertPage(scanID, baseURL, u, h, m, false); err != nil {
+				crawlEvidence.stored(r.Request.ID, false)
 				log.Printf("⚠ DB insert failed for %s: %v", u, err)
+			} else {
+				crawlEvidence.stored(r.Request.ID, true)
 			}
 		}(targetURL, html, pageMetrics)
 	})
@@ -1390,10 +1432,20 @@ func startScan(ctx context.Context, config ScannerConfig) {
 	}()
 
 	crawlStart := time.Now()
+	// Probe results contain the XML already fetched during domain analysis.
+	// Traverse nested indexes and enqueue their page entries into the same
+	// bounded crawl, rather than only reporting that a sitemap exists.
+	sitemapSeeds := collectSitemapURLs(ctx, sitemapProbe.FinalURL, sitemapProbe.Body, config.AllowedDomains, effectiveMaxPages)
 	if err := c.Visit(config.StartURL); err != nil {
 		log.Printf("⚠ Initial visit failed for %s: %v", config.StartURL, err)
+	} else {
+		crawlEvidence.queued(config.StartURL, "initial_seed")
+	}
+	for _, seed := range sitemapSeeds {
+		enqueueCrawlURL(seed, config.StartURL, "", "sitemap")
 	}
 	c.Wait()
+	log.Printf("scan_id=%s phase=crawl duplicate_enqueue=%d", scanID, atomic.LoadInt32(&enqueueDuplicateCount))
 	crawlMS := time.Since(crawlStart).Milliseconds()
 	log.Printf(
 		"Crawl diagnostics: discovered=%d enqueued=%d enqueue_errors=%d skipped_empty=%d skipped_scheme=%d skipped_email_like=%d skipped_binary=%d skipped_fragment_only=%d skipped_forbidden_domain=%d skipped_invalid_abs=%d already_visited=%d request_deadline=%d unsupported_scheme=%d gateway_timeouts=%d",
@@ -1459,7 +1511,7 @@ func startScan(ctx context.Context, config ScannerConfig) {
 			"evidence_provenance": "static_prefetch",
 			"html_source":         "static_prefetch",
 		}
-		if err := db.InsertPage(scanID, baseURL, baseURL, htmlBody, pageMetrics); err != nil {
+		if err := db.InsertPage(scanID, baseURL, baseURL, htmlBody, pageMetrics, false); err != nil {
 			log.Printf("⚠ CF fallback: homepage DB insert failed: %v", err)
 		}
 	}
@@ -1469,7 +1521,7 @@ func startScan(ctx context.Context, config ScannerConfig) {
 	if renderedRecoveryMinimum < 1 {
 		renderedRecoveryMinimum = 1
 	}
-	mergeRenderedDiscovery := func(discovery *browserpool.DiscoverRenderedResult, requestedURL, provenance string, replaceFirst bool, insertPage bool) bool {
+	mergeRenderedDiscovery := func(discovery *browserpool.DiscoverRenderedResult, requestedURL, provenance string) bool {
 		if discovery == nil || discovery.Error != "" {
 			return false
 		}
@@ -1483,19 +1535,29 @@ func startScan(ctx context.Context, config ScannerConfig) {
 		}
 		renderedSEO := seo.Analyze(finalURL, renderedHTML, hasSitemap, hasRobots)
 		renderedUX := ux.Analyze(finalURL, renderedHTML, baseURL)
+		pageMetrics := map[string]interface{}{
+			"seo": renderedSEO, "ux": renderedUX, "rendered_discovery": discovery,
+			"evidence_provenance": provenance + "_rendered_discovery",
+			"html_source":         provenance + "_rendered_discovery",
+		}
+		// Publish DOM and its observation metadata in one transaction/revision.
+		// Upsert also handles a rendered homepage absent from the HTTP crawl.
+		if err := db.InsertRenderedPage(scanID, baseURL, finalURL, renderedHTML, pageMetrics, false); err != nil {
+			log.Printf("%s rendered observation persistence failed for %s: %v", provenance, finalURL, err)
+			return false
+		}
 		mu.Lock()
-		if replaceFirst {
-			if len(allSEOResults) == 0 {
-				allSEOResults = append(allSEOResults, renderedSEO)
-			} else {
-				allSEOResults[0] = renderedSEO
+		index := -1
+		for i, previous := range allSEOResults {
+			if pageIdentity(previous.URL) == pageIdentity(finalURL) {
+				index = i
+				break
 			}
-			if len(allUXResults) == 0 {
-				allUXResults = append(allUXResults, renderedUX)
-			} else {
-				allUXResults[0] = renderedUX
-			}
-		} else if insertPage {
+		}
+		if index >= 0 {
+			allSEOResults[index] = renderedSEO
+			allUXResults[index] = renderedUX
+		} else {
 			allSEOResults = append(allSEOResults, renderedSEO)
 			allUXResults = append(allUXResults, renderedUX)
 		}
@@ -1508,30 +1570,14 @@ func startScan(ctx context.Context, config ScannerConfig) {
 			discoveredForms = append(discoveredForms, f)
 		}
 		mu.Unlock()
-
-		pageMetrics := map[string]interface{}{
-			"seo":                 renderedSEO,
-			"ux":                  renderedUX,
-			"rendered_discovery":  discovery,
-			"evidence_provenance": provenance + "_rendered_discovery",
-			"html_source":         provenance + "_rendered_discovery",
-		}
-		if insertPage {
-			if err := db.InsertPage(scanID, baseURL, finalURL, renderedHTML, pageMetrics); err != nil {
-				log.Printf("%s rendered discovery InsertPage failed for %s: %v", provenance, finalURL, err)
-			}
-		} else {
-			if err := db.UpdatePageHTML(scanID, finalURL, renderedHTML); err != nil {
-				log.Printf("%s rendered discovery UpdatePageHTML failed for %s: %v", provenance, finalURL, err)
-			}
-			if err := db.MergePageMetrics(scanID, finalURL, pageMetrics); err != nil {
-				log.Printf("%s rendered discovery MergePageMetrics failed for %s: %v", provenance, finalURL, err)
-			}
-		}
 		return true
 	}
 	discoverRenderedWithChromiumFallback := func(targetURL string, maxLinks int, provenance string) (*browserpool.DiscoverRenderedResult, error) {
-		discovery, err := browserpool.DiscoverRendered(ctx, targetURL, config.AllowedDomains, maxLinks, true, envInt("RENDERED_DISCOVERY_TIMEOUT_MS", 45000))
+		discovery, err := browserpool.DiscoverRenderedWithOptions(ctx, targetURL, config.AllowedDomains, maxLinks, true, envInt("RENDERED_DISCOVERY_TIMEOUT_MS", 45000), discoveryOptions)
+		if discovery != nil && discovery.AcquisitionRouted {
+			// Pool routing already includes Chromium recovery in the same budget.
+			return discovery, err
+		}
 		if err == nil && discovery != nil && discovery.Error == "" {
 			return discovery, nil
 		}
@@ -1542,9 +1588,9 @@ func startScan(ctx context.Context, config ScannerConfig) {
 			reason = discovery.Error
 		}
 		log.Printf("%s rendered discovery auto engine failed for %s: %s; obscura_unavailable_chromium_fallback", provenance, targetURL, reason)
-		return browserpool.DiscoverRenderedWithOptions(ctx, targetURL, config.AllowedDomains, maxLinks, true, envInt("RENDERED_DISCOVERY_TIMEOUT_MS", 45000), browserpool.DiscoverRenderedOptions{
-			ForceChromium: true,
-		})
+		fallbackOptions := discoveryOptions
+		fallbackOptions.ForceChromium = true
+		return browserpool.DiscoverRenderedWithOptions(ctx, targetURL, config.AllowedDomains, maxLinks, true, envInt("RENDERED_DISCOVERY_TIMEOUT_MS", 45000), fallbackOptions)
 	}
 	applyParallelDiscovery := func(provenance string) bool {
 		if parallelDiscoveryApplied {
@@ -1561,7 +1607,7 @@ func startScan(ctx context.Context, config ScannerConfig) {
 			log.Printf("%s rendered discovery returned error: %s", provenance, parallelDiscovery.Error)
 			return false
 		}
-		if !mergeRenderedDiscovery(parallelDiscovery, config.StartURL, provenance, cfFallbackMode, false) {
+		if !mergeRenderedDiscovery(parallelDiscovery, config.StartURL, provenance) {
 			return false
 		}
 		parallelDiscoveryApplied = true
@@ -1583,139 +1629,93 @@ func startScan(ctx context.Context, config ScannerConfig) {
 	if parallelDiscoveryReady {
 		applyParallelDiscovery("parallel")
 	}
-	if cfFallbackMode && browserpool.IsEnabled() {
-		maxRenderedPages := envInt("RENDERED_DISCOVERY_MAX_PAGES", 100)
+	if browserpool.IsEnabled() && ctx.Err() == nil {
+		// Expand rendered children even after a partially successful HTTP crawl.
+		// Request scope, not the former independent 8/100-page caps, limits rows.
+		maxRenderedVisits := envInt("RENDERED_DISCOVERY_MAX_PAGES", effectiveMaxPages)
+		if maxRenderedVisits <= 0 || maxRenderedVisits > effectiveMaxPages {
+			maxRenderedVisits = effectiveMaxPages
+		}
 		maxRenderedLinks := envInt("RENDERED_DISCOVERY_MAX_LINKS", 200)
-		if maxRenderedPages < 1 {
-			maxRenderedPages = 1
-		}
-		if maxRenderedPages > 100 {
-			maxRenderedPages = 100
-		}
-		if config.MaxPages > 0 && maxRenderedPages > config.MaxPages {
-			maxRenderedPages = config.MaxPages
-		}
-		blockedConcurrency := envInt("OBSCURA_BLOCKED_CRAWL_CONCURRENCY", 4)
-		if blockedConcurrency < 1 {
-			blockedConcurrency = 1
-		}
-		if blockedConcurrency > 6 {
-			blockedConcurrency = 6
-		}
-		if blockedConcurrency > maxRenderedPages {
-			blockedConcurrency = maxRenderedPages
-		}
-		log.Printf("Obscura rendered discovery recovery enabled after 0-page crawl (max_pages=%d max_links=%d concurrency=%d)", maxRenderedPages, maxRenderedLinks, blockedConcurrency)
-
+		concurrency := envInt("OBSCURA_BLOCKED_CRAWL_CONCURRENCY", 4)
 		if !parallelDiscoveryReady {
-			lateJoinMS := envInt("OBSCURA_PARALLEL_DISCOVERY_LATE_JOIN_MS", 15000)
 			select {
 			case <-parallelDiscoveryDone:
 				parallelDiscoveryReady = true
-			case <-time.After(time.Duration(lateJoinMS) * time.Millisecond):
-				log.Printf("Rendered discovery still running after blocked-crawl late join budget; starting dedicated recovery")
+				applyParallelDiscovery("frontier_parallel")
+			case <-time.After(time.Duration(envInt("OBSCURA_PARALLEL_DISCOVERY_LATE_JOIN_MS", 8000)) * time.Millisecond):
+			case <-ctx.Done():
 			}
 		}
-
-		var discovery *browserpool.DiscoverRenderedResult
-		if parallelDiscoveryReady && parallelDiscoveryErr == nil && parallelDiscovery != nil && parallelDiscovery.Error == "" {
-			discovery = parallelDiscovery
-			applyParallelDiscovery("blocked_parallel")
-		} else {
-			var err error
-			discovery, err = discoverRenderedWithChromiumFallback(config.StartURL, maxRenderedLinks, "blocked_crawl")
-			if err != nil {
-				log.Printf("blocked crawl rendered discovery failed: %v", err)
-			} else if discovery == nil || discovery.Error != "" {
-				if discovery != nil {
-					log.Printf("blocked crawl rendered discovery returned error: %s", discovery.Error)
-				}
-			} else if mergeRenderedDiscovery(discovery, config.StartURL, "blocked_crawl", true, false) {
-				parallelDiscoveryApplied = true
+		known := map[string]bool{}
+		for _, page := range allSEOResults {
+			known[pageIdentity(page.URL)] = true
+		}
+		seeds := []string{}
+		addPending := func(target string) {
+			if !known[pageIdentity(target)] {
+				seeds = append(seeds, target)
 			}
 		}
-
-		if discovery != nil && discovery.Error == "" {
-			finalURL := strings.TrimSpace(discovery.FinalURL)
-			if finalURL == "" {
-				finalURL = config.StartURL
+		for _, seed := range sitemapSeeds {
+			addPending(seed)
+		}
+		if parallelDiscoveryApplied {
+			for _, child := range parallelDiscovery.InternalLinks {
+				addPending(child)
 			}
-			seenRendered := map[string]bool{
-				strings.TrimRight(config.StartURL, "/"): true,
-				strings.TrimRight(finalURL, "/"):        true,
+		} else if cfFallbackMode {
+			// Render the seeded challenge/shell once when the parallel visit
+			// could not provide content. Its recovered links feed the frontier.
+			seeds = append(seeds, config.StartURL)
+		}
+		for _, page := range allSEOResults {
+			if isSPASite([]seo.SEOResult{page}) && (!parallelDiscoveryApplied || pageIdentity(page.URL) != pageIdentity(parallelDiscovery.FinalURL)) {
+				seeds = append(seeds, page.URL)
 			}
-			links := make([]string, 0, maxRenderedPages)
-			for _, rawLink := range discovery.InternalLinks {
-				if len(links) >= maxRenderedPages-1 {
-					break
+		}
+		captured := runRenderedFrontier(ctx, seeds, maxRenderedVisits, concurrency, config.AllowedDomains,
+			func(target string) (*browserpool.DiscoverRenderedResult, error) {
+				return discoverRenderedWithChromiumFallback(target, maxRenderedLinks, "frontier")
+			}, func(target string, result *browserpool.DiscoverRenderedResult) bool {
+				finalURL := result.FinalURL
+				if strings.TrimSpace(finalURL) == "" {
+					finalURL = target
 				}
-				link := strings.TrimSpace(rawLink)
-				key := strings.TrimRight(link, "/")
-				if link == "" || seenRendered[key] {
-					continue
+				key := pageIdentity(finalURL)
+				if key == "" || (!known[key] && len(allSEOResults) >= effectiveMaxPages) {
+					return false
 				}
-				seenRendered[key] = true
-				links = append(links, link)
-			}
-
-			type renderedRecoveryResult struct {
-				url       string
-				discovery *browserpool.DiscoverRenderedResult
-				err       error
-			}
-			jobs := make(chan string)
-			results := make(chan renderedRecoveryResult, len(links))
-			var renderedWg sync.WaitGroup
-			workerCount := blockedConcurrency
-			if workerCount > len(links) {
-				workerCount = len(links)
-			}
-			for i := 0; i < workerCount; i++ {
-				renderedWg.Add(1)
-				go func() {
-					defer renderedWg.Done()
-					for link := range jobs {
-						linkDiscovery, linkErr := discoverRenderedWithChromiumFallback(link, maxRenderedLinks, "blocked_crawl_link")
-						results <- renderedRecoveryResult{url: link, discovery: linkDiscovery, err: linkErr}
+				if !mergeRenderedDiscovery(result, target, "frontier") {
+					return false
+				}
+				known[key] = true
+				return true
+			}, func() []string {
+				if !parallelDiscoveryReady {
+					select {
+					case <-parallelDiscoveryDone:
+						parallelDiscoveryReady = true
+					case <-ctx.Done():
+						return nil
 					}
-				}()
-			}
-			go func() {
-				for _, link := range links {
-					jobs <- link
 				}
-				close(jobs)
-				renderedWg.Wait()
-				close(results)
-			}()
-
-			recoveredPages := 1
-			for result := range results {
-				if recoveredPages >= maxRenderedPages {
-					break
+				if !parallelDiscoveryApplied {
+					applyParallelDiscovery("frontier_completed_parallel")
 				}
-				if result.err != nil || result.discovery == nil || result.discovery.Error != "" || strings.TrimSpace(result.discovery.RenderedHTML) == "" {
-					if result.err != nil {
-						log.Printf("blocked crawl rendered discovery skipped %s: %v", result.url, result.err)
-					} else if result.discovery != nil && result.discovery.Error != "" {
-						log.Printf("blocked crawl rendered discovery skipped %s: %s", result.url, result.discovery.Error)
-					}
-					continue
+				if parallelDiscoveryApplied {
+					return parallelDiscovery.InternalLinks
 				}
-				if mergeRenderedDiscovery(result.discovery, result.url, "blocked_crawl", false, true) {
-					recoveredPages++
-				}
-			}
-			atomic.StoreInt32(&pageCount, int32(len(allSEOResults)))
+				return nil
+			})
+		atomic.StoreInt32(&pageCount, int32(len(allSEOResults)))
+		if cfFallbackMode {
 			renderedRecoveryPages = len(allSEOResults)
 			if renderedRecoveryPages < renderedRecoveryMinimum {
 				setStopReason("blocked_recovery_partial")
-				log.Printf("⚠ Blocked crawl recovery is partial: recovered=%d minimum=%d; downstream KPI confidence will be reduced",
-					renderedRecoveryPages, renderedRecoveryMinimum)
 			}
-			log.Printf("Obscura rendered discovery recovered %d page(s), %d link(s), %d form(s), engine=%s",
-				len(allSEOResults), len(discovery.InternalLinks), len(discoveredForms), discovery.Engine)
 		}
+		log.Printf("Rendered frontier consumed %d observations; %d unique pages in scope (limit=%d)", captured, len(allSEOResults), effectiveMaxPages)
 	}
 	if cfFallbackMode && atomic.LoadInt32(&pageCount) == 0 && len(allSEOResults) > 0 {
 		atomic.StoreInt32(&pageCount, int32(len(allSEOResults)))
@@ -1749,7 +1749,7 @@ func startScan(ctx context.Context, config ScannerConfig) {
 			if browserpool.IsEnabled() {
 				log.Printf("No HTTP forms found with Cloudflare challenge markers, trying browser-pool rendered discovery fallback...")
 				timeoutMS := int(browserTimeout.Milliseconds())
-				discovery, renderErr := browserpool.DiscoverRendered(ctx, config.StartURL, config.AllowedDomains, 8, true, timeoutMS)
+				discovery, renderErr := browserpool.DiscoverRenderedWithOptions(ctx, config.StartURL, config.AllowedDomains, 8, true, timeoutMS, discoveryOptions)
 				if renderErr != nil {
 					log.Printf("⚠ Browser-pool rendered discovery fallback failed: %v", renderErr)
 				} else if discovery.Error != "" {
@@ -1820,199 +1820,230 @@ func startScan(ctx context.Context, config ScannerConfig) {
 	// ============================================================
 	// AGGREGATE SEO DATA
 	// ============================================================
-	summary := SEOSummary{
-		TotalPages: len(allSEOResults),
-		MinScore:   100,
-		MaxScore:   0,
-	}
-	totalScore := 0
-	totalSocialSharingScore := 0
+	summary := SEOSummary{}
+	// Initial aggregation retains the phase order; refresh when a later
+	// browser observation replaces content used by the initial summaries.
+	refreshContentSummaries := func() {
+		// Rebuild content-hash membership from the selected observations, so a
+		// hydrated replacement cannot leave its earlier shell in duplication rates.
+		report.SEOIssues = nil
+		report.UXIssues = nil
+		report.DuplicatePages = nil
+		allExternalDomains = map[string]bool{}
+		contentHashes = map[string][]string{}
+		reliableContentHashPages, lowQualityContentHashPages = 0, 0
+		for _, selected := range allSEOResults {
+			hash := strings.TrimSpace(selected.ContentHash)
+			if hash == "" || selected.ContentHashConfidence < minReliableContentHashConfidence {
+				lowQualityContentHashPages++
+			} else {
+				reliableContentHashPages++
+				contentHashes[hash] = append(contentHashes[hash], selected.URL)
+			}
+			for _, domain := range selected.Links.ExternalDomains {
+				allExternalDomains[domain] = true
+			}
+		}
+		summary = SEOSummary{
+			TotalPages: len(allSEOResults),
+			MinScore:   100,
+			MaxScore:   0,
+		}
+		totalScore := 0
+		totalSocialSharingScore := 0
 
-	for _, res := range allSEOResults {
-		totalScore += res.Score
-		if res.Score < summary.MinScore {
-			summary.MinScore = res.Score
-		}
-		if res.Score > summary.MaxScore {
-			summary.MaxScore = res.Score
-		}
-		summary.TotalImages += res.TotalImages
-		summary.ImagesWithoutAlt += res.ImagesNoAlt
-		summary.TotalInternalLinks += res.Links.InternalLinks
-		summary.TotalExternalLinks += res.Links.ExternalLinks
+		for _, res := range allSEOResults {
+			totalScore += res.Score
+			if res.Score < summary.MinScore {
+				summary.MinScore = res.Score
+			}
+			if res.Score > summary.MaxScore {
+				summary.MaxScore = res.Score
+			}
+			summary.TotalImages += res.TotalImages
+			summary.ImagesWithoutAlt += res.ImagesNoAlt
+			summary.TotalInternalLinks += res.Links.InternalLinks
+			summary.TotalExternalLinks += res.Links.ExternalLinks
 
-		if !res.Meta.HasMetaDesc {
-			summary.PagesMissingMetaDesc++
-		}
-		if res.Meta.Title == "" {
-			summary.PagesMissingTitle++
-		}
-		if !res.HeadingValid {
-			summary.PagesWithBadH1++
-		}
-		if !res.URLClean {
-			summary.PagesNotURLClean++
-		}
-		if !res.HasLazyImages {
-			summary.PagesWithoutLazy++
-		}
-		summary.NodeStyleURLCount += res.NodeStyleURLCount // Phase K-4: site-wide total
-		totalSocialSharingScore += res.SocialSharingScore
-		if res.HasOGType || res.HasTwitterCard || len(res.SocialShareButtons) > 0 {
-			summary.PagesWithSocialSharing++
+			if !res.Meta.HasMetaDesc {
+				summary.PagesMissingMetaDesc++
+			}
+			if res.Meta.Title == "" {
+				summary.PagesMissingTitle++
+			}
+			if !res.HeadingValid {
+				summary.PagesWithBadH1++
+			}
+			if !res.URLClean {
+				summary.PagesNotURLClean++
+			}
+			if !res.HasLazyImages {
+				summary.PagesWithoutLazy++
+			}
+			summary.NodeStyleURLCount += res.NodeStyleURLCount // Phase K-4: site-wide total
+			totalSocialSharingScore += res.SocialSharingScore
+			if res.HasOGType || res.HasTwitterCard || len(res.SocialShareButtons) > 0 {
+				summary.PagesWithSocialSharing++
+			}
+
+			// Only store full detail for pages WITH issues
+			if len(res.Issues) > 0 {
+				summary.PagesWithIssues++
+				report.SEOIssues = append(report.SEOIssues, PageIssueEntry{
+					URL:      res.URL,
+					Score:    res.Score,
+					Issues:   res.Issues,
+					Headings: res.Headings,
+					Meta:     res.Meta,
+				})
+			}
 		}
 
-		// Only store full detail for pages WITH issues
-		if len(res.Issues) > 0 {
-			summary.PagesWithIssues++
-			report.SEOIssues = append(report.SEOIssues, PageIssueEntry{
-				URL:      res.URL,
-				Score:    res.Score,
-				Issues:   res.Issues,
-				Headings: res.Headings,
-				Meta:     res.Meta,
-			})
+		if summary.TotalPages > 0 {
+			summary.AvgScore = float64(totalScore) / float64(summary.TotalPages)
+			summary.AvgSocialSharingScore = float64(totalSocialSharingScore) / float64(summary.TotalPages)
 		}
-	}
 
-	if summary.TotalPages > 0 {
-		summary.AvgScore = float64(totalScore) / float64(summary.TotalPages)
-		summary.AvgSocialSharingScore = float64(totalSocialSharingScore) / float64(summary.TotalPages)
-	}
+		// ============================================================
+		// PHASE K: SITE-WIDE SEO AGGREGATIONS
+		// ============================================================
+		// K-1: Homepage missing H1
+		homepageURL := strings.TrimSuffix(config.StartURL, "/")
+		for _, res := range allSEOResults {
+			if strings.TrimSuffix(res.URL, "/") == homepageURL {
+				hasH1 := false
+				for _, h := range res.Headings {
+					if strings.EqualFold(h.Tag, "h1") {
+						hasH1 = true
+						break
+					}
+				}
+				summary.HomepageH1Missing = !hasH1
+				break
+			}
+		}
+		summary.HomepageH1KPIPassed = !summary.HomepageH1Missing
 
-	// ============================================================
-	// PHASE K: SITE-WIDE SEO AGGREGATIONS
-	// ============================================================
-	// K-1: Homepage missing H1
-	homepageURL := strings.TrimSuffix(config.StartURL, "/")
-	for _, res := range allSEOResults {
-		if strings.TrimSuffix(res.URL, "/") == homepageURL {
-			hasH1 := false
-			for _, h := range res.Headings {
-				if strings.EqualFold(h.Tag, "h1") {
-					hasH1 = true
-					break
+		// K-2: Duplicate content rate (reliable hashes only)
+		dupPages := 0
+		for _, pages := range contentHashes {
+			if len(pages) > 1 {
+				dupPages += len(pages)
+			}
+		}
+		if reliableContentHashPages > 0 {
+			summary.DuplicateContentRatePct = float64(dupPages) / float64(reliableContentHashPages) * 100
+		}
+		summary.DupContentKPIPassed = summary.DuplicateContentRatePct <= 10.0
+		duplicationReliability := "reliable"
+		if lowQualityContentHashPages > 0 {
+			duplicationReliability = "partial"
+		}
+		if reliableContentHashPages == 0 && lowQualityContentHashPages > 0 {
+			duplicationReliability = "pipeline_suspect"
+		}
+
+		// K-3: Unique external domains
+		summary.UniqueExternalDomains = len(allExternalDomains)
+
+		// K-4: NodeStyleURLCount already summed in loop; set KPI passed
+		summary.NodeURLKPIPassed = summary.NodeStyleURLCount == 0
+		if summary.TotalPages > 0 {
+			summary.SocialSharingKPIPassed = (float64(summary.PagesWithSocialSharing) / float64(summary.TotalPages)) >= 0.70
+		}
+
+		fmt.Printf("Phase K — H1 missing: %v, dup rate: %.1f%%, ext domains: %d, node URLs: %d\n",
+			summary.HomepageH1Missing, summary.DuplicateContentRatePct,
+			summary.UniqueExternalDomains, summary.NodeStyleURLCount)
+
+		seoKPIExtended := map[string]interface{}{
+			"has_sitemap":                    hasSitemap,
+			"has_robots_txt":                 hasRobots,
+			"sitemap_url":                    sitemapProbe.FinalURL,
+			"sitemap_detected_via":           sitemapProbe.DetectedVia,
+			"robots_url":                     robotsProbe.FinalURL,
+			"robots_detected_via":            robotsProbe.DetectedVia,
+			"ai_robots_policy":               seo.AnalyzeAIRobotsPolicy(robotsTxtContent),
+			"total_internal_links":           summary.TotalInternalLinks,
+			"total_external_links":           summary.TotalExternalLinks,
+			"total_resource_size_kb":         math.Round((float64(atomic.LoadInt64(&totalResourceBytes))/1024.0)*10) / 10,
+			"gateway_timeout_count":          int(atomic.LoadInt32(&gatewayTimeoutCount)),
+			"homepage_h1_missing":            summary.HomepageH1Missing,
+			"homepage_h1_kpi_passed":         summary.HomepageH1KPIPassed,
+			"duplicate_content_rate_pct":     summary.DuplicateContentRatePct,
+			"dup_content_kpi_passed":         summary.DupContentKPIPassed,
+			"content_hash_eligible_pages":    reliableContentHashPages,
+			"content_hash_low_quality_pages": lowQualityContentHashPages,
+			"duplication_reliability":        duplicationReliability,
+			"unique_external_domains":        summary.UniqueExternalDomains,
+			"node_style_url_count":           summary.NodeStyleURLCount,
+			"node_url_kpi_passed":            summary.NodeURLKPIPassed,
+			"pages_with_social_sharing":      summary.PagesWithSocialSharing,
+			"avg_social_sharing_score":       summary.AvgSocialSharingScore,
+			"social_sharing_kpi_passed":      summary.SocialSharingKPIPassed,
+			"pages_missing_meta_desc":        summary.PagesMissingMetaDesc,
+			"pages_missing_title":            summary.PagesMissingTitle,
+			"pages_with_bad_h1":              summary.PagesWithBadH1,
+			"pages_not_url_clean":            summary.PagesNotURLClean,
+		}
+		if err := db.UpdateSEOKPIExtended(scanID, seoKPIExtended); err != nil {
+			log.Printf("⚠ UpdateSEOKPIExtended failed: %v", err)
+		}
+
+		report.SEOSummary = summary
+		report.PagesScanned = summary.TotalPages
+
+		// ============================================================
+		// AGGREGATE UX DATA
+		// ============================================================
+		uxSummary := UXSummary{}
+		for i, res := range allUXResults {
+			if len(res.ProductCardsMissingImages) > 0 {
+				uxSummary.PagesWithMissingImages++
+			}
+			if !res.IsReadable {
+				uxSummary.PagesWithLowTextRatio++
+			}
+			if res.ContextualInternalLinks == 0 && res.TextContentRatio > 0 {
+				// This is a rough proxy, the strict logic is in ux.go producing Issues
+			}
+			// Accurate counts based on issues
+			hadLinksIssue := false
+			for _, iss := range res.Issues {
+				if strings.Contains(iss, "Maillage default") {
+					hadLinksIssue = true
 				}
 			}
-			summary.HomepageH1Missing = !hasH1
-			break
-		}
-	}
-	summary.HomepageH1KPIPassed = !summary.HomepageH1Missing
+			if hadLinksIssue {
+				uxSummary.PagesWithMissingLinks++
+			}
 
-	// K-2: Duplicate content rate (reliable hashes only)
-	dupPages := 0
-	for _, pages := range contentHashes {
-		if len(pages) > 1 {
-			dupPages += len(pages)
-		}
-	}
-	if reliableContentHashPages > 0 {
-		summary.DuplicateContentRatePct = float64(dupPages) / float64(reliableContentHashPages) * 100
-	}
-	summary.DupContentKPIPassed = summary.DuplicateContentRatePct <= 10.0
-	duplicationReliability := "reliable"
-	if lowQualityContentHashPages > 0 {
-		duplicationReliability = "partial"
-	}
-	if reliableContentHashPages == 0 && lowQualityContentHashPages > 0 {
-		duplicationReliability = "pipeline_suspect"
-	}
+			if res.HasMap {
+				uxSummary.PagesWithMaps++
+			}
+			if res.SimulatorCount > 0 {
+				uxSummary.PagesWithSimulators++
+			}
+			if res.IsFunnelStep {
+				uxSummary.PagesWithFunnels++
+			}
 
-	// K-3: Unique external domains
-	summary.UniqueExternalDomains = len(allExternalDomains)
-
-	// K-4: NodeStyleURLCount already summed in loop; set KPI passed
-	summary.NodeURLKPIPassed = summary.NodeStyleURLCount == 0
-	if summary.TotalPages > 0 {
-		summary.SocialSharingKPIPassed = (float64(summary.PagesWithSocialSharing) / float64(summary.TotalPages)) >= 0.70
-	}
-
-	fmt.Printf("Phase K — H1 missing: %v, dup rate: %.1f%%, ext domains: %d, node URLs: %d\n",
-		summary.HomepageH1Missing, summary.DuplicateContentRatePct,
-		summary.UniqueExternalDomains, summary.NodeStyleURLCount)
-
-	seoKPIExtended := map[string]interface{}{
-		"has_sitemap":                    hasSitemap,
-		"has_robots_txt":                 hasRobots,
-		"sitemap_url":                    sitemapProbe.FinalURL,
-		"sitemap_detected_via":           sitemapProbe.DetectedVia,
-		"robots_url":                     robotsProbe.FinalURL,
-		"robots_detected_via":            robotsProbe.DetectedVia,
-		"ai_robots_policy":               seo.AnalyzeAIRobotsPolicy(robotsTxtContent),
-		"total_internal_links":           summary.TotalInternalLinks,
-		"total_external_links":           summary.TotalExternalLinks,
-		"total_resource_size_kb":         math.Round((float64(atomic.LoadInt64(&totalResourceBytes))/1024.0)*10) / 10,
-		"gateway_timeout_count":          int(atomic.LoadInt32(&gatewayTimeoutCount)),
-		"homepage_h1_missing":            summary.HomepageH1Missing,
-		"homepage_h1_kpi_passed":         summary.HomepageH1KPIPassed,
-		"duplicate_content_rate_pct":     summary.DuplicateContentRatePct,
-		"dup_content_kpi_passed":         summary.DupContentKPIPassed,
-		"content_hash_eligible_pages":    reliableContentHashPages,
-		"content_hash_low_quality_pages": lowQualityContentHashPages,
-		"duplication_reliability":        duplicationReliability,
-		"unique_external_domains":        summary.UniqueExternalDomains,
-		"node_style_url_count":           summary.NodeStyleURLCount,
-		"node_url_kpi_passed":            summary.NodeURLKPIPassed,
-		"pages_with_social_sharing":      summary.PagesWithSocialSharing,
-		"avg_social_sharing_score":       summary.AvgSocialSharingScore,
-		"social_sharing_kpi_passed":      summary.SocialSharingKPIPassed,
-		"pages_missing_meta_desc":        summary.PagesMissingMetaDesc,
-		"pages_missing_title":            summary.PagesMissingTitle,
-		"pages_with_bad_h1":              summary.PagesWithBadH1,
-		"pages_not_url_clean":            summary.PagesNotURLClean,
-	}
-	if err := db.UpdateSEOKPIExtended(scanID, seoKPIExtended); err != nil {
-		log.Printf("⚠ UpdateSEOKPIExtended failed: %v", err)
-	}
-
-	report.SEOSummary = summary
-	report.PagesScanned = summary.TotalPages
-
-	// ============================================================
-	// AGGREGATE UX DATA
-	// ============================================================
-	uxSummary := UXSummary{}
-	for i, res := range allUXResults {
-		if len(res.ProductCardsMissingImages) > 0 {
-			uxSummary.PagesWithMissingImages++
-		}
-		if !res.IsReadable {
-			uxSummary.PagesWithLowTextRatio++
-		}
-		if res.ContextualInternalLinks == 0 && res.TextContentRatio > 0 {
-			// This is a rough proxy, the strict logic is in ux.go producing Issues
-		}
-		// Accurate counts based on issues
-		hadLinksIssue := false
-		for _, iss := range res.Issues {
-			if strings.Contains(iss, "Maillage default") {
-				hadLinksIssue = true
+			if len(res.Issues) > 0 {
+				report.UXIssues = append(report.UXIssues, UXPageIssue{
+					URL:    allSEOResults[i].URL, // 1:1 index alignment
+					Issues: res.Issues,
+				})
 			}
 		}
-		if hadLinksIssue {
-			uxSummary.PagesWithMissingLinks++
-		}
+		report.UXSummary = uxSummary
 
-		if res.HasMap {
-			uxSummary.PagesWithMaps++
-		}
-		if res.SimulatorCount > 0 {
-			uxSummary.PagesWithSimulators++
-		}
-		if res.IsFunnelStep {
-			uxSummary.PagesWithFunnels++
-		}
-
-		if len(res.Issues) > 0 {
-			report.UXIssues = append(report.UXIssues, UXPageIssue{
-				URL:    allSEOResults[i].URL, // 1:1 index alignment
-				Issues: res.Issues,
-			})
+		for hash, pages := range contentHashes {
+			if len(pages) > 1 {
+				report.DuplicatePages = append(report.DuplicatePages, DuplicatePage{Hash: hash, Pages: pages})
+			}
 		}
 	}
-	report.UXSummary = uxSummary
-
+	refreshContentSummaries()
 	// ============================================================
 	// FORM FUZZER (Phase A+B+C): run after crawl sync, before headless
 	// ============================================================
@@ -2044,7 +2075,7 @@ func startScan(ctx context.Context, config ScannerConfig) {
 					// on the dedicated form browser path.
 					log.Printf("🔍 Browser-pool modal/JS form discovery (rendered discovery)...")
 					timeoutMS := int(browserTimeout.Milliseconds())
-					discovery, renderErr := browserpool.DiscoverRendered(ctx, config.StartURL, config.AllowedDomains, 8, true, timeoutMS)
+					discovery, renderErr := browserpool.DiscoverRenderedWithOptions(ctx, config.StartURL, config.AllowedDomains, 8, true, timeoutMS, discoveryOptions)
 					if renderErr != nil {
 						log.Printf("⚠ Browser-pool modal rendered discovery failed: %v", renderErr)
 					} else if discovery.Error != "" {
@@ -2186,18 +2217,8 @@ func startScan(ctx context.Context, config ScannerConfig) {
 		log.Printf("⚠ UpdateFormFuzzerSummary failed: %v", err)
 	}
 
-	// Build duplicate pages report
-	for hash, pages := range contentHashes {
-		if len(pages) > 1 {
-			report.DuplicatePages = append(report.DuplicatePages, DuplicatePage{
-				Hash:  hash,
-				Pages: pages,
-			})
-		}
-	}
-
 	// ============================================================
-	// BUILD HEADLESS SAMPLE LIST (default 35%, configurable)
+	// BUILD HEADLESS SAMPLE LIST (default 80%, configurable)
 	// ============================================================
 	headlessSampleRatio := loadHeadlessSampleRatio()
 	// Issue 1: detect SPA and expose flag in report metadata
@@ -2218,6 +2239,38 @@ func startScan(ctx context.Context, config ScannerConfig) {
 		sampleURLs = append([]string{config.StartURL}, sampleURLs...)
 	}
 	fmt.Printf("Selected %d pages for headless analysis (%.0f%% sample).\n", len(sampleURLs), headlessSampleRatio*100)
+	if err := db.ReleaseUnselectedPages(scanID, sampleURLs); err != nil {
+		log.Printf("scan_id=%s phase=release_unselected error=%v", scanID, err)
+	}
+	publishRenderedPage := func(hr performance.HeadlessResult) {
+		if hr.Error != "" || strings.TrimSpace(hr.RenderedHTML) == "" {
+			if err := db.FinishPageAcquisition(scanID, hr.URL, hr.Error); err != nil {
+				log.Printf("scan_id=%s phase=render_publish url=%s error=%v", scanID, hr.URL, err)
+			}
+			return
+		}
+		finalURL := hr.FinalURL
+		if finalURL == "" {
+			finalURL = hr.URL
+		}
+		pageMetrics := map[string]interface{}{
+			"headless": headlessMetricsPayload(hr), "html_source": "headless",
+			"evidence_provenance": evidenceProvenanceFromHeadless(hr),
+			"seo":                 seo.Analyze(finalURL, hr.RenderedHTML, hasSitemap, hasRobots),
+			"ux":                  ux.Analyze(finalURL, hr.RenderedHTML, baseURL),
+			"acquisition":         map[string]interface{}{"status": "rendered", "rendered": true},
+			"rendered_response": map[string]interface{}{
+				"raw_html": hr.RawHTML, "response_headers": hr.ResponseHeaders,
+				"navigation_status": hr.NavigationStatus, "final_url": finalURL,
+				"engine": hr.RenderEngine, "shadow_dom": hr.ShadowDOM,
+			},
+		}
+		if err := db.UpdateRenderedObservation(scanID, hr.URL, hr.RenderedHTML, pageMetrics); err != nil {
+			log.Printf("scan_id=%s phase=render_publish url=%s error=%v", scanID, hr.URL, err)
+			return
+		}
+		log.Printf("scan_id=%s phase=render_publish url=%s engine=%s measured=%v", scanID, hr.URL, hr.RenderEngine, hr.Available)
+	}
 	postCrawlSyncMS := time.Since(postCrawlSyncStart).Milliseconds()
 
 	// Run headless browser analysis on sampled pages
@@ -2243,12 +2296,12 @@ func startScan(ctx context.Context, config ScannerConfig) {
 	go func() {
 		start := time.Now()
 		headlessCh <- headlessRun{
-			results:    performance.RunHeadlessPool(sampleURLs, config.HeadlessConcurrency),
+			results:    performance.RunHeadlessPoolContext(ctx, sampleURLs, config.HeadlessConcurrency, publishRenderedPage),
 			durationMS: time.Since(start).Milliseconds(),
 		}
 	}()
 	go func() {
-		mobileCh <- performance.RunMobileTraces(mobileTestURLs)
+		mobileCh <- performance.RunMobileTracesContext(ctx, mobileTestURLs)
 	}()
 
 	headlessRunResult := <-headlessCh
@@ -2343,6 +2396,7 @@ func startScan(ctx context.Context, config ScannerConfig) {
 	report.HeadlessResults = headlessResults
 	report.HeadlessSampleSize = len(sampleURLs)
 	homepageRenderedHTML := ""
+	renderedContentChanged := false
 
 	for _, hr := range headlessResults {
 		if !hr.Available || hr.Error != "" {
@@ -2356,57 +2410,43 @@ func startScan(ctx context.Context, config ScannerConfig) {
 			fmt.Printf("  ⚠ Headless error on %s: %s\n", hr.URL, reason)
 		} else {
 			fmt.Printf("  ✅ %s → FCP:%.0fms LCP:%.0fms CLS:%.3f Eco:%s\n", hr.URL, hr.FCPMS, hr.LCPMS, hr.CLS, hr.EcoScore)
-			// BL-09: Pass the hydrated Playwright HTML directly into scan_pages so v3-nlp-worker gets it
-			if hr.RenderedHTML != "" {
-				if strings.TrimRight(hr.URL, "/") == strings.TrimRight(config.StartURL, "/") {
-					homepageRenderedHTML = hr.RenderedHTML
-				}
-				if err := db.UpdatePageHTML(scanID, hr.URL, hr.RenderedHTML); err != nil {
-					log.Printf("⚠ UpdatePageHTML failed for %s: %v", hr.URL, err)
+		}
+		pageMetrics := map[string]interface{}{"headless": headlessMetricsPayload(hr)}
+		if hr.Error == "" && strings.TrimSpace(hr.RenderedHTML) != "" {
+			if pageIdentity(hr.URL) == pageIdentity(config.StartURL) {
+				homepageRenderedHTML = hr.RenderedHTML
+			}
+			analysisURL := hr.FinalURL
+			if analysisURL == "" {
+				analysisURL = hr.URL
+			}
+			renderedSEO := seo.Analyze(analysisURL, hr.RenderedHTML, hasSitemap, hasRobots)
+			renderedUX := ux.Analyze(analysisURL, hr.RenderedHTML, baseURL)
+			pageMetrics["seo"], pageMetrics["ux"] = renderedSEO, renderedUX
+			pageMetrics["html_source"] = "headless"
+			pageMetrics["evidence_provenance"] = evidenceProvenanceFromHeadless(hr)
+			pageMetrics["rendered_response"] = map[string]interface{}{
+				"raw_html": hr.RawHTML, "response_headers": hr.ResponseHeaders, "navigation_status": hr.NavigationStatus,
+				"final_url": analysisURL, "engine": hr.RenderEngine,
+				"shadow_dom": hr.ShadowDOM,
+			}
+			if err := db.UpdateRenderedObservation(scanID, hr.URL, hr.RenderedHTML, pageMetrics); err != nil {
+				log.Printf("Rendered observation persistence failed for %s: %v", hr.URL, err)
+				continue
+			}
+			for i, previous := range allSEOResults {
+				if pageIdentity(previous.URL) == pageIdentity(hr.URL) {
+					// Preserve the stored page identity through navigation aliases.
+					renderedSEO.URL = previous.URL
+					allSEOResults[i], allUXResults[i] = renderedSEO, renderedUX
+					renderedContentChanged = true
+					break
 				}
 			}
+		} else if err := db.MergePageMetrics(scanID, hr.URL, pageMetrics); err != nil {
+			log.Printf("Headless metrics persistence failed for %s: %v", hr.URL, err)
 		}
-		// Persist headless metrics (including mobile_metrics for homepage) back into per-page DB record.
-		// Issue 4: set html_source="headless" when RenderedHTML was captured so NLP worker
-		// knows this page received hydrated HTML. Pages where RenderedHTML is empty (headless
-		// ran but produced no HTML) retain html_source="static" set during the crawl phase.
-		htmlSource := "static"
-		if strings.TrimSpace(hr.RenderedHTML) != "" {
-			htmlSource = "headless"
-		}
-		if err := db.MergePageMetrics(scanID, hr.URL, map[string]interface{}{
-			"headless":            headlessMetricsPayload(hr),
-			"evidence_provenance": evidenceProvenanceFromHeadless(hr),
-			"html_source":         htmlSource,
-		}); err != nil {
-			log.Printf("⚠ MergePageMetrics failed for %s: %v", hr.URL, err)
-		}
-	}
 
-	// ============================================================
-	// CF FALLBACK — PHASE 2: Backfill seeded homepage with Rod-rendered HTML
-	// ============================================================
-	if cfFallbackMode && homepageRenderedHTML != "" && len(allSEOResults) == 1 {
-		homepageURL := strings.TrimRight(config.StartURL, "/")
-		if strings.TrimRight(allSEOResults[0].URL, "/") == homepageURL {
-			backfilledSEO := seo.Analyze(config.StartURL, homepageRenderedHTML, hasSitemap, hasRobots)
-			backfilledUX := ux.Analyze(config.StartURL, homepageRenderedHTML, baseURL)
-			allSEOResults[0] = backfilledSEO
-			if len(allUXResults) == 0 {
-				allUXResults = append(allUXResults, backfilledUX)
-			} else {
-				allUXResults[0] = backfilledUX
-			}
-			if err := db.MergePageMetrics(scanID, config.StartURL, map[string]interface{}{
-				"seo":                 backfilledSEO,
-				"ux":                  backfilledUX,
-				"evidence_provenance": "mixed",
-				"html_source":         "headless",
-			}); err != nil {
-				log.Printf("⚠ CF fallback: failed to backfill homepage SEO/UX metrics: %v", err)
-			}
-			log.Printf("✅ Rod-rendered HTML backfilled SEO data for homepage")
-		}
 	}
 
 	if homepageRenderedHTML != "" {
@@ -2416,6 +2456,10 @@ func startScan(ctx context.Context, config ScannerConfig) {
 		if err := db.InsertSummary(scanID, baseURL, domainSecRes, domainTechRes, domainPrivacyRes, domainFuncRes); err != nil {
 			log.Printf("⚠ Failed to refresh domain summary with runtime privacy analysis: %v", err)
 		}
+	}
+
+	if renderedContentChanged {
+		refreshContentSummaries()
 	}
 
 	report.ScanDuration = time.Since(startTime).String()
@@ -2433,18 +2477,30 @@ func startScan(ctx context.Context, config ScannerConfig) {
 	// Issue 5: compute headless coverage percentage and set warning flag if < 80%.
 	var headlessCoveragePct float64
 	totalPages := summary.TotalPages
-	headlessPageCount := len(sampleURLs)
+	headlessPageCount, headlessExecuted, headlessCaptured := 0, 0, 0
+	for _, hr := range headlessResults {
+		if hr.Attempted {
+			headlessExecuted++
+		}
+		if hr.Error == "" && strings.TrimSpace(hr.RenderedHTML) != "" {
+			headlessCaptured++
+		}
+		if hr.Available && hr.Error == "" {
+			headlessPageCount++
+		}
+	}
 	if totalPages > 0 {
 		headlessCoveragePct = math.Round(float64(headlessPageCount)/float64(totalPages)*100*10) / 10
 	}
 	partialHeadlessCoverage := headlessCoveragePct < 80.0 && totalPages > 0
 	if partialHeadlessCoverage {
 		log.Printf("⚠ Partial headless coverage: %.1f%% (%d/%d pages, cap=%d) — KPI site-wide claims are approximate",
-			headlessCoveragePct, headlessPageCount, totalPages, headlessPageCap)
+			headlessCoveragePct, headlessPageCount, totalPages, headlessPageBudget(totalPages))
 	}
 
 	report.ScanTelemetry = ScanTelemetry{
-		StopReason: stopReason,
+		StopReason:    stopReason,
+		CrawlOutcomes: crawlEvidence.snapshot(),
 		PhaseTimingsMS: PhaseTimings{
 			PreFetchMS:     preFetchMS,
 			DomainAnalysis: domainAnalysisMS,
@@ -2457,6 +2513,10 @@ func startScan(ctx context.Context, config ScannerConfig) {
 		BudgetRemainingMS:       budgetRemainingMS,
 		FormFuzzer:              formFuzzerSummary,
 		HeadlessCoveragePct:     headlessCoveragePct,
+		HeadlessSelected:        len(sampleURLs),
+		HeadlessExecuted:        headlessExecuted,
+		HeadlessContentCaptured: headlessCaptured,
+		HeadlessMeasured:        headlessPageCount,
 		PartialHeadlessCoverage: partialHeadlessCoverage,
 		BlockedRecoveryPartial:  cfFallbackMode && (renderedRecoveryPages == 0 || renderedRecoveryPages < renderedRecoveryMinimum),
 		RenderedRecoveryPages:   renderedRecoveryPages,
@@ -2795,9 +2855,8 @@ func buildHeadlessSample(results []seo.SEOResult, brokenURLs map[string]bool, la
 	if budget > len(valid) {
 		budget = len(valid)
 	}
-	// Hard cap: never send more than headlessPageCap pages to the pool.
-	if budget > headlessPageCap {
-		budget = headlessPageCap
+	if limit := headlessPageBudget(len(valid)); budget > limit {
+		budget = limit
 	}
 
 	selected := make(map[string]bool, budget)

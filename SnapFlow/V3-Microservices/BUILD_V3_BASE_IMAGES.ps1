@@ -1,7 +1,8 @@
 param(
     [switch]$NoCacheBuild,
     [switch]$Pull,
-    [switch]$RebuildBase
+    [switch]$RebuildBase,
+    [switch]$CpuOnly
 )
 
 Set-StrictMode -Version Latest
@@ -12,10 +13,15 @@ $baseDir = Join-Path $scriptDir "docker\python-base"
 
 $fastapiDockerfile = Join-Path $baseDir "Dockerfile.fastapi"
 $heavyDockerfile = Join-Path $baseDir "Dockerfile.heavy"
+$nlpDockerfile = Join-Path $baseDir "Dockerfile.nlp"
+$browserDockerfile = Join-Path $baseDir "Dockerfile.browser"
 $fastapiTag = "snapflow/v3-python-fastapi-base:latest"
 $heavyTag = "snapflow/v3-python-heavy-base:latest"
+$nlpTag = "snapflow/v3-python-nlp-base:latest"
+$browserTag = "snapflow/v3-python-browser-base:latest"
 
-if (-not (Test-Path $fastapiDockerfile) -or -not (Test-Path $heavyDockerfile)) {
+if (-not (Test-Path $fastapiDockerfile) -or -not (Test-Path $heavyDockerfile) -or
+    -not (Test-Path $nlpDockerfile) -or -not (Test-Path $browserDockerfile)) {
     throw "Missing V3 base Dockerfiles under $baseDir"
 }
 
@@ -24,8 +30,8 @@ if ($NoCacheBuild) { $commonBuildFlags += "--no-cache" }
 
 # IMPORTANT:
 # - `--pull` is safe for Docker Hub public base (Dockerfile.fastapi).
-# - Do not pass `--pull` to Dockerfile.heavy because it depends on a local
-#   parent image (`snapflow/v3-python-fastapi-base:latest`).
+# - Do not pass `--pull` to child bases: NLP/browser use the local fastapi
+#   parent and visual/GPU uses the local browser parent.
 $fastapiBuildFlags = @($commonBuildFlags)
 $heavyBuildFlags = @($commonBuildFlags)
 if ($Pull) { $fastapiBuildFlags += "--pull" }
@@ -66,7 +72,9 @@ Write-Host "Checking V3 base images..." -ForegroundColor Cyan
 Write-Host "Flags: rebuild_base=$RebuildBase no_cache=$NoCacheBuild pull=$Pull" -ForegroundColor DarkGray
 
 $buildFastapi = $RebuildBase -or -not (Test-V3ImageExists -Tag $fastapiTag)
-$buildHeavy = $RebuildBase -or -not (Test-V3ImageExists -Tag $heavyTag)
+$buildHeavy = -not $CpuOnly -and ($RebuildBase -or -not (Test-V3ImageExists -Tag $heavyTag))
+$buildNlp = $RebuildBase -or -not (Test-V3ImageExists -Tag $nlpTag)
+$buildBrowser = $RebuildBase -or -not (Test-V3ImageExists -Tag $browserTag)
 
 if (-not $RebuildBase) {
     if ($buildFastapi) {
@@ -74,16 +82,18 @@ if (-not $RebuildBase) {
     } else {
         Write-Host "Plan: reuse existing $fastapiTag" -ForegroundColor Cyan
     }
-    if ($buildHeavy) {
+    if ($CpuOnly) {
+        Write-Host "Plan: skip visual/GPU base (-CpuOnly)." -ForegroundColor Cyan
+    } elseif ($buildHeavy) {
         Write-Host "Plan: build missing $heavyTag" -ForegroundColor Yellow
     } else {
         Write-Host "Plan: reuse existing $heavyTag" -ForegroundColor Cyan
     }
 } else {
-    Write-Host "Plan: -RebuildBase was passed, so both base images will be rebuilt." -ForegroundColor Yellow
+    Write-Host "Plan: rebuild all selected base images; cpu_only=$CpuOnly." -ForegroundColor Yellow
 }
 
-if (-not $buildFastapi -and -not $buildHeavy) {
+if (-not $buildFastapi -and -not $buildHeavy -and -not $buildNlp -and -not $buildBrowser) {
     Write-Host "V3 base images already exist. Reusing cached images." -ForegroundColor Cyan
     Write-Host "Use -RebuildBase to rebuild them; combine with -NoCacheBuild for a cacheless base rebuild." -ForegroundColor Cyan
     return
@@ -99,7 +109,16 @@ if (-not (Test-V3ImageExists -Tag $fastapiTag)) {
     throw "Required local base image missing: $fastapiTag"
 }
 
-if ($buildHeavy) {
+if ($buildNlp) {
+    Invoke-V3BaseBuild -Dockerfile $nlpDockerfile -Tag $nlpTag -BuildFlags $commonBuildFlags
+}
+if ($buildBrowser) {
+    Invoke-V3BaseBuild -Dockerfile $browserDockerfile -Tag $browserTag -BuildFlags $commonBuildFlags
+}
+
+if ($CpuOnly) {
+    Write-Host "Visual/GPU base skipped; NLP and browser CPU bases are ready." -ForegroundColor Green
+} elseif ($buildHeavy) {
     Invoke-V3BaseBuild -Dockerfile $heavyDockerfile -Tag $heavyTag -BuildFlags $heavyBuildFlags
 } else {
     Write-Host "Reusing existing $heavyTag" -ForegroundColor Cyan

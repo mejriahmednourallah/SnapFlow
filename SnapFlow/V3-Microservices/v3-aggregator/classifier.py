@@ -1162,7 +1162,7 @@ def classify_report(report: dict) -> dict:
             fix_complexity="template",
         ))
 
-    # RECOMMENDATION — thin content pages (NLP <300 words)
+    # RECOMMENDATION — producer's page-type rule (legacy rows retain their rule)
     thin_pages = int(content.get("pages_thin_content_nlp") or 0)
     if thin_pages > 0:
         findings.append(_mk_finding(
@@ -1171,7 +1171,7 @@ def classify_report(report: dict) -> dict:
             finding_type="RECOMMENDATION",
             severity="MEDIUM",
             scope="SITEWIDE",
-            description=f"{thin_pages} page(s) ont moins de 300 mots (NLP).",
+            description=f"{thin_pages} page(s) présentent un volume de texte inférieur au repère NLP appliqué à leur type de page.",
             impact="Réduit la profondeur éditoriale et la performance SEO.",
             fix="Enrichir les pages avec contenu utile, structuré et orienté intention.",
             source_kpi="site_metrics.content.pages_thin_content_nlp",

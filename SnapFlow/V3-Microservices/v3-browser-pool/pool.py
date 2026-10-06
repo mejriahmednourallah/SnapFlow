@@ -13,13 +13,16 @@ import json
 import logging
 import os
 import socket
+import time
 from dataclasses import dataclass
 from enum import Enum
 from typing import Optional
 from urllib.parse import parse_qsl, urlparse, urlunparse
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
 
 from PIL import Image
+from text_projection import capture_text_projection, VISIBLE_TEXT_HELPER_JS, SHADOW_OBSERVATION_HELPER_JS
+from acquisition_router import AcquisitionRouter
 from playwright.async_api import async_playwright, Browser, Playwright
 from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
@@ -47,8 +50,10 @@ BROWSER_POOL_SCREENSHOT_SETTLE_MS = max(0, int(os.getenv("BROWSER_POOL_SCREENSHO
 BROWSER_POOL_SCREENSHOT_LOAD_STATE_TIMEOUT_MS = max(0, int(os.getenv("BROWSER_POOL_SCREENSHOT_LOAD_STATE_TIMEOUT_MS", "8000")))
 _CHROME_NO_SANDBOX = os.getenv("CHROME_NO_SANDBOX", "").strip().lower() in ("1", "true", "yes", "on")
 _ENABLE_OBSCURA_DISCOVERY = os.getenv("ENABLE_OBSCURA_DISCOVERY", "").strip().lower() in ("1", "true", "yes", "on")
+_OBSCURA_ACQUISITION_ROUTER_ENABLED = os.getenv("OBSCURA_ACQUISITION_ROUTER_ENABLED", "").strip().lower() in ("1", "true", "yes", "on")
 _OBSCURA_CDP_URL = os.getenv("OBSCURA_CDP_URL", "").strip()
 _OBSCURA_CDP_WS_URL = os.getenv("OBSCURA_CDP_WS_URL", "").strip()
+_OBSCURA_CDP_TOKEN = os.getenv("OBSCURA_CDP_TOKEN", "").strip()
 _OBSCURA_CDP_RESOLVE_TIMEOUT_S = float(os.getenv("OBSCURA_CDP_RESOLVE_TIMEOUT_S", "2"))
 _OBSCURA_CDP_CONNECT_TIMEOUT_MS = max(1000, int(os.getenv("OBSCURA_CDP_CONNECT_TIMEOUT_MS", "15000")))
 _OBSCURA_RENDER_ENABLED = os.getenv("OBSCURA_RENDER_ENABLED", "").strip().lower() in ("1", "true", "yes", "on")
@@ -85,6 +90,11 @@ class RenderResult:
     status:        PageStatus
     url:           str
     rendered_html: Optional[str] = None
+    raw_html: Optional[str] = None
+    response_headers: Optional[dict] = None
+    navigation_status: Optional[int] = None
+    shadow_dom: Optional[dict] = None
+    trace_timings_ms: Optional[dict] = None
     title:         Optional[str] = None
     page_height:   Optional[int] = None
     page_width:    Optional[int] = None
@@ -168,13 +178,24 @@ class DiscoveryResult:
     auth_wall: Optional[dict] = None
     form_exploration: Optional[dict] = None
     confidence: str = "low"
+    raw_html: Optional[str] = None
+    response_headers: Optional[dict] = None
+    navigation_status: Optional[int] = None
+    render_metrics: Optional[dict] = None
+    text_projection: Optional[dict] = None
+    acquisition_attempts: Optional[list[dict]] = None
+    acquisition_routed: bool = False
     error: Optional[str] = None
 
 
 def _normalise_allowed_domains(domains: list[str]) -> set[str]:
     clean: set[str] = set()
     for domain in domains or []:
-        host = urlparse(domain).hostname if "://" in domain else domain
+        domain = (domain or "").strip()
+        try:
+            host = domain if _looks_like_ip(domain) else urlparse(domain if "://" in domain else "//" + domain.removeprefix("//")).hostname
+        except ValueError:
+            continue
         host = (host or "").strip().lower().strip(".")
         if host:
             clean.add(host)
@@ -320,7 +341,8 @@ def _resolve_obscura_cdp_endpoint_sync() -> str:
         return _OBSCURA_CDP_URL
 
     version_url = _OBSCURA_CDP_URL.rstrip("/") + "/json/version"
-    with urlopen(version_url, timeout=_OBSCURA_CDP_RESOLVE_TIMEOUT_S) as response:
+    headers = {"Authorization": f"Bearer {_OBSCURA_CDP_TOKEN}"} if _OBSCURA_CDP_TOKEN else {}
+    with urlopen(Request(version_url, headers=headers), timeout=_OBSCURA_CDP_RESOLVE_TIMEOUT_S) as response:
         payload = json.loads(response.read().decode("utf-8") or "{}")
     advertised_ws = str(payload.get("webSocketDebuggerUrl") or "").strip()
     return _rewrite_obscura_ws_url(advertised_ws, _OBSCURA_CDP_URL) or _OBSCURA_CDP_URL
@@ -332,6 +354,7 @@ class BrowserPool:
         self._browsers:         list                 = []   # one entry per BROWSER_POOL_WORKERS
         self._worker_rr:        int                  = 0    # round-robin counter
         self._worker_counters:  list                 = []   # pages-attempted per worker
+        self._worker_leases: list[int] = [0] * BROWSER_POOL_WORKERS
         self._semaphore:        Optional[asyncio.Semaphore] = None
         self._obscura_semaphore: Optional[asyncio.Semaphore] = None
         self._obscura_discovery_semaphore: Optional[asyncio.Semaphore] = None
@@ -351,6 +374,7 @@ class BrowserPool:
         self._timeout_count     = 0
         self._success_count     = 0
         self._started           = False
+        self._acquisition_router = AcquisitionRouter()
 
     # ── Lifecycle ──────────────────────────────────────────────────────────────
 
@@ -358,6 +382,7 @@ class BrowserPool:
         self._playwright = await async_playwright().start()
         self._browsers = [await self._launch() for _ in range(BROWSER_POOL_WORKERS)]
         self._worker_counters = [0] * BROWSER_POOL_WORKERS
+        self._worker_leases = [0] * BROWSER_POOL_WORKERS
         self._semaphore  = asyncio.Semaphore(POOL_CONCURRENCY)
         self._obscura_semaphore = asyncio.Semaphore(_OBSCURA_MAX_SESSIONS)
         self._obscura_discovery_semaphore = asyncio.Semaphore(_OBSCURA_DISCOVERY_CONCURRENCY)
@@ -406,14 +431,18 @@ class BrowserPool:
         async with self._recycle_lock:
             idx = self._worker_rr % BROWSER_POOL_WORKERS
             self._worker_rr += 1
-            self._worker_counters[idx] += 1
             if (
-                self._worker_counters[idx] > 0
-                and self._worker_counters[idx] % RECYCLE_AFTER == 0
-                and self._active_sessions <= BROWSER_POOL_WORKERS
+                self._worker_counters[idx] >= RECYCLE_AFTER
+                and self._worker_leases[idx] == 0
             ):
                 await self._recycle_worker(idx)
+            self._worker_counters[idx] += 1
+            self._worker_leases[idx] += 1
             return self._browsers[idx], idx
+
+    def _release_worker(self, idx) -> None:
+        if idx is not None:
+            self._worker_leases[idx] -= 1
 
     async def _recycle_worker(self, idx: int) -> None:
         """Replace one browser worker process (caller must hold _recycle_lock)."""
@@ -435,17 +464,32 @@ class BrowserPool:
         if page is None:
             return
         try:
-            await page.close()
+            await asyncio.wait_for(page.close(), timeout=2)
         except Exception as exc:
             logger.debug("Ignoring page close error: %s", exc)
 
-    async def _safe_close_context(self, context) -> None:
+    async def _safe_close_context(self, context, timeout: float = 2) -> None:
         if context is None:
             return
         try:
-            await context.close()
+            await asyncio.wait_for(context.close(), timeout=timeout)
         except Exception as exc:
             logger.debug("Ignoring context close error: %s", exc)
+
+    async def _navigation_evidence(self, response) -> dict:
+        if response is None:
+            return {}
+        headers = await response.all_headers()
+        observed = {key: value for key, value in headers.items() if key in {
+            "content-type", "content-length", "last-modified", "date", "cache-control", "content-encoding"
+        }}
+        body = None
+        if "html" in headers.get("content-type", "").lower():
+            try:
+                body = await asyncio.wait_for(response.text(), timeout=2)
+            except Exception as exc:
+                logger.debug("Original navigation body unavailable: %s", exc)
+        return {"raw_html": body, "response_headers": observed, "navigation_status": response.status}
 
     def _classify_error(self, exc: Exception) -> PageStatus:
         msg = str(exc).lower()
@@ -741,6 +785,7 @@ class BrowserPool:
             self._obscura_browser = await self._playwright.chromium.connect_over_cdp(
                 endpoint,
                 timeout=_OBSCURA_CDP_CONNECT_TIMEOUT_MS,
+                headers={"Authorization": f"Bearer {_OBSCURA_CDP_TOKEN}"} if _OBSCURA_CDP_TOKEN else None,
             )
             return self._obscura_browser
 
@@ -785,6 +830,7 @@ class BrowserPool:
             return RenderResult(status=PageStatus.POOL_EXHAUSTED, url=url,
                                 error="All browser slots busy — queue timeout")
         self._active_sessions += 1
+        _worker_idx = None
         try:
             browser, _worker_idx = await self._pick_browser()
 
@@ -849,6 +895,7 @@ class BrowserPool:
                 await self._safe_close_page(page)
                 await self._safe_close_context(context)
         finally:
+            self._release_worker(_worker_idx)
             self._active_sessions -= 1
             self._semaphore.release()
 
@@ -878,6 +925,7 @@ class BrowserPool:
         self._active_sessions += 1
         context = None
         page = None
+        _worker_idx = None
         try:
             browser, _worker_idx = await self._pick_browser()
             context = await browser.new_context(
@@ -962,10 +1010,24 @@ class BrowserPool:
         finally:
             await self._safe_close_page(page)
             await self._safe_close_context(context)
+            self._release_worker(_worker_idx)
             self._active_sessions -= 1
             self._semaphore.release()
 
     async def _render_once(
+        self, url, timeout_ms, wait_until, settle_ms, engine, profile,
+    ) -> RenderResult:
+        # Bound extraction/metrics as well as goto. Cancellation runs the
+        # implementation's cleanup, so hung CDP reads cannot retain pool slots.
+        budget = _ACQUIRE_TIMEOUT + max(1, timeout_ms)/1000 + settle_ms/1000 + 10
+        try:
+            return await asyncio.wait_for(self._render_once_impl(
+                url, timeout_ms, wait_until, settle_ms, engine, profile), budget)
+        except asyncio.TimeoutError:
+            return RenderResult(status=PageStatus.TIMEOUT, url=url, render_engine=engine,
+                                error="render_attempt_budget_exhausted")
+
+    async def _render_once_impl(
         self,
         url: str,
         timeout_ms: int,
@@ -977,6 +1039,15 @@ class BrowserPool:
         if not self._started:
             return RenderResult(status=PageStatus.POOL_EXHAUSTED, url=url, render_engine=engine, error="Pool not started")
 
+        trace = {}
+        stage_start = time.monotonic()
+        attempt_start = stage_start
+        phase = "queue"
+        def finish_stage(name):
+            nonlocal stage_start, phase
+            trace[name] = round((time.monotonic()-stage_start)*1000, 2)
+            stage_start = time.monotonic()
+            phase = name
         use_obscura = engine == "obscura"
         if use_obscura:
             if not self._obscura_available_for("render"):
@@ -989,8 +1060,10 @@ class BrowserPool:
                 return RenderResult(status=PageStatus.POOL_EXHAUSTED, url=url, render_engine="chromium", error="All browser slots busy - queue timeout")
             self._active_sessions += 1
 
+        finish_stage("queue_ms")
         context = None
         page = None
+        _worker_idx = None
         console_errors: list[str] = []
         try:
             context_options = {
@@ -1014,6 +1087,7 @@ class BrowserPool:
                 context = await browser.new_context(**context_options)
 
             page = await context.new_page()
+            finish_stage("context_ms")
             if profile == "mobile_3g":
                 try:
                     cdp = await context.new_cdp_session(page)
@@ -1034,7 +1108,17 @@ class BrowserPool:
                 else None,
             )
             logger.info("render navigation url=%s engine=%s wait_until=%s timeout_ms=%d settle_ms=%d", url, engine, wait_until, timeout_ms, settle_ms)
-            await page.goto(url, wait_until=wait_until, timeout=timeout_ms)
+            phase = "navigation"
+            navigation = await page.goto(url, wait_until=wait_until, timeout=timeout_ms)
+            finish_stage("navigation_ms")
+            if navigation is not None:
+                try:
+                    trace["request_timing"] = navigation.request.timing
+                except Exception:
+                    pass
+            phase = "navigation_evidence"
+            navigation_evidence = await self._navigation_evidence(navigation)
+            phase = "evidence_and_settle"
             if settle_ms > 0:
                 await page.wait_for_timeout(settle_ms)
             html = await page.content()
@@ -1042,7 +1126,14 @@ class BrowserPool:
             page_height = await page.evaluate("document.documentElement.scrollHeight")
             page_width = await page.evaluate("document.documentElement.scrollWidth")
             final_url = page.url
+            shadow_dom = await page.evaluate("() => {" + SHADOW_OBSERVATION_HELPER_JS + """
+                const selectorFor = el => el.id ? '#' + CSS.escape(el.id) : el.tagName.toLowerCase();
+                return collectShadowObservation(selectorFor);
+            }""")
+            finish_stage("evidence_and_settle_ms")
+            phase = "metrics"
             metrics = await self._measure_render_metrics(page)
+            finish_stage("metrics_ms")
             self._pages_served += 1
             if use_obscura:
                 self._obscura_success_count += 1
@@ -1064,6 +1155,9 @@ class BrowserPool:
                 status=PageStatus.SUCCESS,
                 url=url,
                 rendered_html=html,
+                trace_timings_ms=trace,
+                **navigation_evidence,
+                shadow_dom=shadow_dom,
                 title=title,
                 page_height=page_height,
                 page_width=page_width,
@@ -1107,8 +1201,15 @@ class BrowserPool:
                 await self._reset_obscura_browser()
             return RenderResult(status=st, url=url, render_engine=engine, wait_until=wait_until, error=str(exc))
         finally:
+            trace["last_phase"] = phase
+            cleanup_start = time.monotonic()
             await self._safe_close_page(page)
             await self._safe_close_context(context)
+            self._release_worker(_worker_idx)
+            trace["cleanup_ms"] = round((time.monotonic()-cleanup_start)*1000, 2)
+            trace["total_ms"] = round((time.monotonic()-attempt_start)*1000, 2)
+            logger.info("phase=render_trace engine=%s target=%s timings=%s", engine,
+                        _sanitize_network_request("GET", url, 0, "document"), trace)
             if use_obscura:
                 self._obscura_active_sessions -= 1
                 self._release_obscura("render")
@@ -1164,6 +1265,59 @@ class BrowserPool:
         return first
 
     async def discover_rendered(
+        self, url: str, allowed_domains: Optional[list[str]] = None,
+        max_links: int = 30, extract_forms: bool = True, wait_ms: int = DEFAULT_TIMEOUT,
+        force_chromium: bool = False, measure_metrics: bool = False,
+        capture_projection: bool = False, scan_id: Optional[str] = None,
+    ) -> DiscoveryResult:
+        options = dict(allowed_domains=allowed_domains, max_links=max_links,
+                       extract_forms=extract_forms, measure_metrics=measure_metrics,
+                       capture_projection=capture_projection)
+        if (force_chromium or measure_metrics or not scan_id or
+                not _OBSCURA_ACQUISITION_ROUTER_ENABLED or not self._obscura_available_for("discovery")):
+            return await self._discover_rendered_once(url, wait_ms=wait_ms,
+                force_chromium=force_chromium or measure_metrics, **options)
+
+        async def fetch(engine, allowance):
+            try:
+                return await asyncio.wait_for(self._discover_rendered_once(
+                    url, wait_ms=allowance, force_chromium=engine == "chromium",
+                    connection_fallback=False, **options), allowance/1000)
+            except asyncio.TimeoutError:
+                return DiscoveryResult(status=PageStatus.TIMEOUT, url=url, engine=engine,
+                                       error="acquisition_attempt_budget_exhausted")
+        result, attempts = await self._acquisition_router.acquire(scan_id, url, wait_ms or DEFAULT_TIMEOUT, fetch)
+        if result is None:
+            result = DiscoveryResult(status=PageStatus.TIMEOUT, url=url, error="acquisition_budget_exhausted")
+        result.acquisition_attempts = attempts
+        # Even a queue timeout with no attempts consumed the routing budget.
+        # Callers must not launch another full-budget recovery for this result.
+        result.acquisition_routed = True
+        return result
+
+    async def _discover_rendered_once(
+        self, url: str, allowed_domains: Optional[list[str]] = None,
+        max_links: int = 30, extract_forms: bool = True, wait_ms: int = DEFAULT_TIMEOUT,
+        force_chromium: bool = False, measure_metrics: bool = False,
+        capture_projection: bool = False, connection_fallback: bool = True,
+    ) -> DiscoveryResult:
+        # One allowance covers connection/queue, navigation, extraction and
+        # cleanup. A goto timeout alone leaves later CDP reads unbounded.
+        budget = max(.001, min(wait_ms or DEFAULT_TIMEOUT, 60000) / 1000)
+        deadline = time.monotonic() + budget
+        state = {"engine": "obscura" if self._obscura_available_for("discovery") and not force_chromium else "chromium"}
+        try:
+            return await asyncio.wait_for(self._discover_rendered_impl(
+                url, allowed_domains=allowed_domains, max_links=max_links,
+                extract_forms=extract_forms, wait_ms=wait_ms,
+                force_chromium=force_chromium, measure_metrics=measure_metrics,
+                capture_projection=capture_projection, connection_fallback=connection_fallback,
+                acquisition_deadline=deadline, attempt_state=state), budget)
+        except asyncio.TimeoutError:
+            return DiscoveryResult(status=PageStatus.TIMEOUT, url=url, engine=state['engine'],
+                                   error="acquisition_attempt_budget_exhausted")
+
+    async def _discover_rendered_impl(
         self,
         url: str,
         allowed_domains: Optional[list[str]] = None,
@@ -1171,6 +1325,11 @@ class BrowserPool:
         extract_forms: bool = True,
         wait_ms: int = DEFAULT_TIMEOUT,
         force_chromium: bool = False,
+        measure_metrics: bool = False,
+        capture_projection: bool = False,
+        connection_fallback: bool = True,
+        acquisition_deadline: Optional[float] = None,
+        attempt_state: Optional[dict] = None,
     ) -> DiscoveryResult:
         """Discovery-only rendered extraction for routes, text, buttons and forms."""
         allowed_domains = sorted(_normalise_allowed_domains(allowed_domains or []))
@@ -1192,9 +1351,11 @@ class BrowserPool:
 
         context = None
         page = None
-        engine = "chromium"
+        engine = "obscura" if use_obscura else "chromium"
+        slot_owned = True
         network_requests: list[dict] = []
         _local_browser = None
+        _worker_idx = None
         try:
             if not use_obscura:
                 _local_browser, _worker_idx = await self._pick_browser()
@@ -1213,22 +1374,28 @@ class BrowserPool:
                         ignore_https_errors=_BROWSER_POOL_IGNORE_HTTPS_ERRORS,
                     )
             except Exception as exc:
+                if not use_obscura or not connection_fallback:
+                    raise
                 logger.warning("Obscura discovery unavailable, falling back to Chromium: %s", exc)
                 if use_obscura:
                     if self._should_reset_obscura_browser(exc):
                         await self._reset_obscura_browser()
                     self._obscura_active_sessions -= 1
                     self._release_obscura("discovery")
+                    slot_owned = False
                     use_obscura = False
                     if not await self._acquire():
                         return DiscoveryResult(status=PageStatus.POOL_EXHAUSTED, url=url, error="All browser slots busy - queue timeout")
                     self._active_sessions += 1
+                    slot_owned = True
                     _local_browser, _worker_idx = await self._pick_browser()
                 context = await _local_browser.new_context(
                     viewport={"width": 1366, "height": 768},
                     ignore_https_errors=_BROWSER_POOL_IGNORE_HTTPS_ERRORS,
                 )
                 engine = "chromium"
+                if attempt_state is not None:
+                    attempt_state['engine'] = engine
 
             page = await context.new_page()
             page.on(
@@ -1247,7 +1414,7 @@ class BrowserPool:
                 ),
             )
             timeout_ms = max(3000, min(wait_ms or DEFAULT_TIMEOUT, 60000))
-            await page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
+            navigation = await page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
             await page.wait_for_timeout(min(max(timeout_ms // 8, 300), 2500))
 
             final_url = page.url
@@ -1262,8 +1429,11 @@ class BrowserPool:
                     risk_flags=["redirected_outside_allowed_domains"],
                 )
 
+            navigation_evidence = await self._navigation_evidence(navigation)
+            render_metrics = await self._measure_render_metrics(page) if measure_metrics else None
             payload = await page.evaluate(
                 """({ allowedDomains, maxLinks, extractForms }) => {
+                """ + VISIBLE_TEXT_HELPER_JS + SHADOW_OBSERVATION_HELPER_JS + """
                     const esc = (value) => {
                       if (!value) return "";
                       if (window.CSS && CSS.escape) return CSS.escape(String(value));
@@ -1345,7 +1515,7 @@ class BrowserPool:
                       if (/card|payment|paiement|stripe|checkout/.test(text)) riskSet.add("payment");
                     };
 
-                    const bodyTextRaw = document.body ? document.body.innerText : "";
+                    const bodyTextRaw = visibleLightText(document.body);
                     const bodyTextLower = bodyTextRaw.toLowerCase();
                     if (/captcha|recaptcha|hcaptcha/.test(bodyTextLower)) riskSet.add("captcha");
                     if (/rdv|rendez-vous|appointment|booking|reservation/.test(bodyTextLower)) riskSet.add("appointment");
@@ -1651,6 +1821,7 @@ class BrowserPool:
             payload["form_exploration"] = exploration
             runtime = await page.evaluate(
                 """() => {
+                """ + VISIBLE_TEXT_HELPER_JS + SHADOW_OBSERVATION_HELPER_JS + """
                     const clean = (value) => String(value || "").replace(/\\s+/g, " ").trim();
                     const short = (value, limit = 240) => {
                       const text = clean(value);
@@ -1702,35 +1873,9 @@ class BrowserPool:
                       break;
                     }
 
-                    const shadow = {host_count: 0, text: "", links: [], forms: [], aria_roles: []};
-                    const visitShadowRoots = (root) => {
-                      Array.from(root.querySelectorAll("*")).forEach((el) => {
-                        if (!el.shadowRoot) return;
-                        shadow.host_count += 1;
-                        shadow.text += "\\n" + clean(el.shadowRoot.innerText || el.shadowRoot.textContent || "");
-                        Array.from(el.shadowRoot.querySelectorAll("a[href]")).forEach((a) => shadow.links.push(a.href));
-                        Array.from(el.shadowRoot.querySelectorAll("form")).forEach((form) => shadow.forms.push({
-                          selector: selectorFor(form),
-                          action: form.getAttribute("action") || "",
-                          method: String(form.getAttribute("method") || "get").toUpperCase(),
-                          text: short(form.innerText || "", 220),
-                        }));
-                        Array.from(el.shadowRoot.querySelectorAll("[role], [aria-label], [aria-expanded], [aria-controls]")).forEach((node) => shadow.aria_roles.push({
-                          role: node.getAttribute("role") || "",
-                          aria_label: node.getAttribute("aria-label") || "",
-                          aria_expanded: node.getAttribute("aria-expanded") || "",
-                          selector: selectorFor(node),
-                        }));
-                        visitShadowRoots(el.shadowRoot);
-                      });
-                    };
-                    visitShadowRoots(document);
-                    shadow.text = short(shadow.text, 8000);
-                    shadow.links = Array.from(new Set(shadow.links)).slice(0, 80);
-                    shadow.forms = shadow.forms.slice(0, 30);
-                    shadow.aria_roles = shadow.aria_roles.slice(0, 80);
+                    const shadow = collectShadowObservation(selectorFor);
 
-                    const bodyText = clean(document.body ? document.body.innerText : "");
+                    const bodyText = visibleLightText(document.body);
                     const passwordFields = document.querySelectorAll('input[type="password"]').length;
                     const authReasons = [];
                     if (/\\/login|\\/signin|\\/connexion|\\/auth/i.test(location.pathname)) authReasons.push("login_url");
@@ -1755,8 +1900,19 @@ class BrowserPool:
                 payload["risk_flags"] = list(dict.fromkeys((payload.get("risk_flags") or []) + ["auth_wall"]))
             payload["network_requests"] = network_requests[:120]
             forms = payload.get("forms") or []
-            links = payload.get("internal_links") or []
+            links = list(payload.get("internal_links") or [])
+            for shadow_link in (payload.get("shadow_dom") or {}).get("links") or []:
+                parsed = urlparse(shadow_link)
+                if parsed.scheme in {"http", "https"} and _host_matches_allowed(parsed.hostname or "", allowed_domains) and shadow_link not in links:
+                    links.append(shadow_link)
+            links = links[:max_links]
             confidence = "high" if forms else ("medium" if links else "low")
+            projection = None
+            if capture_projection:
+                try:
+                    projection = await capture_text_projection(page, engine)
+                except Exception as exc:
+                    projection = {"available": False, "reason": type(exc).__name__, "engine": engine}
             self._pages_served += 1
             if engine == "obscura":
                 self._obscura_success_count += 1
@@ -1784,6 +1940,9 @@ class BrowserPool:
                 auth_wall=payload.get("auth_wall"),
                 form_exploration=payload.get("form_exploration"),
                 confidence=confidence,
+                render_metrics=render_metrics,
+                text_projection=projection,
+                **navigation_evidence,
             )
         except asyncio.TimeoutError:
             if engine == "obscura":
@@ -1802,12 +1961,18 @@ class BrowserPool:
                 await self._reset_obscura_browser()
             return DiscoveryResult(status=st, url=url, engine=engine, error=str(exc))
         finally:
-            await self._safe_close_page(page)
-            await self._safe_close_context(context)
-            if engine == "obscura":
+            # Closing the context also closes its pages. Do not spend two
+            # independent two-second waits after the shared deadline expires.
+            remaining = 2 if acquisition_deadline is None else max(.05, min(2, acquisition_deadline - time.monotonic()))
+            if context is not None:
+                await self._safe_close_context(context, timeout=remaining)
+            else:
+                await self._safe_close_page(page)
+            self._release_worker(_worker_idx)
+            if slot_owned and use_obscura:
                 self._obscura_active_sessions -= 1
                 self._release_obscura("discovery")
-            else:
+            elif slot_owned:
                 self._active_sessions -= 1
                 self._semaphore.release()
 
@@ -1821,6 +1986,7 @@ class BrowserPool:
         wait_until: Optional[str] = DEFAULT_SCREENSHOT_WAIT_UNTIL,
     ) -> ScreenshotResult:
         """Capture a screenshot of *url* and return raw PNG bytes."""
+        _worker_idx = None
         wait_until = _normalize_wait_until(wait_until, DEFAULT_SCREENSHOT_WAIT_UNTIL)
         if not self._started:
             return ScreenshotResult(status=PageStatus.POOL_EXHAUSTED, url=url, error="Pool not started")
@@ -1948,6 +2114,7 @@ class BrowserPool:
                 await self._safe_close_page(page)
                 await self._safe_close_context(context)
         finally:
+            self._release_worker(_worker_idx)
             self._active_sessions -= 1
             self._semaphore.release()
 

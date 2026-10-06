@@ -52,7 +52,7 @@ Deno.serve(async (req) => {
         name: 'gemini',
         url: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions',
         key: Deno.env.get('GEMINI_API_KEY'),
-        models: ['gemini-2.0-flash-lite', 'gemini-2.0-flash']
+        models: [Deno.env.get('GEMINI_CHAT_FALLBACK_MODEL') || 'gemini-3.8-flash', Deno.env.get('GEMINI_CHAT_MODEL') || 'gemini-3.5-flash-lite']
       });
     }
 

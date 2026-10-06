@@ -1,4 +1,6 @@
 node_modules
+.pytest_tmp*/
+pytest-cache-files-*/
 dist
 .dist
 .git
@@ -11,4 +13,6 @@ yarn-error.log*
 pnpm-debug.log*
 tmp
 supabase/.temp
+supabase/.env*
+supabase/.local-login.json
 vite.config.ts.timestamp-*.mjs

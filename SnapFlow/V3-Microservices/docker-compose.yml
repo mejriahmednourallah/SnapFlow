@@ -39,10 +39,11 @@ services:
       BROWSER_POOL_URL: http://v3-browser-pool:8084
       BROWSER_POOL_TIMEOUT_MS: "90000"
       SCANNER_REQUEST_TIMEOUT_SEC: "30"
-      RENDERED_DISCOVERY_MAX_PAGES: "8"
-      RENDERED_DISCOVERY_MAX_LINKS: "30"
+      RENDERED_DISCOVERY_MAX_PAGES: "${RENDERED_DISCOVERY_MAX_PAGES:-0}"
+      RENDERED_DISCOVERY_MAX_LINKS: "${RENDERED_DISCOVERY_MAX_LINKS:-200}"
       RENDERED_DISCOVERY_TIMEOUT_MS: "20000"
       ENABLE_OBSCURA_PARALLEL_DISCOVERY: "true"
+      CAPTURE_TEXT_PROJECTION: ${CAPTURE_TEXT_PROJECTION:-false}
       OBSCURA_DISCOVERY_MAX_LINKS_PER_PAGE: "30"
       OBSCURA_PARALLEL_DISCOVERY_JOIN_MS: "1500"
       ENABLE_PORT_SCAN: "true"
@@ -54,6 +55,8 @@ services:
     build:
       context: ./v3-nlp-worker
       dockerfile: Dockerfile
+      args:
+        INSTALL_SEMANTIC: "${INSTALL_SEMANTIC:-false}"
     depends_on:
       db:
         condition: service_healthy
@@ -67,6 +70,8 @@ services:
       NLP_SEMANTIC_ENABLED: "${NLP_SEMANTIC_ENABLED:-false}"
       NLP_SEMANTIC_MODEL: "${NLP_SEMANTIC_MODEL:-sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2}"
       NLP_SEMANTIC_MAX_CHARS: "${NLP_SEMANTIC_MAX_CHARS:-6000}"
+      NLP_PASSAGE_RETRIEVAL_ENABLED: "${NLP_PASSAGE_RETRIEVAL_ENABLED:-false}"
+      NLP_PASSAGE_MAX_WINDOWS: "${NLP_PASSAGE_MAX_WINDOWS:-32}"
     restart: unless-stopped
 
   # ─── Aggregator API ─────────────────────────────────────────────────
@@ -107,14 +112,16 @@ services:
       BROWSER_POOL_SCREENSHOT_LOAD_STATE_TIMEOUT_MS: "8000"
       BROWSER_POOL_RENDER_WAIT_UNTIL: "domcontentloaded"
       BROWSER_POOL_RENDER_SETTLE_MS: "1000"
-      ENABLE_OBSCURA_DISCOVERY: ${ENABLE_OBSCURA_DISCOVERY:-true}
-      OBSCURA_RENDER_ENABLED: ${OBSCURA_RENDER_ENABLED:-true}
+      ENABLE_OBSCURA_DISCOVERY: ${ENABLE_OBSCURA_DISCOVERY:-false}
+      OBSCURA_ACQUISITION_ROUTER_ENABLED: ${OBSCURA_ACQUISITION_ROUTER_ENABLED:-false}
+      OBSCURA_RENDER_ENABLED: ${OBSCURA_RENDER_ENABLED:-false}
       OBSCURA_MAX_SESSIONS: "48"
       OBSCURA_DISCOVERY_CONCURRENCY: "24"
       OBSCURA_RENDER_FALLBACK_CONCURRENCY: "24"
       ENABLE_OBSCURA_FORM_EXECUTION: "false"
       ENABLE_OBSCURA_FORM_FUZZING: "false"
       OBSCURA_CDP_URL: http://obscura:9222
+      OBSCURA_CDP_TOKEN: ${OBSCURA_CDP_TOKEN:-}
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:8084/health || exit 1"]
@@ -163,10 +170,11 @@ services:
       retries: 10
 
   obscura:
-    image: ${OBSCURA_IMAGE:-h4ckf0r0day/obscura:latest}
+    image: ${OBSCURA_IMAGE:-h4ckf0r0day/obscura@sha256:475def3ddf1ec513b3d1bc36e8ad15f0d192538cb15f814c77215aa70c418ca2}
     profiles: ["obscura"]
     environment:
       CHROME_NO_SANDBOX: "true"
+      OBSCURA_CDP_TOKEN: ${OBSCURA_CDP_TOKEN:-}
     restart: unless-stopped
 
   # ─── Visual Regression Microservice ─────────────────────────────────

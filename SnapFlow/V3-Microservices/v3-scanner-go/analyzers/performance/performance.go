@@ -2,6 +2,7 @@ package performance
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math"
 	"math/rand"
@@ -90,6 +91,7 @@ type NonFunctionalButtonDetail struct {
 type HeadlessResult struct {
 	URL                  string                   `json:"url"`
 	Available            bool                     `json:"available"`
+	Attempted            bool                     `json:"-"` // Dispatch happened; launch/cancellation failures are not executed visits.
 	MeasurementStatus    string                   `json:"measurement_status,omitempty"`
 	FCPMS                float64                  `json:"fcp_ms"`
 	LCPMS                float64                  `json:"lcp_ms"`
@@ -120,16 +122,21 @@ type HeadlessResult struct {
 	NonFunctionalButtonCount   int                         `json:"non_functional_button_count"`
 	ButtonKPIPassed            bool                        `json:"button_kpi_passed"`
 	// Phase H: mobile performance trace
-	MobileMetrics   *MobilePerformanceResult `json:"mobile_metrics,omitempty"`
-	RenderEngine    string                   `json:"render_engine,omitempty"`
-	FallbackEngine  string                   `json:"fallback_engine,omitempty"`
-	Estimated       bool                     `json:"estimated,omitempty"`
-	Confidence      string                   `json:"confidence,omitempty"`
-	WaitUntil       string                   `json:"wait_until,omitempty"`
-	Attempts        []map[string]interface{} `json:"attempts,omitempty"`
-	ScoreMultiplier float64                  `json:"score_multiplier,omitempty"`
-	RenderedHTML    string                   `json:"-"`
-	Error           string                   `json:"error,omitempty"`
+	MobileMetrics    *MobilePerformanceResult `json:"mobile_metrics,omitempty"`
+	RenderEngine     string                   `json:"render_engine,omitempty"`
+	FallbackEngine   string                   `json:"fallback_engine,omitempty"`
+	Estimated        bool                     `json:"estimated,omitempty"`
+	Confidence       string                   `json:"confidence,omitempty"`
+	WaitUntil        string                   `json:"wait_until,omitempty"`
+	Attempts         []map[string]interface{} `json:"attempts,omitempty"`
+	ScoreMultiplier  float64                  `json:"score_multiplier,omitempty"`
+	RenderedHTML     string                   `json:"-"`
+	RawHTML          *string                  `json:"-"`
+	ResponseHeaders  map[string]string        `json:"-"`
+	NavigationStatus int                      `json:"-"`
+	ShadowDOM        map[string]interface{}   `json:"-"`
+	FinalURL         string                   `json:"-"`
+	Error            string                   `json:"error,omitempty"`
 }
 
 // MobilePerformanceResult holds metrics captured from a 3G mobile emulation of the homepage.
@@ -221,11 +228,34 @@ func getSafeDCLMS(page *rod.Page) float64 {
 // RunHeadlessPool launches a headless Chrome browser and analyzes the given URLs
 // using a pool of concurrent tabs (limited by concurrency param).
 func RunHeadlessPool(urls []string, concurrency int) []HeadlessResult {
+	return RunHeadlessPoolContext(context.Background(), urls, concurrency, nil)
+}
+
+// Publish each completed visit instead of waiting for the slowest page. The
+// callback may run concurrently; its caller owns persistence synchronization.
+type scanIdentityKey struct{}
+
+func WithScanID(ctx context.Context, scanID string) context.Context {
+	return context.WithValue(ctx, scanIdentityKey{}, scanID)
+}
+
+func scanIDFromContext(ctx context.Context) string {
+	id, _ := ctx.Value(scanIdentityKey{}).(string)
+	return id
+}
+
+func RunHeadlessPoolContext(ctx context.Context, urls []string, concurrency int, completed func(HeadlessResult)) []HeadlessResult {
+	if concurrency < 1 {
+		concurrency = 1
+	}
+	if browserpool.IsEnabled() {
+		return renderPagesViaBrowserPoolContext(ctx, urls, concurrency, completed)
+	}
 	if len(urls) == 0 {
 		return nil
 	}
 
-	launchURL, err := launchBrowserWithFallback()
+	launchURL, err := launchBrowserWithFallbackContext(ctx)
 	if err != nil {
 		if browserpool.IsEnabled() {
 			return renderPagesViaBrowserPool(urls, concurrency)
@@ -233,33 +263,53 @@ func RunHeadlessPool(urls []string, concurrency int) []HeadlessResult {
 		// Return error results for all URLs
 		var results []HeadlessResult
 		for _, u := range urls {
-			results = append(results, HeadlessResult{URL: u, Error: fmt.Sprintf("Failed to launch browser: %v", err)})
+			result := HeadlessResult{URL: u, Error: fmt.Sprintf("Failed to launch browser: %v", err), MeasurementStatus: "browser_unavailable"}
+			results = append(results, result)
+			if completed != nil {
+				completed(result)
+			}
 		}
 		return results
 	}
 
-	browser := rod.New().ControlURL(launchURL)
+	browser := rod.New().Context(ctx).ControlURL(launchURL)
 	err = browser.Connect()
 	if err != nil {
 		var results []HeadlessResult
 		for _, u := range urls {
-			results = append(results, HeadlessResult{URL: u, Error: fmt.Sprintf("Failed to connect to browser: %v", err)})
+			result := HeadlessResult{URL: u, Error: fmt.Sprintf("Failed to connect to browser: %v", err), MeasurementStatus: "browser_unavailable"}
+			results = append(results, result)
+			if completed != nil {
+				completed(result)
+			}
 		}
 		return results
 	}
-	defer browser.MustClose()
+	defer browser.Context(context.Background()).Close()
 
 	results := make([]HeadlessResult, len(urls))
 	sem := make(chan struct{}, concurrency)
 	var wg sync.WaitGroup
 
 	for i, pageURL := range urls {
+		select {
+		case sem <- struct{}{}:
+		case <-ctx.Done():
+			results[i] = HeadlessResult{URL: pageURL, Error: ctx.Err().Error(), MeasurementStatus: "cancelled"}
+			if completed != nil {
+				completed(results[i])
+			}
+			continue
+		}
 		wg.Add(1)
-		sem <- struct{}{} // acquire semaphore slot
 		go func(idx int, targetURL string) {
 			defer wg.Done()
 			defer func() { <-sem }()
 			results[idx] = analyzePageHeadless(browser, targetURL)
+			results[idx].Attempted = true
+			if completed != nil {
+				completed(results[idx])
+			}
 		}(i, pageURL)
 	}
 
@@ -267,7 +317,30 @@ func RunHeadlessPool(urls []string, concurrency int) []HeadlessResult {
 	return results
 }
 
+// HeadlessFromDiscovery reuses measurements from the same browser visit that
+// captured the DOM. Obscura content without timings still requires Chromium.
+func HeadlessFromDiscovery(target string, page *browserpool.DiscoverRenderedResult) HeadlessResult {
+	result := HeadlessResult{URL: target, RenderEngine: page.Engine, RenderedHTML: page.RenderedHTML}
+	data, _ := json.Marshal(page.RenderMetrics)
+	_ = json.Unmarshal(data, &result)
+	result.Available = result.FCPMS > 0 && result.LCPMS > 0
+	result.MeasurementStatus = "metrics_unavailable"
+	if result.Available {
+		result.MeasurementStatus = "measured"
+		result.SpeedIndexMS = math.Round((result.FCPMS*0.3+result.LCPMS*0.7)*10) / 10
+		result.SpeedIndexSynthetic = true
+	}
+	result.ConsoleErrorKPIPassed = result.ConsoleErrorCount == 0
+	result.ButtonKPIPassed = true
+	result.EcoIndex, result.EcoScore = calculateEcoIndex(result.DOMNodes, result.HTTPRequests, result.TransferSizeKB)
+	return result
+}
+
 func launchBrowserWithFallback() (string, error) {
+	return launchBrowserWithFallbackContext(context.Background())
+}
+
+func launchBrowserWithFallbackContext(ctx context.Context) (string, error) {
 	// Guard: abort immediately when no system Chromium is present.
 	// Without this, rod auto-downloads a fresh binary and blocks the scan.
 	if _, found := findChromePath(); !found {
@@ -286,7 +359,10 @@ func launchBrowserWithFallback() (string, error) {
 
 	var lastErr error
 	for _, l := range launchers {
-		launchURL, err := l.Launch()
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
+		launchURL, err := l.Context(ctx).Launch()
 		if err == nil {
 			return launchURL, nil
 		}
@@ -300,6 +376,10 @@ func launchBrowserWithFallback() (string, error) {
 }
 
 func renderPagesViaBrowserPool(urls []string, concurrency int) []HeadlessResult {
+	return renderPagesViaBrowserPoolContext(context.Background(), urls, concurrency, nil)
+}
+
+func renderPagesViaBrowserPoolContext(ctx context.Context, urls []string, concurrency int, completed func(HeadlessResult)) []HeadlessResult {
 	if len(urls) == 0 {
 		return nil
 	}
@@ -312,18 +392,33 @@ func renderPagesViaBrowserPool(urls []string, concurrency int) []HeadlessResult 
 	var wg sync.WaitGroup
 
 	for i, pageURL := range urls {
+		select {
+		case sem <- struct{}{}:
+		case <-ctx.Done():
+			results[i] = HeadlessResult{URL: pageURL, Error: ctx.Err().Error(), MeasurementStatus: "cancelled"}
+			if completed != nil {
+				completed(results[i])
+			}
+			continue
+		}
 		wg.Add(1)
-		sem <- struct{}{}
 		go func(idx int, targetURL string) {
 			defer wg.Done()
 			defer func() { <-sem }()
+			defer func() {
+				if completed != nil {
+					completed(results[idx])
+				}
+			}()
 
 			res := HeadlessResult{
 				URL:                   targetURL,
+				Attempted:             true,
 				ConsoleErrorKPIPassed: true,
 				ButtonKPIPassed:       true,
 			}
-			renderResult, err := browserpool.RenderWithOptions(context.Background(), targetURL, browserpool.RenderOptions{
+			renderResult, err := browserpool.RenderWithOptions(ctx, targetURL, browserpool.RenderOptions{
+				ScanID:               scanIDFromContext(ctx),
 				TimeoutMS:            45000,
 				WaitUntil:            "domcontentloaded",
 				Engine:               "chromium",
@@ -404,6 +499,11 @@ func renderPagesViaBrowserPool(urls []string, concurrency int) []HeadlessResult 
 				res.EcoIndex, res.EcoScore = calculateEcoIndex(res.DOMNodes, res.HTTPRequests, res.TransferSizeKB)
 			}
 			res.RenderedHTML = renderResult.RenderedHTML
+			res.RawHTML = renderResult.RawHTML
+			res.ResponseHeaders = renderResult.ResponseHeaders
+			res.NavigationStatus = renderResult.NavigationStatus
+			res.ShadowDOM = renderResult.ShadowDOM
+			res.FinalURL = renderResult.FinalURL
 			results[idx] = res
 		}(i, pageURL)
 	}
@@ -1168,6 +1268,10 @@ func AnalyzeHomepageMobile(br *rod.Browser, targetURL string) MobilePerformanceR
 // RunMobileTraces analyzes multiple URLs under 3G mobile emulation sharing one
 // browser instance. Results are returned in the same order as the input slice.
 func RunMobileTraces(urls []string) []MobilePerformanceResult {
+	return RunMobileTracesContext(context.Background(), urls)
+}
+
+func RunMobileTracesContext(ctx context.Context, urls []string) []MobilePerformanceResult {
 	results := make([]MobilePerformanceResult, len(urls))
 	if len(urls) == 0 {
 		return results
@@ -1179,7 +1283,8 @@ func RunMobileTraces(urls []string) []MobilePerformanceResult {
 			wg.Add(1)
 			go func(idx int, pageURL string) {
 				defer wg.Done()
-				rendered, err := browserpool.RenderWithOptions(context.Background(), pageURL, browserpool.RenderOptions{
+				rendered, err := browserpool.RenderWithOptions(ctx, pageURL, browserpool.RenderOptions{
+					ScanID:               scanIDFromContext(ctx),
 					TimeoutMS:            90000,
 					WaitUntil:            "domcontentloaded",
 					Engine:               "chromium",
@@ -1240,7 +1345,7 @@ func RunMobileTraces(urls []string) []MobilePerformanceResult {
 		return results
 	}
 
-	launchURL, err := launchBrowserWithFallback()
+	launchURL, err := launchBrowserWithFallbackContext(ctx)
 	if err != nil {
 		for i := range results {
 			results[i].Error = fmt.Sprintf("launcher: %v", err)
@@ -1248,8 +1353,14 @@ func RunMobileTraces(urls []string) []MobilePerformanceResult {
 		return results
 	}
 
-	br := rod.New().ControlURL(launchURL).MustConnect()
-	defer br.Close()
+	br := rod.New().Context(ctx).ControlURL(launchURL)
+	if err := br.Connect(); err != nil {
+		for i := range results {
+			results[i].Error = fmt.Sprintf("browser connection: %v", err)
+		}
+		return results
+	}
+	defer br.Context(context.Background()).Close()
 
 	var wg sync.WaitGroup
 	for i, u := range urls {

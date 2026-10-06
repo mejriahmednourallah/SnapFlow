@@ -12,6 +12,7 @@ import unicodedata
 import math
 import hashlib
 from collections import Counter
+from functools import lru_cache
 from datetime import date
 from email.utils import parsedate_to_datetime
 from urllib.parse import urlparse
@@ -24,6 +25,10 @@ from nltk.corpus import stopwords
 from nltk.stem.snowball import SnowballStemmer
 from bs4 import BeautifulSoup
 import textstat
+from textstat.textstat import textstatistics
+from page_queue import ClaimHeartbeat, claim_page, publish_page, release_page
+from page_evidence import select_page_evidence
+from content_passages import content_passages, rank_passages
 
 try:
     import spacy
@@ -45,10 +50,13 @@ try:
 except Exception:  # pragma: no cover - optional dependency
     json5 = None
 
-# Download required NLTK data on first run
-nltk.download("punkt", quiet=True)
-nltk.download("punkt_tab", quiet=True)
-nltk.download("stopwords", quiet=True)
+# Production images preload these resources. Avoid network probes on every
+# worker import; local development only downloads genuinely missing data.
+for resource, location in (("punkt", "tokenizers/punkt"), ("punkt_tab", "tokenizers/punkt_tab"), ("stopwords", "corpora/stopwords"), ("cmudict", "corpora/cmudict")):
+    try:
+        nltk.data.find(location)
+    except LookupError:
+        nltk.download(resource, quiet=True)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [NLP] %(message)s")
 logger = logging.getLogger(__name__)
@@ -66,6 +74,8 @@ NLP_SEMANTIC_MODEL = os.getenv(
     "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
 )
 NLP_SEMANTIC_MAX_CHARS = int(os.getenv("NLP_SEMANTIC_MAX_CHARS", "6000"))
+NLP_PASSAGE_RETRIEVAL_ENABLED = os.getenv("NLP_PASSAGE_RETRIEVAL_ENABLED", "false").lower() in {"1", "true", "yes", "on"}
+NLP_PASSAGE_MAX_WINDOWS = max(1, int(os.getenv("NLP_PASSAGE_MAX_WINDOWS", "32")))
 
 # French + English stopwords
 STOP_WORDS = set()
@@ -283,6 +293,7 @@ _SPACY_NLP = None
 _SPACY_LOAD_FAILED = False
 _LT_FR = None
 _LT_LOAD_FAILED = False
+_LT_REMOTE_CLIENTS = {}
 _SEMANTIC_MODEL = None
 _SEMANTIC_LOAD_FAILED = False
 
@@ -345,11 +356,36 @@ def _load_language_tool_fr():
         _LT_LOAD_FAILED = True
         return None
     try:
-        _LT_FR = language_tool_python.LanguageTool("fr")
-    except Exception:
+        _LT_FR = language_tool_python.LanguageTool("fr", language_tool_download_version="6.8")
+    except Exception as exc:
         _LT_LOAD_FAILED = True
         _LT_FR = None
+        logger.warning("French LanguageTool failed to start: %s", exc)
     return _LT_FR
+
+
+def _load_language_tool(language: str):
+    server = os.getenv("LANGUAGETOOL_SERVER_URL", "").strip()
+    if server:
+        # Each client keeps an immutable language. Concurrent workers share the
+        # Java server, never a mutable language setting or a local JVM.
+        code = {"fr": "fr", "en": "en-US", "ar": "ar"}.get(language, "en-US")
+        key = (server, code)
+        if key not in _LT_REMOTE_CLIENTS:
+            if language_tool_python is None:
+                return None
+            try:
+                _LT_REMOTE_CLIENTS[key] = language_tool_python.LanguageTool(code, remote_server=server)
+            except Exception as exc:
+                logger.warning("LanguageTool remote initialization failed language=%s: %s", code, exc)
+                return None  # Retry next page; do not permanently disable the provider.
+        return _LT_REMOTE_CLIENTS[key]
+    # Pages are processed sequentially: reuse one local JVM and its dictionaries
+    # instead of creating a Java server for every supported language.
+    tool = _load_language_tool_fr()
+    if tool is not None:
+        tool.language = {"fr": "fr", "en": "en-US", "ar": "ar"}.get(language, "en-US")
+    return tool
 
 
 def _load_semantic_model():
@@ -437,9 +473,42 @@ def build_semantic_enrichment(title_text: str, meta_desc: str, h1_text: str, bod
         return result
 
     try:
-        result["title_body_similarity"] = _semantic_pair_similarity(model, title_text, body)
-        result["meta_body_similarity"] = _semantic_pair_similarity(model, meta_desc, body)
-        result["h1_body_similarity"] = _semantic_pair_similarity(model, h1_text, body)
+        # One batch per page; body and repeated heading text are encoded once.
+        # Keep the existing model, cosine semantics and result fields unchanged.
+        encoding_body = body.strip()
+        pairs = [("title_body_similarity", title_text),
+                 ("meta_body_similarity", meta_desc),
+                 ("h1_body_similarity", h1_text)]
+        passages = []
+        if NLP_PASSAGE_RETRIEVAL_ENABLED and any((value or '').strip() for _key, value in pairs):
+            try:
+                passages, coverage = content_passages((body_text or '').strip(), model.tokenizer,
+                    model.max_seq_length, max_windows=NLP_PASSAGE_MAX_WINDOWS)
+                result['passage_retrieval'] = dict(coverage, available=True,
+                    source='extracted_content_text', normalization='strip',
+                    text_sha256=hashlib.sha256((body_text or '').strip().encode('utf-8')).hexdigest(),
+                    interpretation='topic relevance only; not factual support')
+            except Exception as exc:
+                result['passage_retrieval'] = dict(available=False, reason=type(exc).__name__)
+        texts = []
+        for _key, value in pairs:
+            value = (value or "").strip()
+            if value:
+                for text in (value, encoding_body):
+                    if text not in texts:
+                        texts.append(text)
+        for passage in passages:
+            if passage['text'] not in texts:
+                texts.append(passage['text'])
+        if texts:
+            embeddings = model.encode(texts, convert_to_numpy=True)
+            vectors = dict(zip(texts, embeddings))
+            for key, value in pairs:
+                value = (value or "").strip()
+                if value:
+                    result[key] = _cosine_similarity(vectors[value], vectors[encoding_body])
+            if passages:
+                result['passage_retrieval']['matches'] = rank_passages(passages, pairs, vectors, _cosine_similarity)
         scores = [
             value
             for value in (
@@ -481,7 +550,7 @@ def _extract_protected_entity_tokens(text: str) -> set[str]:
 def _match_confidence(match) -> float:
     # language_tool_python does not expose a strict probability score.
     # Build a conservative confidence proxy from rule type + replacement quality.
-    issue_type = str(getattr(match, "ruleIssueType", "") or "").lower()
+    issue_type = str(getattr(match, "rule_issue_type", getattr(match, "ruleIssueType", "")) or "").lower()
     replacements = list(getattr(match, "replacements", []) or [])
 
     confidence = 0.65
@@ -495,8 +564,8 @@ def _match_confidence(match) -> float:
 
 
 def _is_grammar_or_spelling_issue(match) -> bool:
-    issue_type = str(getattr(match, "ruleIssueType", "") or "").lower()
-    category = ""
+    issue_type = str(getattr(match, "rule_issue_type", getattr(match, "ruleIssueType", "")) or "").lower()
+    category = str(getattr(match, "category", "") or "").lower()
     rule = getattr(match, "rule", None)
     if rule is not None:
         category = str(getattr(rule, "category", "") or "").lower()
@@ -512,7 +581,31 @@ def _lt_text_blocks(text: str) -> list[str]:
         blocks = [text or ""]
     # Skip short snippets/slogans; they are too noisy for grammar checks.
     filtered = [b for b in blocks if len(_TOKEN_RE.findall(b)) >= 15]
-    return filtered[:30]
+    # Check every eligible paragraph. One HTTP call per paragraph is expensive
+    # and the old 30-paragraph cap silently dropped late content. Preserve
+    # paragraph boundaries while grouping requests below the server text limit.
+    limit = 20000
+    chunks, current = [], ""
+    for paragraph in filtered:
+        parts = []
+        while len(paragraph) > limit:
+            separators = list(re.finditer(r"\s+", paragraph[:limit + 1]))
+            if not separators:
+                # An overlong unbroken token cannot be split without inventing
+                # spelling inputs. Let the provider report its explicit limit.
+                break
+            cut = separators[-1].start()
+            parts.append(paragraph[:cut])
+            paragraph = paragraph[separators[-1].end():]
+        parts.append(paragraph)
+        for part in parts:
+            if current and len(current) + len(part) + 2 > limit:
+                chunks.append(current)
+                current = ""
+            current = current + "\n\n" + part if current else part
+    if current:
+        chunks.append(current)
+    return chunks
 
 
 def _parse_json_like(payload: str):
@@ -589,37 +682,41 @@ def _stem_token(token: str) -> str:
     return token
 
 
-def _detect_typo_density(text: str) -> tuple[float, list[str]]:
+def _detect_typo_density(text: str, language: str | None = None, _return_count: bool = False):
     tokens = [t.lower() for t in _TOKEN_RE.findall(text)]
     if not tokens:
-        return 0.0, []
+        return (0.0, [], 0, False) if _return_count else (0.0, [])
 
-    token_freq = Counter(tokens)
+    if language is None:
+        arabic_chars = sum(1 for char in (text or "")[:500] if '\u0600' <= char <= '\u06ff')
+        language = "ar" if arabic_chars / max(len((text or "")[:500]), 1) > .15 else "fr" if _is_likely_french(text) else "en"
 
-    if _is_likely_french(text):
-        protected_tokens = _extract_protected_entity_tokens(text)
+    if language in {"fr", "en", "ar"}:
+        protected_tokens = _extract_protected_entity_tokens(text) if language == "fr" else set()
         protected_tokens |= TYPO_BRAND_WHITELIST
-        tool = _load_language_tool_fr()
-        # Keep French typo KPI neutral when LT is unavailable to avoid
-        # dictionary-fallback false positives on domain-specific vocabulary.
+        tool = _load_language_tool(language)
+        # A tiny business vocabulary is not a spelling dictionary. Supported
+        # languages use the actual language provider and retain sample errors.
         if tool is None:
-            return 0.0, []
+            return (0.0, [], 0, False) if _return_count else (0.0, [])
 
         typo_candidates = []
+        measured = False
         try:
-            total_words = max(len(tokens), 1)
-            for block in _lt_text_blocks(text[:100000]):
+            blocks = _lt_text_blocks(text)
+            total_words = max(sum(len(_TOKEN_RE.findall(block)) for block in blocks), 1)
+            measured = bool(blocks)
+            for block in blocks:
                 for match in tool.check(block):
                     if not _is_grammar_or_spelling_issue(match):
                         continue
-                    raw = block[match.offset: match.offset + match.errorLength]
+                    error_length = getattr(match, "error_length", getattr(match, "errorLength", 0))
+                    raw = block[match.offset: match.offset + error_length]
                     words = _TOKEN_RE.findall(raw)
                     if not words:
                         continue
                     token = words[0].lower()
                     if token in STOP_WORDS or token in protected_tokens:
-                        continue
-                    if token_freq.get(token, 0) >= 3:
                         continue
                     if _match_confidence(match) <= 0.8:
                         continue
@@ -627,26 +724,20 @@ def _detect_typo_density(text: str) -> tuple[float, list[str]]:
             # Minimum density guard to avoid noisy isolated LT matches on long pages.
             if typo_candidates and (len(typo_candidates) / total_words) < 0.001:
                 typo_candidates = []
-        except Exception:
+        except Exception as exc:
+            logger.warning("%s LanguageTool analysis failed: %s", language, exc)
             typo_candidates = []
+            measured = False
 
         if typo_candidates:
             deduped = list(dict.fromkeys(typo_candidates))
-            density = round(len(deduped) / max(len(tokens), 1), 4)
-            return density, deduped[:10]
+            # Density counts erroneous occurrences; sample words are deduped.
+            density = round(len(typo_candidates) / total_words, 4)
+            return (density, deduped[:10], len(typo_candidates), measured) if _return_count else (density, deduped[:10])
 
-        return 0.0, []
+        return (0.0, [], 0, measured) if _return_count else (0.0, [])
 
-    unknown = []
-    for tok in tokens:
-        if tok in STOP_WORDS:
-            continue
-        if tok in MIN_DICT_FR_EN_AR["fr"] or tok in MIN_DICT_FR_EN_AR["en"] or tok in MIN_DICT_FR_EN_AR["ar"]:
-            continue
-        unknown.append(tok)
-
-    density = round(len(unknown) / max(len(tokens), 1), 4)
-    return density, list(dict.fromkeys(unknown))[:10]
+    return (0.0, [], 0, False) if _return_count else (0.0, [])
 
 
 def classify_audience_segment(url: str, title: str, text: str, keyword_density: dict) -> dict:
@@ -686,74 +777,84 @@ def classify_audience_segment(url: str, title: str, text: str, keyword_density: 
     return {"segment": segment, "confidence": confidence, "signals": score}
 
 
+def _primary_schema_types(soup: BeautifulSoup, page_url: str) -> set[str]:
+    """Use page entities, not types nested in cards, publishers or breadcrumbs."""
+    from urllib.parse import urljoin, urldefrag
+    page_identity = urldefrag(page_url)[0].rstrip("/")
+    candidates = []
+    for script in soup.find_all("script", attrs={"type": "application/ld+json"}):
+        value = _parse_json_like(script.string or script.get_text())
+        roots = value if isinstance(value, list) else [value]
+        for root in roots:
+            if isinstance(root, dict):
+                graph = root.get("@graph")
+                candidates.extend(graph if isinstance(graph, list) else [root])
+    types = set()
+    for candidate in candidates:
+        if not isinstance(candidate, dict):
+            continue
+        identity = candidate.get("mainEntityOfPage") or candidate.get("url") or candidate.get("@id")
+        if isinstance(identity, dict):
+            identity = identity.get("@id") or identity.get("url")
+        if isinstance(identity, str) and urldefrag(urljoin(page_url, identity))[0].rstrip("/") != page_identity:
+            continue
+        declared = candidate.get("@type", [])
+        declared = declared if isinstance(declared, list) else [declared]
+        types.update(str(item).rstrip("/").rsplit("/", 1)[-1].lower() for item in declared)
+    return types
+
+
 def classify_page_type(url: str, title: str, text: str, soup: BeautifulSoup | None = None, schema_types: list[str] | None = None) -> str:
-    """Classify page into: faq, landing, product, contact, news, error, other."""
-    url_lower = url.lower()
+    """Classify the current page's purpose before secondary widgets or copy."""
+    path = (urlparse(url).path or "/").lower()
     title_lower = (title or "").lower()
-    schema_norm = {str(s).lower() for s in (schema_types or [])}
-
-    # 1) Schema.org declaration has top priority.
-    if any(t in schema_norm for t in {"product"}):
-        return "product"
-    if any(t in schema_norm for t in {"faqpage"}):
-        return "faq"
-    if any(t in schema_norm for t in {"newsarticle", "article", "blogposting"}):
-        return "news"
-    if any(t in schema_norm for t in {"contactpage"}):
-        return "contact"
-
-    # FAQ: URL signal or title/content signals
-    if _FAQ_URL_RE.search(url_lower):
-        return "faq"
-    if "faq" in title_lower or "questions fr\u00e9quentes" in title_lower or "fr\u00e9quemment" in title_lower:
-        return "faq"
-    # [N-4] Only classify as FAQ if heading text contains many question marks —
-    # plain body count is too broad (contact forms have many question-phrased labels).
-    heading_question_marks = sum(
-        h.get_text(" ", strip=True).count("?")
-        for h in (soup.find_all(["h2", "h3", "h4"]) if soup is not None else [])
-    )
-    if heading_question_marks >= 3:
-        return "faq"
-
-    # Error page: title signal
+    schema_norm = _primary_schema_types(soup, url) if soup is not None else {str(s).lower() for s in (schema_types or [])}
     if _ERROR_TEXT_RE.search(title_lower):
         return "error"
+    declared = {category for category, names in {
+        "product": {"product"}, "faq": {"faqpage"},
+        "news": {"newsarticle", "article", "blogposting"}, "contact": {"contactpage"},
+    }.items() if schema_norm & names}
+    if len(declared) == 1:
+        return declared.pop()
 
-    # Product page: URL signal or price pattern near top of page
-    if _PRODUCT_URL_RE.search(url_lower):
-        return "product"
-    if _PRICE_RE.search(text[:500]):
-        return "product"
-
-    if soup is not None:
-        raw_html = str(soup)
-        if re.search(r'(sku|reference\s*produit|add\s*to\s*cart|ajouter\s+au\s+panier)', raw_html, re.I):
-            return "product"
-        # FAQ structure pattern: heading with '?' followed by paragraph answer.
-        for h in soup.find_all(["h2", "h3", "h4"]):
-            q = h.get_text(" ", strip=True)
-            if "?" in q and h.find_next_sibling("p") is not None:
-                return "faq"
-        if soup.find("form") and re.search(r'(contact|devis|quote|support)', raw_html, re.I):
-            return "contact"
-        if re.search(r'(publish|publie|publi[eé]|par\s+|auteur|author|category)', raw_html, re.I):
-            return "news"
-
-    if re.search(r'/actualit|/news|/article|/blog', url_lower) or re.search(r'actualit[ée]|communiqu[ée]|presse', title_lower):
-        return "news"
-    if re.search(r'/contact|/nous-contacter|contactez', url_lower) or "contact" in title_lower:
+    # The host and query can mention a topic without defining this route.
+    if re.search(r'/(faq|aide|help|questions|support)(?:/|$)', path) or re.search(r'\bfaq\b|questions fr[?e]quentes', title_lower):
+        return "faq"
+    if re.search(r'/(contact|nous-contacter|contactez)(?:/|$)', path) or re.search(r'\bcontact(?:ez)?\b', title_lower):
         return "contact"
+    if re.search(r'/(produits?|products?|catalogue|shop|boutique|item)(?:/|$)', path):
+        return "product"
+    if re.search(r'/(actualit[?e]s?|news|articles?|blog)(?:/|$)', path) or re.search(r'actualit[?e]|communiqu[?e]|presse', title_lower):
+        return "news"
 
-    # Landing page: root path + short content
-    try:
-        from urllib.parse import urlparse
-        path = urlparse(url).path.rstrip("/")
-    except Exception:
-        path = ""
-    if path in ("", "/home", "/accueil", "/index") and len(text.split()) < 400:
+    segments = [part for part in path.strip("/").split("/") if part]
+    if segments and re.fullmatch(r'(?:fr|en|ar|es|de|it|pt|nl|tr)(?:[-_][a-z]{2})?', segments[0]):
+        segments = segments[1:]
+    if not segments or segments in (["home"], ["accueil"], ["index"], ["index.html"], ["index.php"]):
+        # A long homepage remains a landing page. Contact/news/FAQ widgets
+        # do not change its identity or select another word-count policy.
         return "landing"
 
+    if soup is not None:
+        primary = soup.find("main") or soup.select_one('[role="main"]') or soup.find("article") or soup.body or soup
+        primary = BeautifulSoup(str(primary), "html.parser")
+        for secondary in primary.select('nav, footer, header, script, style, noscript, template, [hidden], [aria-hidden="true"]'):
+            secondary.decompose()
+        headings = primary.find_all(["h2", "h3", "h4"])
+        questions = sum("?" in heading.get_text(" ", strip=True) for heading in headings)
+        h1 = primary.find("h1")
+        h1_text = h1.get_text(" ", strip=True) if h1 else ""
+        if re.search(r'\bfaq\b|questions fr[?e]quentes', h1_text, re.I) or (questions >= 3 and questions / max(len(headings), 1) >= .6):
+            return "faq"
+        if primary.find("form") and re.search(r'\b(contact(?:ez)?|devis|quote|support)\b', h1_text, re.I):
+            return "contact"
+        if primary.find("article") and primary.find("time", attrs={"datetime": True}):
+            return "news"
+        if re.search(r'\b(sku|r[?e]f[?e]rence produit|add to cart|ajouter au panier)\b', primary.get_text(" ", strip=True), re.I):
+            return "product"
+    if _PRICE_RE.search(text[:500]):
+        return "product"
     return "other"
 
 
@@ -1023,15 +1124,14 @@ def check_llms_txt(base_url: str) -> dict:
 
 
 def check_thin_content_by_type(word_count: int, page_type: str, lang: str = "en") -> dict:
-    """Return thin-content verdict adjusted for language morphology.
+    """Apply the existing count policy and preserve its inputs as evidence.
 
-    [N5] PAGE_TYPE_WORD_BENCHMARKS are calibrated on English text.
-    French and Arabic are morphologically richer: the same concept is expressed
-    in more distinct tokens, so identical semantic density produces higher word counts.
-    Applying a downward multiplier prevents false thin-content positives on FR/AR pages.
+    These benchmarks/multipliers are heuristics, not proof of semantic quality
+    or independently established calibration. Keep their current values while
+    making the producer and final report use the same measured rule.
     """
     base_threshold = PAGE_TYPE_WORD_BENCHMARKS.get(page_type, 200)
-    lang_lower = (lang or "en").lower()
+    lang_lower = (lang or "en").lower().replace("_", "-").split("-")[0]
     if lang_lower in ("fr", "fra", "french"):
         threshold = int(base_threshold * 0.85)
     elif lang_lower in ("ar", "ara", "arabic"):
@@ -1039,6 +1139,11 @@ def check_thin_content_by_type(word_count: int, page_type: str, lang: str = "en"
     else:
         threshold = base_threshold
     return {
+        "method": "page_type_word_benchmark",
+        "page_type": page_type,
+        "language": lang_lower,
+        "word_count": word_count,
+        "base_word_count_threshold": base_threshold,
         "thin_vs_page_type": word_count < threshold,
         "word_count_threshold": threshold,
         "word_count_gap": max(0, threshold - word_count),
@@ -1076,7 +1181,8 @@ def compute_keyword_prominence(dominant_keyword: str, title_text: str, h1_text: 
 
 
 def compute_title_content_alignment(title_text: str, keyword_density: dict) -> dict:
-    title_stems = {_stem_token(w) for w in re.findall(r"[A-Za-zÀ-ÿ]{3,}", title_text or "")}
+    title_stems = {_stem_token(w) for w in _TOKEN_RE.findall(title_text or "")
+                   if w.lower() not in STOP_WORDS and w.lower() not in SEMANTIC_NOISE_WORDS}
     top_kw_stems = {_stem_token(k) for k in list((keyword_density or {}).keys())[:5]}
     overlap = title_stems & top_kw_stems
     alignment_score = round(len(overlap) / max(len(title_stems), 1), 3)
@@ -1691,7 +1797,7 @@ def _parse_iso_date(raw: str) -> str | None:
     return m.group(1) if m else None
 
 
-def extract_dates_and_classify(html: str, url: str) -> dict:
+def extract_dates_and_classify(html: str, url: str, http_last_modified: str | None = None, fetch_http_date: bool = True) -> dict:
     """
     Phase L: Extract publication dates and classify page type.
 
@@ -1743,7 +1849,8 @@ def extract_dates_and_classify(html: str, url: str) -> dict:
             candidates.append((d, "time_datetime", 0.86))
 
     # 4) HTTP Last-Modified as final fallback source.
-    http_last_modified = _head_last_modified_date(url)
+    if http_last_modified is None and fetch_http_date:
+        http_last_modified = _head_last_modified_date(url)
     if http_last_modified:
         candidates.append((http_last_modified, "http_last_modified", 0.75))
 
@@ -1796,16 +1903,18 @@ def get_db_connection():
     """Create a new database connection."""
     return psycopg2.connect(
         host=DB_HOST, port=DB_PORT, dbname=DB_NAME,
-        user=DB_USER, password=DB_PASS,
+        user=DB_USER, password=DB_PASS, connect_timeout=5,
     )
 
 
 BOILERPLATE_SELECTORS = [
-    "nav", "footer", "header", "aside",
+    "nav", "footer", "aside",
     "[role='navigation']", "[role='banner']",
-    "[id*='cookie']", "[class*='cookie']",
-    "[class*='consent']", "[id*='consent']",
-    "[class*='menu']", "[id*='menu']",
+    "[id*='cookie-banner']", "[class*='cookie-banner']",
+    "[id*='cookie-consent']", "[class*='cookie-consent']",
+    "[id*='consent-banner']", "[class*='consent-banner']",
+    "[id*='cookie-modal']", "[class*='cookie-modal']",
+    ".menu", "#menu", ".main-menu", "#main-menu",
 ]
 
 MAIN_CONTENT_SELECTORS = [
@@ -1826,10 +1935,30 @@ def _clean_text_fragment(text: str) -> str:
 
 
 def _prune_non_content_nodes(soup: BeautifulSoup) -> None:
-    for tag in soup(["script", "style", "noscript"]):
-        tag.decompose()
+    # Work only on the extraction copy; raw HTML remains available to checks
+    # for metadata, consent, hidden stuffing and original-response evidence.
+    for tag in list(soup.find_all(True)):
+        if tag.attrs is None:
+            continue  # parent has already been removed
+        style = re.sub(r"\s+", "", str(tag.get("style", ""))).lower()
+        hidden_style = re.search(r"(?:^|;)(?:display:none|visibility:hidden|content-visibility:hidden)(?:!important)?(?:;|$)", style)
+        if (tag.name in {"head", "script", "style", "noscript", "template"}
+                or tag.has_attr("hidden") or hidden_style):
+            tag.decompose()
+    # An article header is substantive text; a site header is boilerplate.
+    for tag in soup.find_all("header"):
+        if tag.attrs is None:
+            continue
+        if not tag.find_parent(["main", "article"]) and not tag.find_parent(attrs={"role": "main"}):
+            tag.decompose()
     for sel in BOILERPLATE_SELECTORS:
         for tag in soup.select(sel):
+            if tag.attrs is None:
+                continue
+            # A content landmark or wrapper containing one is not a banner,
+            # even when its CMS identifier happens to contain a cookie word.
+            if tag.name in {"main", "article"} or tag.get("role") == "main" or tag.select_one("main, article, [role='main']"):
+                continue
             tag.decompose()
 
 
@@ -1842,6 +1971,16 @@ def _pick_main_content_node(soup: BeautifulSoup):
             wc = len(text.split())
             if wc >= 40:
                 candidates.append((wc, text, selector))
+
+    # Do not let a generic page wrapper with related widgets outrank explicit
+    # main/article content solely because the wrapper contains more words.
+    if candidates:
+        semantic = [item for item in candidates if item[2] in {"main", "article", "[role='main']"}]
+        best_wc, best_text, best_source = max(semantic or candidates, key=lambda x: x[0])
+        if best_wc >= 80:
+            return best_text, f"main_candidate:{best_source}"
+        if semantic:
+            return None, "fallback_full_page"
 
     for node in soup.find_all(["section", "div"], limit=250):
         if len(node.find_all("p")) < 2:
@@ -1929,18 +2068,30 @@ def extract_text_main_content_first(html: str) -> tuple[str, str, dict]:
     soup = BeautifulSoup(html, "html.parser")
     _prune_non_content_nodes(soup)
 
+    # Serialized HTML has no shadow roots. Their independently captured text
+    # must survive main-content selection, including when a rich <main> wins.
+    shadow_fragments = [node.get_text(" ", strip=True)
+                        for node in soup.select("[data-snapflow-shadow-text='true']")]
+
+    def with_shadow(text):
+        for fragment in shadow_fragments:
+            fragment = _clean_text_fragment(fragment)
+            if fragment and fragment not in text:
+                text = _clean_text_fragment(f"{text} {fragment}")
+        return text
+
     main_text, source = _pick_main_content_node(soup)
     if main_text:
-        return main_text, source, {}
+        return with_shadow(main_text), source, {}
 
     # Primary extraction failed; try progressive graceful strategies.
     graceful_text, graceful_source = _try_graceful_content_extraction(soup)
     if graceful_text:
-        return graceful_text, f"graceful:{graceful_source}", {}
+        return with_shadow(graceful_text), f"graceful:{graceful_source}", {}
 
     # Last resort: full page text — mark as low quality for downstream KPIs.
     full_text = _clean_text_fragment(soup.get_text(separator=" ", strip=True))
-    return full_text, "fallback_full_page", {"content_extraction_quality": "low"}
+    return with_shadow(full_text), "fallback_full_page", {"content_extraction_quality": "low"}
 
 
 # CMP vendor keywords — used only inside trusted tag/script contexts.
@@ -2001,10 +2152,80 @@ def _detect_cmp_from_html(html: str) -> tuple[bool, str]:
     return False, "none"
 
 
+@lru_cache(maxsize=2)
+def _readability_statistics(language: str):
+    # textstat's module singleton defaults to English. Separate cached
+    # instances avoid both French syllable errors and cross-page state leaks.
+    statistics = textstatistics()
+    statistics.set_lang("fr" if language == "fr" else "en")
+    return statistics
+
+
+def _declared_spelling_inputs(text: str, html: str, page_language: str):
+    """Project exact selected-text nodes by declared language; omit code only
+    for spelling. Counts/content/passages continue using the original text.
+    """
+    if not html:
+        return None
+    soup = BeautifulSoup(html, "html.parser")
+    declarations = {str(node.get("lang", "")).lower().split("-")[0] for node in soup.find_all(attrs={"lang": True})}
+    if not (declarations - {page_language}) and not soup.find(["pre", "code", "kbd", "samp"]):
+        return None
+    _prune_non_content_nodes(soup)
+    groups, excluded_code_words = {}, 0
+    cursor = 0
+    for node in soup.find_all(string=True):
+        # BeautifulSoup's selected get_text excludes comments.
+        from bs4 import Comment
+        if isinstance(node, Comment):
+            continue
+        fragment = _clean_text_fragment(str(node))
+        if not fragment:
+            continue
+        offset = text.find(fragment, cursor)
+        if offset < 0:
+            continue  # Outside the worker's selected content.
+        cursor = offset + len(fragment)
+        if node.find_parent(["pre", "code", "kbd", "samp"]):
+            excluded_code_words += len(_TOKEN_RE.findall(fragment))
+            continue
+        parent = node.find_parent(attrs={"lang": True})
+        language = str(parent.get("lang")).lower().split("-")[0] if parent else page_language
+        groups.setdefault(language, []).append(fragment)
+    return {"blocks": {lang: " ".join(parts) for lang, parts in groups.items()},
+            "excluded_code_words": excluded_code_words,
+            "source": "declared_HTML_language_on_selected_text_nodes"}
+
+
 def analyze_content(text: str, url: str = None, html: str = None) -> dict:
     """Run NLP analysis on extracted text."""
+    # Preserve language for page-type policy even when content is too short
+    # for readability/keyword analysis. Prefer declared HTML language.
+    is_arabic, is_french = False, False
+    html_lang = ""
+    if html:
+        match = re.search(r'(?i)<html[^>]*lang=["\']([^"\']+)["\']', html)
+        if match:
+            html_lang = match.group(1).lower()
+
+    if html_lang.startswith("ar"):
+        is_arabic = True
+    elif html_lang.startswith("fr"):
+        is_french = True
+    elif html_lang.startswith("en"):
+        pass  # Declared English must not be replaced by one Arabic paragraph.
+    else:
+        # Fallback to 500-char heuristic
+        words_sample = (text or "")[:500].lower()
+        arabic_chars = sum(1 for c in words_sample if '\u0600' <= c <= '\u06FF')
+        french_markers = sum(words_sample.count(w) for w in (" le ", " la ", " les ", " de ", " du ", " des ", " est ", " une ", " que "))
+        is_arabic = arabic_chars / max(len(words_sample), 1) > 0.15
+        is_french = french_markers >= 2 and not is_arabic
+
+    content_language = "ar" if is_arabic else "fr" if is_french else "en"
     if not text or len(text) < 50:
         return {
+            "content_language": content_language,
             "word_count": len(text.split()) if text else 0,
             "readability_score": 0,
             "readability_grade": "N/A",
@@ -2019,37 +2240,18 @@ def analyze_content(text: str, url: str = None, html: str = None) -> dict:
             "typo_samples": [],
         }
 
-    word_count = textstat.lexicon_count(text, removepunct=True)
-    sentence_count = textstat.sentence_count(text)
-    avg_sentence_length = round(word_count / max(sentence_count, 1), 1)
-
     # [5.8] Language-aware readability.
-    # BL-13: Prefer explicit HTML language declaration if available
-    is_arabic, is_french = False, False
-    html_lang = ""
-    if html:
-        match = re.search(r'(?i)<html[^>]*lang=["\']([^"\']+)["\']', html)
-        if match:
-            html_lang = match.group(1).lower()
-
-    if html_lang.startswith("ar"):
-        is_arabic = True
-    elif html_lang.startswith("fr"):
-        is_french = True
-    else:
-        # Fallback to 500-char heuristic
-        words_sample = text[:500].lower()
-        arabic_chars = sum(1 for c in words_sample if '\u0600' <= c <= '\u06FF')
-        french_markers = sum(words_sample.count(w) for w in (" le ", " la ", " les ", " de ", " du ", " des ", " est ", " une ", " que "))
-        is_arabic = arabic_chars / max(len(words_sample), 1) > 0.15
-        is_french = french_markers >= 2 and not is_arabic
+    statistics = _readability_statistics("fr" if is_french else "en")
+    word_count = statistics.lexicon_count(text, removepunct=True)
+    sentence_count = statistics.sentence_count(text)
+    avg_sentence_length = round(word_count / max(sentence_count, 1), 1)
 
     if is_arabic:
         flesch_score = None
         grade = "N/A"  # No reliable readability formula for Arabic
     elif is_french:
         # Kandel-Moles formula (calibrated for French)
-        avg_syllables = textstat.avg_syllables_per_word(text)
+        avg_syllables = statistics.avg_syllables_per_word(text)
         flesch_score = round(207 - (1.015 * avg_sentence_length) - (73.6 * avg_syllables), 1)
         flesch_score = max(0, min(100, flesch_score))
         if flesch_score >= 80:
@@ -2064,7 +2266,7 @@ def analyze_content(text: str, url: str = None, html: str = None) -> dict:
             grade = "F"
     else:
         # English / other — Flesch Reading Ease
-        flesch_score = textstat.flesch_reading_ease(text)
+        flesch_score = statistics.flesch_reading_ease(text)
         flesch_score = max(0, min(100, round(flesch_score, 1)))
         if flesch_score >= 80:
             grade = "A"
@@ -2116,13 +2318,54 @@ def analyze_content(text: str, url: str = None, html: str = None) -> dict:
         quality = "insufficient_content"
 
     # Section 3.3: keyword stuffing signal + enriched content type hint
-    top_keyword_count = list(word_freq.values())[0] if word_freq else 0
+    top_keyword_count = top_keywords[0][1] if top_keywords else 0
     # [5.1] Same fix: raw word_count denominator
     keyword_density_score = round(top_keyword_count / max(word_count, 1), 4)
     dominant_keyword = top_keywords[0][0] if top_keywords else None
     dominant_keyword_stem = _stem_token(dominant_keyword) if dominant_keyword else None
 
-    typo_density, typo_samples = _detect_typo_density(text)
+    spelling_inputs = _declared_spelling_inputs(text, html, content_language)
+    spelling_scope = None
+    if spelling_inputs is None:
+        eligible_words = sum(len(_TOKEN_RE.findall(block)) for block in _lt_text_blocks(text))
+        typo_density, typo_samples, error_count, measured = _detect_typo_density(text, language=content_language, _return_count=True)
+        spelling_scope = dict(source="selected_text", checked_word_count=eligible_words if measured else 0,
+            error_occurrences=error_count, languages_checked=[content_language] if measured else [],
+            unmeasured_languages={} if measured else {content_language: eligible_words},
+            excluded_policy_words=max(0, len(_TOKEN_RE.findall(text)) - eligible_words),
+            excluded_code_words=0, status="evaluated" if measured else "partial")
+        # An intentionally excluded short snippet is not a provider outage.
+        if not measured and content_language in {"fr", "en", "ar"} and eligible_words:
+            spelling_scope["provider_failures"] = {content_language: eligible_words}
+    else:
+        errors, samples, checked_words, excluded_policy_words = 0, [], 0, 0
+        unmeasured = {}
+        provider_failures = {}
+        for language, block in spelling_inputs["blocks"].items():
+            words_in_block = len(_TOKEN_RE.findall(block))
+            if language not in {"fr", "en", "ar"}:
+                unmeasured[language] = words_in_block
+                continue
+            eligible_words = sum(len(_TOKEN_RE.findall(chunk)) for chunk in _lt_text_blocks(block))
+            excluded_policy_words += max(0, words_in_block - eligible_words)
+            _density, found, count, measured = _detect_typo_density(block, language=language, _return_count=True)
+            if not measured:
+                unmeasured[language] = words_in_block
+                if eligible_words:
+                    provider_failures[language] = eligible_words
+                continue
+            errors += count
+            samples.extend(found)
+            checked_words += eligible_words
+        typo_density = round(errors / max(checked_words, 1), 4)
+        typo_samples = list(dict.fromkeys(samples))[:10]
+        spelling_scope = dict(source=spelling_inputs["source"], checked_word_count=checked_words,
+            error_occurrences=errors, languages_checked=[lang for lang in spelling_inputs["blocks"] if lang not in unmeasured],
+            unmeasured_languages=unmeasured, excluded_code_words=spelling_inputs["excluded_code_words"],
+            excluded_policy_words=excluded_policy_words,
+            status="partial" if unmeasured else "evaluated")
+        if provider_failures:
+            spelling_scope["provider_failures"] = provider_failures
 
     if flesch_for_quality > 50 and word_count > 300:
         content_type_hint = "rich"
@@ -2134,6 +2377,8 @@ def analyze_content(text: str, url: str = None, html: str = None) -> dict:
         content_type_hint = "normal"
 
     nlp_dict = {
+        "spelling_scope": spelling_scope,
+        "content_language": content_language,
         "word_count": word_count,
         "sentence_count": sentence_count,
         "readability_score": flesch_score,
@@ -2163,65 +2408,38 @@ def analyze_content(text: str, url: str = None, html: str = None) -> dict:
 
 
 def process_pending_pages():
-    """Poll DB for pages where nlp_results IS NULL, analyze them, and update."""
+    """Analyze at most 20 current page revisions using one-page durable claims."""
     conn = get_db_connection()
     conn.autocommit = False
     cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-
-    try:
-        # [N-2] SELECT .. FOR UPDATE SKIP LOCKED prevents parallel NLP workers
-        # from processing the same page simultaneously (race condition).
-        cur.execute("""
-                        SELECT id, url, html, raw_html, rendered_html, metrics FROM scan_pages
-                        WHERE nlp_results IS NULL
-                            AND (rendered_html IS NOT NULL OR html IS NOT NULL OR raw_html IS NOT NULL)
-            ORDER BY id ASC
-            LIMIT 20
-            FOR UPDATE SKIP LOCKED
-        """)
-        rows = cur.fetchall()
-    except Exception as e:
-        conn.rollback()
-        logger.error(f"\u274c Error fetching pending pages: {e}")
-        cur.close()
-        conn.close()
-        return 0
-
-    if not rows:
-        conn.rollback()  # release the lock
-        cur.close()
-        conn.close()
-        return 0
-
     processed = 0
-    for row in rows:
+    for _ in range(20):
+        try:
+            row = claim_page(conn, cur)
+        except Exception as exc:
+            conn.rollback()
+            logger.error("Error claiming pending page: %s", exc)
+            break
+        if not row:
+            break
         page_id = row["id"]
+        heartbeat = ClaimHeartbeat(get_db_connection, row)
+        heartbeat.start()
+        page_started = time.monotonic()
         url = row["url"]
         rendered_html = row.get("rendered_html")
         raw_html = row.get("raw_html")
-        html = rendered_html or row.get("html") or raw_html
-        metrics = row.get("metrics") or {}
-        if isinstance(metrics, str):
-            try:
-                metrics = json.loads(metrics)
-            except Exception:
-                metrics = {}
-        rendered_discovery = metrics.get("rendered_discovery") if isinstance(metrics, dict) else {}
-        if isinstance(rendered_discovery, dict):
-            discovery_text = str(rendered_discovery.get("visible_text") or "")
-            shadow_dom = rendered_discovery.get("shadow_dom")
-            shadow_text = str(shadow_dom.get("text") or "") if isinstance(shadow_dom, dict) else ""
-            rendered_text = " ".join(part.strip() for part in [discovery_text, shadow_text] if part and part.strip())
-            if rendered_text:
-                safe_rendered_text = rendered_text.replace("<", " ").replace(">", " ")
-                html = f"{html or ''}\n<main data-snapflow-rendered-discovery='true'>{safe_rendered_text}</main>"
-        raw_base_html = row.get("html") or raw_html or ""
+        html, raw_base_html, metrics = select_page_evidence(row)
         html_for_legacy = raw_base_html or html
         # [N-1] Per-row try/except + commit so one bad page cannot roll back
         # the entire batch and trap other pages in a retry loop.
         # [N-7] HTTP HEAD call is done BEFORE opening the DB transaction to
         # avoid holding the row lock during a blocking network call.
-        http_last_modified_prefetch = _head_last_modified_date(url)
+        response_headers = metrics.get("response_headers") or {}
+        captured_last_modified = response_headers.get("last-modified") if isinstance(response_headers, dict) else None
+        http_last_modified_prefetch = (_normalize_candidate_date(captured_last_modified) if captured_last_modified else None)
+        if http_last_modified_prefetch is None and not response_headers:
+            http_last_modified_prefetch = _head_last_modified_date(url)
         try:
 
             legacy_text = extract_text(html_for_legacy)
@@ -2239,9 +2457,7 @@ def process_pending_pages():
             )
             if spa_shell:
                 logger.warning(f"Page {url} appears to be a non-hydrated SPA shell. Skipping NLP.")
-                cur.execute(
-                    "UPDATE scan_pages SET nlp_results = %s WHERE id = %s",
-                    (
+                published = publish_page(conn, cur, row,
                         json.dumps({
                             "status": "not_evaluated",
                             "skipped": True,
@@ -2258,11 +2474,8 @@ def process_pending_pages():
                                 "raw_content_source": raw_content_source,
                             },
                         }),
-                        page_id,
-                    ),
                 )
-                conn.commit()
-                processed += 1
+                processed += int(published)
                 continue
 
             nlp_result = analyze_content(text, url=url, html=html)
@@ -2288,7 +2501,7 @@ def process_pending_pages():
             # Phase L: date extraction + page classification
             # [N-7] Pass the pre-fetched HTTP date so extract_dates_and_classify
             # doesn't fire another synchronous HEAD inside the DB lock.
-            date_classify = extract_dates_and_classify(html, url)
+            date_classify = extract_dates_and_classify(html, url, http_last_modified_prefetch, fetch_http_date=False)
             if http_last_modified_prefetch and not date_classify.get("last_pub_date"):
                 date_classify["last_pub_date"] = http_last_modified_prefetch
                 date_classify["last_pub_date_source"] = "http_last_modified"
@@ -2358,7 +2571,9 @@ def process_pending_pages():
                     "rendered_content_used": bool(rendered_html) and len(text.split()) > raw_content_word_count + 30,
                     "main_word_count": len(text.split()),
                 },
-                "thin_content_by_type": check_thin_content_by_type(nlp_result.get("word_count", 0), nlp_result.get("page_type", "other")),
+                "thin_content_by_type": check_thin_content_by_type(
+                    nlp_result.get("word_count", 0), nlp_result.get("page_type", "other"),
+                    nlp_result.get("content_language", "en")),
             }
 
             # Build nested Content KPIs
@@ -2457,20 +2672,23 @@ def process_pending_pages():
                 "privacy_score": privacy_score,
             }
 
-            cur.execute(
-                "UPDATE scan_pages SET nlp_results = %s WHERE id = %s",
-                (json.dumps(nlp_result), page_id),
-            )
-            conn.commit()  # [N-1] per-row commit — isolates each page
-            processed += 1
+            nlp_result["content_revision"] = row["content_revision"]
+            published = publish_page(conn, cur, row, json.dumps(nlp_result))
+            processed += int(published)
+            logger.info("phase=nlp_publish page_id=%s revision=%s published=%s elapsed_ms=%.1f",
+                        page_id, row["content_revision"], published, (time.monotonic()-page_started)*1000)
             logger.info(
                 f"\u2705 Analyzed {url} \u2192 {nlp_result['word_count']} words, "
                 f"readability: {nlp_result['readability_grade']}"
             )
         except Exception as e:
             conn.rollback()
+            release_page(cur, row, retry_seconds=10)
+            conn.commit()
             logger.error(f"\u274c Error processing page id={page_id} url={url}: {e}")
             # Continue to next page; do not block the whole batch.
+        finally:
+            heartbeat.stop()
 
     cur.close()
     conn.close()

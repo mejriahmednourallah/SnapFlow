@@ -55,6 +55,10 @@ type RenderResult struct {
 	Status            string                   `json:"status"`
 	URL               string                   `json:"url"`
 	RenderedHTML      string                   `json:"rendered_html"`
+	RawHTML           *string                  `json:"raw_html"`
+	ResponseHeaders   map[string]string        `json:"response_headers"`
+	NavigationStatus  int                      `json:"navigation_status"`
+	ShadowDOM         map[string]interface{}   `json:"shadow_dom"`
 	Title             string                   `json:"title"`
 	PageHeight        int                      `json:"page_height"`
 	PageWidth         int                      `json:"page_width"`
@@ -137,27 +141,34 @@ type DiscoverRenderedForm struct {
 }
 
 type DiscoverRenderedResult struct {
-	Status            string                   `json:"status"`
-	URL               string                   `json:"url"`
-	Engine            string                   `json:"engine"`
-	FinalURL          string                   `json:"final_url"`
-	RenderedHTML      string                   `json:"rendered_html"`
-	VisibleText       string                   `json:"visible_text"`
-	Title             string                   `json:"title"`
-	Headings          []map[string]interface{} `json:"headings"`
-	InternalLinks     []string                 `json:"internal_links"`
-	ExternalLinks     []string                 `json:"external_links"`
-	Forms             []DiscoverRenderedForm   `json:"forms"`
-	Buttons           []map[string]interface{} `json:"buttons"`
-	RiskFlags         []string                 `json:"risk_flags"`
-	CandidateMessages []string                 `json:"candidate_messages"`
-	DetectionSources  []string                 `json:"detection_sources"`
-	NetworkRequests   []map[string]interface{} `json:"network_requests"`
-	ConsentBanner     map[string]interface{}   `json:"consent_banner"`
-	ShadowDOM         map[string]interface{}   `json:"shadow_dom"`
-	AuthWall          map[string]interface{}   `json:"auth_wall"`
-	Confidence        string                   `json:"confidence"`
-	Error             string                   `json:"error"`
+	Status              string                   `json:"status"`
+	URL                 string                   `json:"url"`
+	Engine              string                   `json:"engine"`
+	FinalURL            string                   `json:"final_url"`
+	RenderedHTML        string                   `json:"rendered_html"`
+	RawHTML             *string                  `json:"raw_html"`
+	ResponseHeaders     map[string]string        `json:"response_headers"`
+	NavigationStatus    int                      `json:"navigation_status"`
+	RenderMetrics       map[string]interface{}   `json:"render_metrics"`
+	TextProjection      map[string]interface{}   `json:"text_projection"`
+	AcquisitionAttempts []map[string]interface{} `json:"acquisition_attempts"`
+	AcquisitionRouted   bool                     `json:"acquisition_routed"`
+	VisibleText         string                   `json:"visible_text"`
+	Title               string                   `json:"title"`
+	Headings            []map[string]interface{} `json:"headings"`
+	InternalLinks       []string                 `json:"internal_links"`
+	ExternalLinks       []string                 `json:"external_links"`
+	Forms               []DiscoverRenderedForm   `json:"forms"`
+	Buttons             []map[string]interface{} `json:"buttons"`
+	RiskFlags           []string                 `json:"risk_flags"`
+	CandidateMessages   []string                 `json:"candidate_messages"`
+	DetectionSources    []string                 `json:"detection_sources"`
+	NetworkRequests     []map[string]interface{} `json:"network_requests"`
+	ConsentBanner       map[string]interface{}   `json:"consent_banner"`
+	ShadowDOM           map[string]interface{}   `json:"shadow_dom"`
+	AuthWall            map[string]interface{}   `json:"auth_wall"`
+	Confidence          string                   `json:"confidence"`
+	Error               string                   `json:"error"`
 }
 
 // HealthResult mirrors the /health response body.
@@ -269,6 +280,7 @@ func Health(ctx context.Context) (*HealthResult, error) {
 }
 
 type RenderOptions struct {
+	ScanID               string
 	TimeoutMS            int
 	WaitUntil            string
 	Engine               string
@@ -278,7 +290,10 @@ type RenderOptions struct {
 }
 
 type DiscoverRenderedOptions struct {
-	ForceChromium bool
+	ScanID            string
+	ForceChromium     bool
+	MeasureMetrics    bool
+	CaptureProjection bool
 }
 
 // Render asks the pool to navigate to url and return rendered HTML.
@@ -310,6 +325,9 @@ func RenderWithOptions(ctx context.Context, url string, opts RenderOptions) (*Re
 		"wait_until":             waitUntil,
 		"engine":                 engine,
 		"allow_obscura_fallback": opts.AllowObscuraFallback,
+	}
+	if opts.ScanID != "" {
+		payload["scan_id"] = opts.ScanID
 	}
 	if opts.SettleMS > 0 {
 		payload["settle_ms"] = opts.SettleMS
@@ -394,6 +412,15 @@ func DiscoverRenderedWithOptions(ctx context.Context, url string, allowedDomains
 	}
 	if opts.ForceChromium {
 		payload["force_chromium"] = true
+	}
+	if opts.ScanID != "" {
+		payload["scan_id"] = opts.ScanID
+	}
+	if opts.MeasureMetrics {
+		payload["measure_metrics"] = true
+	}
+	if opts.CaptureProjection {
+		payload["capture_projection"] = true
 	}
 	data, err := post(ctx, "/discover-rendered", payload)
 	if err != nil {

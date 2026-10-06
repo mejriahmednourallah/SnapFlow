@@ -1,0 +1,95 @@
+{
+  "purpose": "Independently authored adversarial evidence-selection cases. Expected support follows the explicit text, not model agreement or model-generated labels. This diagnostic corpus does not estimate live-site accuracy.",
+  "cases": [
+    {
+      "id": "fr_erasure_denied", "language": "fr", "claim": "Vous pouvez demander l'effacement de vos données personnelles.",
+      "support": "Sur simple demande, nous supprimons les informations personnelles vous concernant.",
+      "contradiction": "Vous ne pouvez pas demander l'effacement de vos données personnelles.",
+      "judge_reason": "The second text expressly denies the requested possibility; shared erasure vocabulary does not make it support."
+    },
+    {
+      "id": "fr_fee_number", "language": "fr", "claim": "Le compte coûte 15 euros par mois.",
+      "support": "Les frais mensuels de tenue de ce compte s'élèvent à quinze euros.",
+      "contradiction": "Le compte coûte 25 euros par mois.",
+      "judge_reason": "The stated amount must equal 15, not 25."
+    },
+    {
+      "id": "fr_retention_number", "language": "fr", "claim": "Vos données sont conservées pendant 30 jours.",
+      "support": "Les informations personnelles sont supprimées après un mois de trente jours.",
+      "contradiction": "Vos données sont conservées pendant 300 jours.",
+      "judge_reason": "300 days contradicts 30 days; topical retention similarity cannot prove the duration."
+    },
+    {
+      "id": "fr_cancellation_condition", "language": "fr", "claim": "Vous pouvez annuler votre abonnement sans frais.",
+      "support": "La résiliation de l'abonnement est gratuite.",
+      "contradiction": "Vous pouvez annuler votre abonnement avec des frais de résiliation.",
+      "judge_reason": "Cancellation availability and free cancellation are different claims."
+    },
+    {
+      "id": "fr_access_denied", "language": "fr", "claim": "Vous pouvez consulter vos données personnelles.",
+      "support": "Une copie des informations vous concernant peut vous être communiquée sur demande.",
+      "contradiction": "Vous ne pouvez pas consulter vos données personnelles.",
+      "judge_reason": "An explicit denial cannot serve as evidence that access is available."
+    },
+    {
+      "id": "en_erasure_denied", "language": "en", "claim": "You can request deletion of your personal data.",
+      "support": "Ask us to remove the personal information we hold about you.",
+      "contradiction": "You cannot request deletion of your personal data.",
+      "judge_reason": "Cannot reverses the proposition despite nearly identical terms."
+    },
+    {
+      "id": "en_fee_number", "language": "en", "claim": "The account costs 15 euros per month.",
+      "support": "The monthly charge for this account is fifteen euros.",
+      "contradiction": "The account costs 25 euros per month.",
+      "judge_reason": "A price of 25 is not evidence for the stated price of 15."
+    },
+    {
+      "id": "en_retention_number", "language": "en", "claim": "Your data is retained for 30 days.",
+      "support": "We delete your personal information after a thirty-day period.",
+      "contradiction": "Your data is retained for 300 days.",
+      "judge_reason": "The duration is ten times the claim."
+    },
+    {
+      "id": "en_cancellation_condition", "language": "en", "claim": "You can cancel your subscription without a fee.",
+      "support": "Subscription cancellation is free of charge.",
+      "contradiction": "You can cancel your subscription with a cancellation fee.",
+      "judge_reason": "Both texts concern cancellation, but only the free option supports this claim."
+    },
+    {
+      "id": "en_access_denied", "language": "en", "claim": "You can access your personal data.",
+      "support": "A copy of the information we hold about you is available on request.",
+      "contradiction": "You cannot access your personal data.",
+      "judge_reason": "The contradiction denies access; shared topic is not supporting evidence."
+    },
+    {
+      "id": "ar_erasure_denied", "language": "ar", "claim": "يمكنك طلب حذف بياناتك الشخصية.",
+      "support": "نزيل المعلومات الشخصية المتعلقة بك عند تقديم طلب بذلك.",
+      "contradiction": "لا يمكنك طلب حذف بياناتك الشخصية.",
+      "judge_reason": "لا يمكنك denies the possibility that the claim grants."
+    },
+    {
+      "id": "ar_fee_number", "language": "ar", "claim": "تبلغ رسوم الحساب 15 يورو شهرياً.",
+      "support": "التكلفة الشهرية لهذا الحساب هي خمسة عشر يورو.",
+      "contradiction": "تبلغ رسوم الحساب 25 يورو شهرياً.",
+      "judge_reason": "25 differs from the expressly claimed monthly amount of 15."
+    },
+    {
+      "id": "ar_retention_number", "language": "ar", "claim": "نحتفظ ببياناتك لمدة 30 يوماً.",
+      "support": "نحذف معلوماتك الشخصية بعد مرور ثلاثين يوماً.",
+      "contradiction": "نحتفظ ببياناتك لمدة 300 يوم.",
+      "judge_reason": "The contradiction states a different retention duration."
+    },
+    {
+      "id": "ar_cancellation_condition", "language": "ar", "claim": "يمكنك إلغاء الاشتراك دون رسوم.",
+      "support": "إنهاء الاشتراك مجاني ولا يتطلب دفع أي مبلغ.",
+      "contradiction": "يمكنك إلغاء الاشتراك مقابل رسوم.",
+      "judge_reason": "دون رسوم and مقابل رسوم disagree on whether payment is required."
+    },
+    {
+      "id": "ar_access_denied", "language": "ar", "claim": "يمكنك الاطلاع على بياناتك الشخصية.",
+      "support": "تستطيع الحصول على نسخة من المعلومات المتعلقة بك عند طلبها.",
+      "contradiction": "لا يمكنك الاطلاع على بياناتك الشخصية.",
+      "judge_reason": "An explicit negation cannot substantiate the access claim."
+    }
+  ]
+}

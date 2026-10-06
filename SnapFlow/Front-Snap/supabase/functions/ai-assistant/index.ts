@@ -12,7 +12,19 @@ serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
 
   try {
-    const { messages, userId } = await req.json();
+    const { messages, userId: requestedUserId } = await req.json();
+    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+    const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    const sb = createClient(supabaseUrl, supabaseKey);
+    const token = req.headers.get("Authorization")?.replace(/^Bearer\s+/i, "");
+    const { data: caller, error: callerError } = await sb.auth.getUser(token || "");
+    if (callerError || !caller.user) return new Response(JSON.stringify({ error: "Authentication required" }), {
+      status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+    const userId = caller.user.id;
+    if (requestedUserId && requestedUserId !== userId) return new Response(JSON.stringify({ error: "Caller identity mismatch" }), {
+      status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
     let apiUrl = "";
     let apiKey = "";
     let modelName = "";
@@ -24,16 +36,12 @@ serve(async (req) => {
     } else if (Deno.env.get("GEMINI_API_KEY")) {
       apiUrl = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions";
       apiKey = Deno.env.get("GEMINI_API_KEY")!;
-      modelName = "gemini-2.0-flash";
+      modelName = Deno.env.get("GEMINI_CHAT_MODEL") || "gemini-3.5-flash-lite";
     } else {
       throw new Error("No AI provider configured (missing GROQ_API_KEY or GEMINI_API_KEY)");
     }
 
     // Fetch user context from DB
-    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-    const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const sb = createClient(supabaseUrl, supabaseKey);
-
     // Check user role
     const { data: roleData } = await sb
       .from("user_roles")
@@ -80,9 +88,7 @@ serve(async (req) => {
         .select("project_id")
         .eq("user_id", userId);
       const ids = (assignments || []).map((a: any) => a.project_id);
-      if (ids.length > 0) {
-        auditQuery.in("project_id", ids);
-      }
+      auditQuery.in("project_id", ids);
     }
     const { data: audits } = await auditQuery;
     if (audits && audits.length > 0) {
@@ -106,6 +112,8 @@ serve(async (req) => {
       .eq("is_active", true)
       .order("next_run_at", { ascending: true })
       .limit(10);
+
+    if (!isAdmin) schedQuery.eq("created_by", userId);
 
     const { data: scheds } = await schedQuery;
     if (scheds && scheds.length > 0) {

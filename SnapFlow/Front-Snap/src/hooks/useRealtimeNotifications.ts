@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 
@@ -38,22 +38,30 @@ export function useRealtimeNotifications(
   const { user } = useAuth();
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(true);
+  const latestRequest = useRef(0);
 
   const fetchNotifications = useCallback(async () => {
     if (!user) return;
+    const request = ++latestRequest.current;
     const { data } = await supabase
       .from('notifications')
       .select('*')
       .eq('user_id', user.id)
       .order('created_at', { ascending: false })
       .limit(limit);
+    // A slow initial snapshot must not overwrite a newer readiness/change snapshot.
+    if (request !== latestRequest.current) return;
     setNotifications((data as Notification[]) || []);
     setLoading(false);
   }, [user, limit]);
 
   useEffect(() => {
+    if (!user) {
+      setNotifications([]);
+      setLoading(false);
+      return;
+    }
     fetchNotifications();
-    if (!user) return;
 
     const channel = supabase
       .channel(channelName)
@@ -63,9 +71,19 @@ export function useRealtimeNotifications(
         table: 'notifications',
         filter: `user_id=eq.${user.id}`,
       }, () => fetchNotifications())
+      .on('system', {}, (payload) => {
+        // The websocket can join before PostgreSQL registers this subscription.
+        // Read a snapshot once change delivery is ready, including on reconnect.
+        if (payload.extension === 'postgres_changes' && payload.status === 'ok') {
+          fetchNotifications();
+        }
+      })
       .subscribe();
 
-    return () => { supabase.removeChannel(channel); };
+    return () => {
+      latestRequest.current++;
+      supabase.removeChannel(channel);
+    };
   }, [user, channelName, fetchNotifications]);
 
   const markAsRead = useCallback(async (id: string) => {

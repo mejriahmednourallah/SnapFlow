@@ -1,0 +1,2841 @@
+{
+  "scope": "Offline synthetic evidence audit; not production prevalence or scan-time measurement.",
+  "source_sha256": {
+    "V3-Microservices/v3-aggregator/main.py": "eabf70cc8f33c382d1cbd5074510cd8b132195410780fbe8efbdc58fe9ee5d60",
+    "V3-Microservices/v3-aggregator/kpi_builder.py": "02b7d392edb0236d9c95d015652871d09c3fb40ae48df1d275e3811db97ae92c",
+    "V3-Microservices/v3-nlp-worker/main.py": "7dcdb43ab4cafb56ae65e527ca74720db3323d60c53c043b267b775ef82aead5",
+    "V3-Microservices/v3-scanner-go/db/db.go": "2b1f62f944a14c83ff352e02ab1d2c5884a51930c84671d9ddd0b52f94d15a62",
+    "Front-Snap/src/lib/auditMapper.ts": "dca8a3b468157f2973b3c529ff7b1aff408484a78cfc07f05e7a2f21145eab5d",
+    "raw_ec_response.json": "edef7cfad996b9cadb8ba3921de8ec4ad31a8b414e580d247fc3c21bb50e943e"
+  },
+  "nlp_pending": {
+    "pages_scanned": 1,
+    "status_counts": {
+      "not_evaluated": 24,
+      "passing": 30,
+      "failing": 17,
+      "warning": 2
+    },
+    "kpis": {
+      "tech_cms_version": {
+        "status": "not_evaluated",
+        "quality": "MISSING",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Aucun CMS ou framework n'a été identifié lors du scan (signatures non reconnues ou en-têtes masqués). Le niveau de risque lié à la base technique ne peut pas être évalué."
+      },
+      "tech_modules_versions": {
+        "status": "not_evaluated",
+        "quality": "MISSING",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Version Modules Installés: données insuffisantes pour conclure de façon fiable sur ce critère."
+      },
+      "tech_server_version": {
+        "status": "not_evaluated",
+        "quality": "MISSING",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Le serveur du site n'a pas pu être identifié lors du scan (en-têtes masqués, CDN ou réponse non standard). Le risque lié à la version serveur ne peut pas être évalué sans cette information."
+      },
+      "tech_programming_language": {
+        "status": "not_evaluated",
+        "quality": "MISSING",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Le langage de programmation du site n'est pas exposé directement dans les pages analysées (runtime masqué ou CDN). Le niveau de risque ne peut pas être conclu avec certitude."
+      },
+      "tech_cve_check": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "high",
+        "pages_checked": 1,
+        "constat": "aucune CVE critique ou haute détectée. Aucune action requise."
+      },
+      "sec_ssl": {
+        "status": "not_evaluated",
+        "quality": "MISSING",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "SSL: données insuffisantes pour conclure de façon fiable sur ce critère."
+      },
+      "sec_http_headers": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "high",
+        "pages_checked": 1,
+        "constat": "0 en-têtes de sécurité configurés. Aucune action requise."
+      },
+      "sec_session_cookies": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "high",
+        "pages_checked": 1,
+        "constat": "aucun cookie dépourvu de flags Secure/HttpOnly. Aucune action requise."
+      },
+      "sec_sqli_ddos": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "high",
+        "pages_checked": 1,
+        "constat": "SQL Injection et DDoS: vérification réussie. Aucune action requise."
+      },
+      "sec_service_exposure": {
+        "status": "not_evaluated",
+        "quality": "MISSING",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Le contrôle d'exposition des services réseau est désactivé. Activez ENABLE_PORT_SCAN pour évaluer ce risque."
+      },
+      "sec_admin_exposed": {
+        "status": "passing",
+        "quality": "PARTIAL",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Pages Admin Exposées: vérification réussie sur les éléments disponibles. Aucune action requise."
+      },
+      "sec_version_disclosure": {
+        "status": "passing",
+        "quality": "PARTIAL",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Divulgation de Version CMS: vérification réussie sur les éléments disponibles. Aucune action requise."
+      },
+      "sec_robots_disclosure": {
+        "status": "passing",
+        "quality": "PARTIAL",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Divulgation d'Information via robots.txt: vérification réussie sur les éléments disponibles. Aucune action requise."
+      },
+      "sec_error_pages": {
+        "status": "passing",
+        "quality": "PARTIAL",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Fuite d'Information Page d'Erreur: vérification réussie sur les éléments disponibles. Aucune action requise."
+      },
+      "sec_sensitive_files": {
+        "status": "passing",
+        "quality": "PARTIAL",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Fichiers Sensibles Exposés: vérification réussie sur les éléments disponibles. Aucune action requise."
+      },
+      "sec_trace_track": {
+        "status": "passing",
+        "quality": "PARTIAL",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Méthodes HTTP TRACE/TRACK: vérification réussie sur les éléments disponibles. Aucune action requise."
+      },
+      "sec_cors_misconfiguration": {
+        "status": "passing",
+        "quality": "PARTIAL",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Misconfiguration CORS: vérification réussie sur les éléments disponibles. Aucune action requise."
+      },
+      "sec_brute_force": {
+        "status": "not_evaluated",
+        "quality": "MISSING",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Protection Brute Force Login: données insuffisantes pour conclure de façon fiable sur ce critère."
+      },
+      "sec_file_upload": {
+        "status": "not_evaluated",
+        "quality": "MISSING",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Contrôle d'Extension Upload Fichier: données insuffisantes pour conclure de façon fiable sur ce critère."
+      },
+      "sec_js_deps": {
+        "status": "passing",
+        "quality": "PARTIAL",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Dépendances JS Vulnérables (CVE): vérification réussie sur les éléments disponibles. Aucune action requise."
+      },
+      "func_forms": {
+        "status": "not_evaluated",
+        "quality": "MISSING",
+        "confidence": "low",
+        "pages_checked": 0,
+        "constat": "0 formulaire(s) ont été détectés et 0 test(s) lancés, mais aucune réponse exploitable n'a été obtenue (0 erreur(s) de transport). Le risque métier reste inconnu."
+      },
+      "func_links": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "high",
+        "pages_checked": 1,
+        "constat": "Aucun lien interne cassé n'a été remonté sur les pages échantillonnées."
+      },
+      "func_buttons": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "high",
+        "pages_checked": 1,
+        "constat": "Aucun bouton sans action exploitable n'a été détecté sur les pages échantillonnées."
+      },
+      "func_features": {
+        "status": "failing",
+        "quality": "VALID",
+        "confidence": "medium",
+        "pages_checked": 1,
+        "constat": "Fonctionnalités: bug ou recommandation détecté. Vérification manuelle recommandée."
+      },
+      "func_search": {
+        "status": "not_evaluated",
+        "quality": "MISSING",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Fonctionnement du Moteur de Recherche Interne: données insuffisantes pour conclure de façon fiable sur ce critère."
+      },
+      "perf_desktop_speed": {
+        "status": "not_evaluated",
+        "quality": "MISSING",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Temps de Chargement Desktop: données insuffisantes pour conclure de façon fiable sur ce critère."
+      },
+      "perf_mobile_speed": {
+        "status": "not_evaluated",
+        "quality": "MISSING",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Temps de Chargement Mobile: données insuffisantes pour conclure de façon fiable sur ce critère."
+      },
+      "perf_image_optim": {
+        "status": "not_evaluated",
+        "quality": "MISSING",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Optimisation des Images: données insuffisantes pour conclure de façon fiable sur ce critère."
+      },
+      "perf_cache": {
+        "status": "failing",
+        "quality": "VALID",
+        "confidence": "medium",
+        "pages_checked": 1,
+        "constat": "Gestion de Cache: point d'optimisation identifié. Affecte 1 page(s). Gain potentiel sur l'expérience utilisateur."
+      },
+      "perf_compression": {
+        "status": "failing",
+        "quality": "VALID",
+        "confidence": "medium",
+        "pages_checked": 1,
+        "constat": "Utilisation de Compression: point d'optimisation identifié. Affecte 1 page(s). Gain potentiel sur l'expérience utilisateur."
+      },
+      "perf_console_errors": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "high",
+        "pages_checked": 1,
+        "constat": "Erreurs Console JavaScript: vérification réussie. Aucune action requise."
+      },
+      "seo_alt_tags": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "high",
+        "pages_checked": 1,
+        "constat": "Les images échantillonnées disposent d'un attribut ALT exploitable dans l'agrégat SEO."
+      },
+      "seo_meta_tags": {
+        "status": "failing",
+        "quality": "VALID",
+        "confidence": "high",
+        "pages_checked": 1,
+        "constat": "1 page(s) sans balise title ont été détectées dans l'audit SEO. Exemples : https://example.test/."
+      },
+      "seo_sitemap": {
+        "status": "failing",
+        "quality": "VALID",
+        "confidence": "high",
+        "pages_checked": 1,
+        "constat": "Sitemap: point d'optimisation identifié. Affecte 1 page(s). Gain potentiel sur l'expérience utilisateur."
+      },
+      "seo_robots_txt": {
+        "status": "failing",
+        "quality": "VALID",
+        "confidence": "high",
+        "pages_checked": 1,
+        "constat": "Robot Txt: point d'optimisation identifié. Affecte 1 page(s). Gain potentiel sur l'expérience utilisateur."
+      },
+      "seo_duplication": {
+        "status": "not_evaluated",
+        "quality": "MISSING",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Duplication de Contenu: données insuffisantes pour conclure de façon fiable sur ce critère."
+      },
+      "seo_multi_browser": {
+        "status": "not_evaluated",
+        "quality": "MISSING",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Compatibilité Multiplateforme: données insuffisantes pour conclure de façon fiable sur ce critère."
+      },
+      "seo_url_structure": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "high",
+        "pages_checked": 1,
+        "constat": "Structure des URLs: vérification réussie. Aucune action requise."
+      },
+      "seo_heading_structure": {
+        "status": "failing",
+        "quality": "VALID",
+        "confidence": "high",
+        "pages_checked": 1,
+        "constat": "La hiérarchie Hn est défaillante et la page d'accueil (https://example.test/) est elle-même concernée. 1 page(s) sont remontées comme non conformes."
+      },
+      "seo_internal_linking": {
+        "status": "not_evaluated",
+        "quality": "PARTIAL",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Le KPI de maillage interne n'a pas pu être évalué de manière fiable sur ce scan."
+      },
+      "seo_external_linking": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Linking Externe: vérification réussie. Aucune action requise."
+      },
+      "seo_h1_quality": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "medium",
+        "pages_checked": 1,
+        "constat": "Qualité H1 (NLP): vérification réussie. Aucune action requise."
+      },
+      "seo_meta_nlp": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "medium",
+        "pages_checked": 1,
+        "constat": "Méta Description (NLP): vérification réussie. Aucune action requise."
+      },
+      "ai_llms_txt": {
+        "status": "not_evaluated",
+        "quality": "MISSING",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Aucun fichier llms.txt exploitable n'a été détecté à https://example.test/llms.txt. Le site reste consultable, mais il ne fournit pas de guide dédié aux moteurs génératifs."
+      },
+      "ai_robots_access": {
+        "status": "warning",
+        "quality": "PARTIAL",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "0 agent(s) IA sont bloqués ou ambiguës dans robots.txt. La politique observée (robots_missing) peut limiter l'exploration générative du contenu public."
+      },
+      "ai_https_ready": {
+        "status": "warning",
+        "quality": "PARTIAL",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "L'accès HTTPS n'est pas confirmé comme fiable. Les crawlers IA peuvent refuser ou dégrader l'exploration si le certificat ou la chaîne TLS pose problème."
+      },
+      "ai_schema_org": {
+        "status": "not_evaluated",
+        "quality": "MISSING",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Aucun JSON-LD Schema.org valide avec type @type concret n'a été détecté sur les 1 page(s) analysée(s). Les moteurs IA devront inférer seuls le contexte métier."
+      },
+      "ai_faq_schema": {
+        "status": "not_evaluated",
+        "quality": "MISSING",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Aucune page FAQ ou FAQPage exploitable n'a été détectée. Le site offre moins de réponses directement réutilisables par les moteurs génératifs."
+      },
+      "ai_raw_content_visible": {
+        "status": "not_evaluated",
+        "quality": "MISSING",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Le contenu principal est visible dans le HTML initial sur 0/1 page(s), sous le seuil V1 de 70%. Une dépendance forte au JavaScript peut réduire l'extraction par certains crawlers IA. Couverture observée: 0.0%."
+      },
+      "ai_heading_questions": {
+        "status": "not_evaluated",
+        "quality": "MISSING",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "0 page(s) seulement contiennent des titres orientés questions-réponses, sous le seuil V1 de 20% ou 5 pages. Couverture observée: 0.0% sur 1 page(s)."
+      },
+      "ux_audience_targeting": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Ciblage: vérification réussie. Aucune action requise."
+      },
+      "ux_social_sharing": {
+        "status": "failing",
+        "quality": "VALID",
+        "confidence": "medium",
+        "pages_checked": 1,
+        "constat": "Partage Social: point d'optimisation identifié. Affecte 1 page(s). Gain potentiel sur l'expérience utilisateur."
+      },
+      "ux_design_ergonomics": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "medium",
+        "pages_checked": 1,
+        "constat": "Ergonomie et Design: vérification réussie. Aucune action requise."
+      },
+      "ux_navigation": {
+        "status": "failing",
+        "quality": "VALID",
+        "confidence": "medium",
+        "pages_checked": 1,
+        "constat": "Structure, Navigation et Parcours Client: bug ou recommandation détecté. Vérification manuelle recommandée."
+      },
+      "ux_mobile_friendly": {
+        "status": "not_evaluated",
+        "quality": "MISSING",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Mobile Friendly: données insuffisantes pour conclure de façon fiable sur ce critère."
+      },
+      "content_freshness": {
+        "status": "not_evaluated",
+        "quality": "MISSING",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Fraîcheur du Contenu: données insuffisantes pour conclure de façon fiable sur ce critère."
+      },
+      "content_thin": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "medium",
+        "pages_checked": 1,
+        "constat": "Contenu Fin et Qualité: vérification réussie. Aucune action requise."
+      },
+      "content_key_pages": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Pages Clés: vérification réussie. Aucune action requise."
+      },
+      "content_cannibalization": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "medium",
+        "pages_checked": 1,
+        "constat": "Cannabalisation de Mots-clés: vérification réussie. Aucune action requise."
+      },
+      "content_missing_cta": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "medium",
+        "pages_checked": 1,
+        "constat": "CTA Transactionnels Manquants: vérification réussie. Aucune action requise."
+      },
+      "content_broken_structure": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "medium",
+        "pages_checked": 1,
+        "constat": "Structure Contenu Cassée: vérification réussie. Aucune action requise."
+      },
+      "content_lexical_diversity": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Diversité Lexicale: vérification réussie. Aucune action requise."
+      },
+      "eco_index_score": {
+        "status": "not_evaluated",
+        "quality": "VALID",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Score Écologique et Impact Climatique: données insuffisantes pour conclure de façon fiable sur ce critère."
+      },
+      "rgpd_cookie_consent": {
+        "status": "failing",
+        "quality": "VALID",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Consentement Cookies: non-conformité détectée. Affecte 1 page(s). Exposition à sanctions réglementaires. Correction prioritaire requise."
+      },
+      "rgpd_privacy_policy": {
+        "status": "failing",
+        "quality": "VALID",
+        "confidence": "high",
+        "pages_checked": 1,
+        "constat": "Politique de confidentialité absente (Art.13/14 RGPD). Affecte 1 page(s). Exposition à sanctions réglementaires. Correction prioritaire requise."
+      },
+      "rgpd_data_retention": {
+        "status": "failing",
+        "quality": "VALID",
+        "confidence": "medium",
+        "pages_checked": 1,
+        "constat": "Durée de Conservation: non-conformité détectée. Affecte 1 page(s). Exposition à sanctions réglementaires. Correction prioritaire requise."
+      },
+      "rgpd_minimization": {
+        "status": "failing",
+        "quality": "VALID",
+        "confidence": "medium",
+        "pages_checked": 1,
+        "constat": "Minimisation des Données: non-conformité détectée. Affecte 1 page(s). Exposition à sanctions réglementaires. Correction prioritaire requise."
+      },
+      "rgpd_legal_notice": {
+        "status": "failing",
+        "quality": "VALID",
+        "confidence": "high",
+        "pages_checked": 1,
+        "constat": "Mentions légales absentes (loi LCEN). Affecte 1 page(s). Exposition à sanctions réglementaires. Correction prioritaire requise."
+      },
+      "rgpd_user_rights": {
+        "status": "failing",
+        "quality": "VALID",
+        "confidence": "high",
+        "pages_checked": 1,
+        "constat": "Droits des personnes non mentionnés (non-conformité Art.13/14 RGPD). Affecte 1 page(s). Exposition à sanctions réglementaires. Correction prioritaire requise."
+      },
+      "rgpd_declared_purpose": {
+        "status": "failing",
+        "quality": "VALID",
+        "confidence": "high",
+        "pages_checked": 1,
+        "constat": "Finalité du traitement non déclarée. Affecte 1 page(s). Exposition à sanctions réglementaires. Correction prioritaire requise."
+      },
+      "rgpd_rights_coverage": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "medium",
+        "pages_checked": 1,
+        "constat": "Couverture des Droits RGPD: vérification réussie. Aucune action requise."
+      },
+      "rgpd_pre_consent_trackers": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "medium",
+        "pages_checked": 1,
+        "constat": "Trackers Avant Consentement: vérification réussie. Aucune action requise."
+      },
+      "rgpd_privacy_score": {
+        "status": "failing",
+        "quality": "VALID",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Score Politique de Confidentialité: non-conformité détectée. Affecte 1 page(s). Exposition à sanctions réglementaires. Correction prioritaire requise."
+      }
+    },
+    "nlp_not_evaluated_pages": 0
+  },
+  "nlp_explicitly_skipped": {
+    "pages_scanned": 1,
+    "status_counts": {
+      "not_evaluated": 24,
+      "passing": 30,
+      "failing": 17,
+      "warning": 2
+    },
+    "kpis": {
+      "tech_cms_version": {
+        "status": "not_evaluated",
+        "quality": "MISSING",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Aucun CMS ou framework n'a été identifié lors du scan (signatures non reconnues ou en-têtes masqués). Le niveau de risque lié à la base technique ne peut pas être évalué."
+      },
+      "tech_modules_versions": {
+        "status": "not_evaluated",
+        "quality": "MISSING",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Version Modules Installés: données insuffisantes pour conclure de façon fiable sur ce critère."
+      },
+      "tech_server_version": {
+        "status": "not_evaluated",
+        "quality": "MISSING",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Le serveur du site n'a pas pu être identifié lors du scan (en-têtes masqués, CDN ou réponse non standard). Le risque lié à la version serveur ne peut pas être évalué sans cette information."
+      },
+      "tech_programming_language": {
+        "status": "not_evaluated",
+        "quality": "MISSING",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Le langage de programmation du site n'est pas exposé directement dans les pages analysées (runtime masqué ou CDN). Le niveau de risque ne peut pas être conclu avec certitude."
+      },
+      "tech_cve_check": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "high",
+        "pages_checked": 1,
+        "constat": "aucune CVE critique ou haute détectée. Aucune action requise."
+      },
+      "sec_ssl": {
+        "status": "not_evaluated",
+        "quality": "MISSING",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "SSL: données insuffisantes pour conclure de façon fiable sur ce critère."
+      },
+      "sec_http_headers": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "high",
+        "pages_checked": 1,
+        "constat": "0 en-têtes de sécurité configurés. Aucune action requise."
+      },
+      "sec_session_cookies": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "high",
+        "pages_checked": 1,
+        "constat": "aucun cookie dépourvu de flags Secure/HttpOnly. Aucune action requise."
+      },
+      "sec_sqli_ddos": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "high",
+        "pages_checked": 1,
+        "constat": "SQL Injection et DDoS: vérification réussie. Aucune action requise."
+      },
+      "sec_service_exposure": {
+        "status": "not_evaluated",
+        "quality": "MISSING",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Le contrôle d'exposition des services réseau est désactivé. Activez ENABLE_PORT_SCAN pour évaluer ce risque."
+      },
+      "sec_admin_exposed": {
+        "status": "passing",
+        "quality": "PARTIAL",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Pages Admin Exposées: vérification réussie sur les éléments disponibles. Aucune action requise."
+      },
+      "sec_version_disclosure": {
+        "status": "passing",
+        "quality": "PARTIAL",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Divulgation de Version CMS: vérification réussie sur les éléments disponibles. Aucune action requise."
+      },
+      "sec_robots_disclosure": {
+        "status": "passing",
+        "quality": "PARTIAL",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Divulgation d'Information via robots.txt: vérification réussie sur les éléments disponibles. Aucune action requise."
+      },
+      "sec_error_pages": {
+        "status": "passing",
+        "quality": "PARTIAL",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Fuite d'Information Page d'Erreur: vérification réussie sur les éléments disponibles. Aucune action requise."
+      },
+      "sec_sensitive_files": {
+        "status": "passing",
+        "quality": "PARTIAL",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Fichiers Sensibles Exposés: vérification réussie sur les éléments disponibles. Aucune action requise."
+      },
+      "sec_trace_track": {
+        "status": "passing",
+        "quality": "PARTIAL",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Méthodes HTTP TRACE/TRACK: vérification réussie sur les éléments disponibles. Aucune action requise."
+      },
+      "sec_cors_misconfiguration": {
+        "status": "passing",
+        "quality": "PARTIAL",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Misconfiguration CORS: vérification réussie sur les éléments disponibles. Aucune action requise."
+      },
+      "sec_brute_force": {
+        "status": "not_evaluated",
+        "quality": "MISSING",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Protection Brute Force Login: données insuffisantes pour conclure de façon fiable sur ce critère."
+      },
+      "sec_file_upload": {
+        "status": "not_evaluated",
+        "quality": "MISSING",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Contrôle d'Extension Upload Fichier: données insuffisantes pour conclure de façon fiable sur ce critère."
+      },
+      "sec_js_deps": {
+        "status": "passing",
+        "quality": "PARTIAL",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Dépendances JS Vulnérables (CVE): vérification réussie sur les éléments disponibles. Aucune action requise."
+      },
+      "func_forms": {
+        "status": "not_evaluated",
+        "quality": "MISSING",
+        "confidence": "low",
+        "pages_checked": 0,
+        "constat": "0 formulaire(s) ont été détectés et 0 test(s) lancés, mais aucune réponse exploitable n'a été obtenue (0 erreur(s) de transport). Le risque métier reste inconnu."
+      },
+      "func_links": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "high",
+        "pages_checked": 1,
+        "constat": "Aucun lien interne cassé n'a été remonté sur les pages échantillonnées."
+      },
+      "func_buttons": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "high",
+        "pages_checked": 1,
+        "constat": "Aucun bouton sans action exploitable n'a été détecté sur les pages échantillonnées."
+      },
+      "func_features": {
+        "status": "failing",
+        "quality": "VALID",
+        "confidence": "medium",
+        "pages_checked": 1,
+        "constat": "Fonctionnalités: bug ou recommandation détecté. Vérification manuelle recommandée."
+      },
+      "func_search": {
+        "status": "not_evaluated",
+        "quality": "MISSING",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Fonctionnement du Moteur de Recherche Interne: données insuffisantes pour conclure de façon fiable sur ce critère."
+      },
+      "perf_desktop_speed": {
+        "status": "not_evaluated",
+        "quality": "MISSING",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Temps de Chargement Desktop: données insuffisantes pour conclure de façon fiable sur ce critère."
+      },
+      "perf_mobile_speed": {
+        "status": "not_evaluated",
+        "quality": "MISSING",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Temps de Chargement Mobile: données insuffisantes pour conclure de façon fiable sur ce critère."
+      },
+      "perf_image_optim": {
+        "status": "not_evaluated",
+        "quality": "MISSING",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Optimisation des Images: données insuffisantes pour conclure de façon fiable sur ce critère."
+      },
+      "perf_cache": {
+        "status": "failing",
+        "quality": "VALID",
+        "confidence": "medium",
+        "pages_checked": 1,
+        "constat": "Gestion de Cache: point d'optimisation identifié. Affecte 1 page(s). Gain potentiel sur l'expérience utilisateur."
+      },
+      "perf_compression": {
+        "status": "failing",
+        "quality": "VALID",
+        "confidence": "medium",
+        "pages_checked": 1,
+        "constat": "Utilisation de Compression: point d'optimisation identifié. Affecte 1 page(s). Gain potentiel sur l'expérience utilisateur."
+      },
+      "perf_console_errors": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "high",
+        "pages_checked": 1,
+        "constat": "Erreurs Console JavaScript: vérification réussie. Aucune action requise."
+      },
+      "seo_alt_tags": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "high",
+        "pages_checked": 1,
+        "constat": "Les images échantillonnées disposent d'un attribut ALT exploitable dans l'agrégat SEO."
+      },
+      "seo_meta_tags": {
+        "status": "failing",
+        "quality": "VALID",
+        "confidence": "high",
+        "pages_checked": 1,
+        "constat": "1 page(s) sans balise title ont été détectées dans l'audit SEO. Exemples : https://example.test/."
+      },
+      "seo_sitemap": {
+        "status": "failing",
+        "quality": "VALID",
+        "confidence": "high",
+        "pages_checked": 1,
+        "constat": "Sitemap: point d'optimisation identifié. Affecte 1 page(s). Gain potentiel sur l'expérience utilisateur."
+      },
+      "seo_robots_txt": {
+        "status": "failing",
+        "quality": "VALID",
+        "confidence": "high",
+        "pages_checked": 1,
+        "constat": "Robot Txt: point d'optimisation identifié. Affecte 1 page(s). Gain potentiel sur l'expérience utilisateur."
+      },
+      "seo_duplication": {
+        "status": "not_evaluated",
+        "quality": "MISSING",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Duplication de Contenu: données insuffisantes pour conclure de façon fiable sur ce critère."
+      },
+      "seo_multi_browser": {
+        "status": "not_evaluated",
+        "quality": "MISSING",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Compatibilité Multiplateforme: données insuffisantes pour conclure de façon fiable sur ce critère."
+      },
+      "seo_url_structure": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "high",
+        "pages_checked": 1,
+        "constat": "Structure des URLs: vérification réussie. Aucune action requise."
+      },
+      "seo_heading_structure": {
+        "status": "failing",
+        "quality": "VALID",
+        "confidence": "high",
+        "pages_checked": 1,
+        "constat": "La hiérarchie Hn est défaillante et la page d'accueil (https://example.test/) est elle-même concernée. 1 page(s) sont remontées comme non conformes."
+      },
+      "seo_internal_linking": {
+        "status": "not_evaluated",
+        "quality": "PARTIAL",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Le KPI de maillage interne n'a pas pu être évalué de manière fiable sur ce scan."
+      },
+      "seo_external_linking": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Linking Externe: vérification réussie. Aucune action requise."
+      },
+      "seo_h1_quality": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "medium",
+        "pages_checked": 1,
+        "constat": "Qualité H1 (NLP): vérification réussie. Aucune action requise."
+      },
+      "seo_meta_nlp": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "medium",
+        "pages_checked": 1,
+        "constat": "Méta Description (NLP): vérification réussie. Aucune action requise."
+      },
+      "ai_llms_txt": {
+        "status": "not_evaluated",
+        "quality": "MISSING",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Aucun fichier llms.txt exploitable n'a été détecté à https://example.test/llms.txt. Le site reste consultable, mais il ne fournit pas de guide dédié aux moteurs génératifs."
+      },
+      "ai_robots_access": {
+        "status": "warning",
+        "quality": "PARTIAL",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "0 agent(s) IA sont bloqués ou ambiguës dans robots.txt. La politique observée (robots_missing) peut limiter l'exploration générative du contenu public."
+      },
+      "ai_https_ready": {
+        "status": "warning",
+        "quality": "PARTIAL",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "L'accès HTTPS n'est pas confirmé comme fiable. Les crawlers IA peuvent refuser ou dégrader l'exploration si le certificat ou la chaîne TLS pose problème."
+      },
+      "ai_schema_org": {
+        "status": "not_evaluated",
+        "quality": "MISSING",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Aucun JSON-LD Schema.org valide avec type @type concret n'a été détecté sur les 1 page(s) analysée(s). Les moteurs IA devront inférer seuls le contexte métier."
+      },
+      "ai_faq_schema": {
+        "status": "not_evaluated",
+        "quality": "MISSING",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Aucune page FAQ ou FAQPage exploitable n'a été détectée. Le site offre moins de réponses directement réutilisables par les moteurs génératifs."
+      },
+      "ai_raw_content_visible": {
+        "status": "not_evaluated",
+        "quality": "MISSING",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Le contenu principal est visible dans le HTML initial sur 0/1 page(s), sous le seuil V1 de 70%. Une dépendance forte au JavaScript peut réduire l'extraction par certains crawlers IA. Couverture observée: 0.0%."
+      },
+      "ai_heading_questions": {
+        "status": "not_evaluated",
+        "quality": "MISSING",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "0 page(s) seulement contiennent des titres orientés questions-réponses, sous le seuil V1 de 20% ou 5 pages. Couverture observée: 0.0% sur 1 page(s)."
+      },
+      "ux_audience_targeting": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Ciblage: vérification réussie. Aucune action requise."
+      },
+      "ux_social_sharing": {
+        "status": "failing",
+        "quality": "VALID",
+        "confidence": "medium",
+        "pages_checked": 1,
+        "constat": "Partage Social: point d'optimisation identifié. Affecte 1 page(s). Gain potentiel sur l'expérience utilisateur."
+      },
+      "ux_design_ergonomics": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "medium",
+        "pages_checked": 1,
+        "constat": "Ergonomie et Design: vérification réussie. Aucune action requise."
+      },
+      "ux_navigation": {
+        "status": "failing",
+        "quality": "VALID",
+        "confidence": "medium",
+        "pages_checked": 1,
+        "constat": "Structure, Navigation et Parcours Client: bug ou recommandation détecté. Vérification manuelle recommandée."
+      },
+      "ux_mobile_friendly": {
+        "status": "not_evaluated",
+        "quality": "MISSING",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Mobile Friendly: données insuffisantes pour conclure de façon fiable sur ce critère."
+      },
+      "content_freshness": {
+        "status": "not_evaluated",
+        "quality": "MISSING",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Fraîcheur du Contenu: données insuffisantes pour conclure de façon fiable sur ce critère."
+      },
+      "content_thin": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "medium",
+        "pages_checked": 1,
+        "constat": "Contenu Fin et Qualité: vérification réussie. Aucune action requise."
+      },
+      "content_key_pages": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Pages Clés: vérification réussie. Aucune action requise."
+      },
+      "content_cannibalization": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "medium",
+        "pages_checked": 1,
+        "constat": "Cannabalisation de Mots-clés: vérification réussie. Aucune action requise."
+      },
+      "content_missing_cta": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "medium",
+        "pages_checked": 1,
+        "constat": "CTA Transactionnels Manquants: vérification réussie. Aucune action requise."
+      },
+      "content_broken_structure": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "medium",
+        "pages_checked": 1,
+        "constat": "Structure Contenu Cassée: vérification réussie. Aucune action requise."
+      },
+      "content_lexical_diversity": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Diversité Lexicale: vérification réussie. Aucune action requise."
+      },
+      "eco_index_score": {
+        "status": "not_evaluated",
+        "quality": "VALID",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Score Écologique et Impact Climatique: données insuffisantes pour conclure de façon fiable sur ce critère."
+      },
+      "rgpd_cookie_consent": {
+        "status": "failing",
+        "quality": "VALID",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Consentement Cookies: non-conformité détectée. Affecte 1 page(s). Exposition à sanctions réglementaires. Correction prioritaire requise."
+      },
+      "rgpd_privacy_policy": {
+        "status": "failing",
+        "quality": "VALID",
+        "confidence": "high",
+        "pages_checked": 1,
+        "constat": "Politique de confidentialité absente (Art.13/14 RGPD). Affecte 1 page(s). Exposition à sanctions réglementaires. Correction prioritaire requise."
+      },
+      "rgpd_data_retention": {
+        "status": "failing",
+        "quality": "VALID",
+        "confidence": "medium",
+        "pages_checked": 1,
+        "constat": "Durée de Conservation: non-conformité détectée. Affecte 1 page(s). Exposition à sanctions réglementaires. Correction prioritaire requise."
+      },
+      "rgpd_minimization": {
+        "status": "failing",
+        "quality": "VALID",
+        "confidence": "medium",
+        "pages_checked": 1,
+        "constat": "Minimisation des Données: non-conformité détectée. Affecte 1 page(s). Exposition à sanctions réglementaires. Correction prioritaire requise."
+      },
+      "rgpd_legal_notice": {
+        "status": "failing",
+        "quality": "VALID",
+        "confidence": "high",
+        "pages_checked": 1,
+        "constat": "Mentions légales absentes (loi LCEN). Affecte 1 page(s). Exposition à sanctions réglementaires. Correction prioritaire requise."
+      },
+      "rgpd_user_rights": {
+        "status": "failing",
+        "quality": "VALID",
+        "confidence": "high",
+        "pages_checked": 1,
+        "constat": "Droits des personnes non mentionnés (non-conformité Art.13/14 RGPD). Affecte 1 page(s). Exposition à sanctions réglementaires. Correction prioritaire requise."
+      },
+      "rgpd_declared_purpose": {
+        "status": "failing",
+        "quality": "VALID",
+        "confidence": "high",
+        "pages_checked": 1,
+        "constat": "Finalité du traitement non déclarée. Affecte 1 page(s). Exposition à sanctions réglementaires. Correction prioritaire requise."
+      },
+      "rgpd_rights_coverage": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "medium",
+        "pages_checked": 1,
+        "constat": "Couverture des Droits RGPD: vérification réussie. Aucune action requise."
+      },
+      "rgpd_pre_consent_trackers": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "medium",
+        "pages_checked": 1,
+        "constat": "Trackers Avant Consentement: vérification réussie. Aucune action requise."
+      },
+      "rgpd_privacy_score": {
+        "status": "failing",
+        "quality": "VALID",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Score Politique de Confidentialité: non-conformité détectée. Affecte 1 page(s). Exposition à sanctions réglementaires. Correction prioritaire requise."
+      }
+    },
+    "nlp_not_evaluated_pages": 1
+  },
+  "zero_page_builder": {
+    "pages_scanned": 1,
+    "status_counts": {
+      "not_evaluated": 24,
+      "passing": 34,
+      "failing": 13,
+      "warning": 2
+    },
+    "kpis": {
+      "tech_cms_version": {
+        "status": "not_evaluated",
+        "quality": "MISSING",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Aucun CMS ou framework n'a été identifié lors du scan (signatures non reconnues ou en-têtes masqués). Le niveau de risque lié à la base technique ne peut pas être évalué."
+      },
+      "tech_modules_versions": {
+        "status": "not_evaluated",
+        "quality": "MISSING",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Version Modules Installés: données insuffisantes pour conclure de façon fiable sur ce critère."
+      },
+      "tech_server_version": {
+        "status": "not_evaluated",
+        "quality": "MISSING",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Le serveur du site n'a pas pu être identifié lors du scan (en-têtes masqués, CDN ou réponse non standard). Le risque lié à la version serveur ne peut pas être évalué sans cette information."
+      },
+      "tech_programming_language": {
+        "status": "not_evaluated",
+        "quality": "MISSING",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Le langage de programmation du site n'est pas exposé directement dans les pages analysées (runtime masqué ou CDN). Le niveau de risque ne peut pas être conclu avec certitude."
+      },
+      "tech_cve_check": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "high",
+        "pages_checked": 1,
+        "constat": "aucune CVE critique ou haute détectée. Aucune action requise."
+      },
+      "sec_ssl": {
+        "status": "not_evaluated",
+        "quality": "MISSING",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "SSL: données insuffisantes pour conclure de façon fiable sur ce critère."
+      },
+      "sec_http_headers": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "high",
+        "pages_checked": 1,
+        "constat": "0 en-têtes de sécurité configurés. Aucune action requise."
+      },
+      "sec_session_cookies": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "high",
+        "pages_checked": 1,
+        "constat": "aucun cookie dépourvu de flags Secure/HttpOnly. Aucune action requise."
+      },
+      "sec_sqli_ddos": {
+        "status": "passing",
+        "quality": "PARTIAL",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "SQL Injection et DDoS: vérification réussie sur les éléments disponibles. Aucune action requise."
+      },
+      "sec_service_exposure": {
+        "status": "not_evaluated",
+        "quality": "MISSING",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Le contrôle d'exposition des services réseau est désactivé. Activez ENABLE_PORT_SCAN pour évaluer ce risque."
+      },
+      "sec_admin_exposed": {
+        "status": "passing",
+        "quality": "PARTIAL",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Pages Admin Exposées: vérification réussie sur les éléments disponibles. Aucune action requise."
+      },
+      "sec_version_disclosure": {
+        "status": "passing",
+        "quality": "PARTIAL",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Divulgation de Version CMS: vérification réussie sur les éléments disponibles. Aucune action requise."
+      },
+      "sec_robots_disclosure": {
+        "status": "passing",
+        "quality": "PARTIAL",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Divulgation d'Information via robots.txt: vérification réussie sur les éléments disponibles. Aucune action requise."
+      },
+      "sec_error_pages": {
+        "status": "passing",
+        "quality": "PARTIAL",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Fuite d'Information Page d'Erreur: vérification réussie sur les éléments disponibles. Aucune action requise."
+      },
+      "sec_sensitive_files": {
+        "status": "passing",
+        "quality": "PARTIAL",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Fichiers Sensibles Exposés: vérification réussie sur les éléments disponibles. Aucune action requise."
+      },
+      "sec_trace_track": {
+        "status": "passing",
+        "quality": "PARTIAL",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Méthodes HTTP TRACE/TRACK: vérification réussie sur les éléments disponibles. Aucune action requise."
+      },
+      "sec_cors_misconfiguration": {
+        "status": "passing",
+        "quality": "PARTIAL",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Misconfiguration CORS: vérification réussie sur les éléments disponibles. Aucune action requise."
+      },
+      "sec_brute_force": {
+        "status": "not_evaluated",
+        "quality": "MISSING",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Protection Brute Force Login: données insuffisantes pour conclure de façon fiable sur ce critère."
+      },
+      "sec_file_upload": {
+        "status": "not_evaluated",
+        "quality": "MISSING",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Contrôle d'Extension Upload Fichier: données insuffisantes pour conclure de façon fiable sur ce critère."
+      },
+      "sec_js_deps": {
+        "status": "passing",
+        "quality": "PARTIAL",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Dépendances JS Vulnérables (CVE): vérification réussie sur les éléments disponibles. Aucune action requise."
+      },
+      "func_forms": {
+        "status": "not_evaluated",
+        "quality": "MISSING",
+        "confidence": "low",
+        "pages_checked": 0,
+        "constat": "0 formulaire(s) ont été détectés et 0 test(s) lancés, mais aucune réponse exploitable n'a été obtenue (0 erreur(s) de transport). Le risque métier reste inconnu."
+      },
+      "func_links": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "high",
+        "pages_checked": 1,
+        "constat": "Aucun lien interne cassé n'a été remonté sur les pages échantillonnées."
+      },
+      "func_buttons": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "high",
+        "pages_checked": 1,
+        "constat": "Aucun bouton sans action exploitable n'a été détecté sur les pages échantillonnées."
+      },
+      "func_features": {
+        "status": "failing",
+        "quality": "VALID",
+        "confidence": "medium",
+        "pages_checked": 1,
+        "constat": "Fonctionnalités: bug ou recommandation détecté. Vérification manuelle recommandée."
+      },
+      "func_search": {
+        "status": "not_evaluated",
+        "quality": "MISSING",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Fonctionnement du Moteur de Recherche Interne: données insuffisantes pour conclure de façon fiable sur ce critère."
+      },
+      "perf_desktop_speed": {
+        "status": "not_evaluated",
+        "quality": "MISSING",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Temps de Chargement Desktop: données insuffisantes pour conclure de façon fiable sur ce critère."
+      },
+      "perf_mobile_speed": {
+        "status": "not_evaluated",
+        "quality": "MISSING",
+        "confidence": "low",
+        "pages_checked": 0,
+        "constat": "Temps de Chargement Mobile: données insuffisantes pour conclure de façon fiable sur ce critère."
+      },
+      "perf_image_optim": {
+        "status": "not_evaluated",
+        "quality": "MISSING",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Optimisation des Images: données insuffisantes pour conclure de façon fiable sur ce critère."
+      },
+      "perf_cache": {
+        "status": "failing",
+        "quality": "VALID",
+        "confidence": "medium",
+        "pages_checked": 1,
+        "constat": "Gestion de Cache: point d'optimisation identifié. Affecte 1 page(s). Gain potentiel sur l'expérience utilisateur."
+      },
+      "perf_compression": {
+        "status": "failing",
+        "quality": "VALID",
+        "confidence": "medium",
+        "pages_checked": 1,
+        "constat": "Utilisation de Compression: point d'optimisation identifié. Affecte 1 page(s). Gain potentiel sur l'expérience utilisateur."
+      },
+      "perf_console_errors": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "high",
+        "pages_checked": 1,
+        "constat": "Erreurs Console JavaScript: vérification réussie. Aucune action requise."
+      },
+      "seo_alt_tags": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "high",
+        "pages_checked": 1,
+        "constat": "Les images échantillonnées disposent d'un attribut ALT exploitable dans l'agrégat SEO."
+      },
+      "seo_meta_tags": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "high",
+        "pages_checked": 1,
+        "constat": "Les pages analysées disposent de titres et de meta descriptions exploitables dans l'agrégat SEO."
+      },
+      "seo_sitemap": {
+        "status": "failing",
+        "quality": "VALID",
+        "confidence": "high",
+        "pages_checked": 1,
+        "constat": "Sitemap: point d'optimisation identifié. Affecte 1 page(s). Gain potentiel sur l'expérience utilisateur."
+      },
+      "seo_robots_txt": {
+        "status": "failing",
+        "quality": "VALID",
+        "confidence": "high",
+        "pages_checked": 1,
+        "constat": "Robot Txt: point d'optimisation identifié. Affecte 1 page(s). Gain potentiel sur l'expérience utilisateur."
+      },
+      "seo_duplication": {
+        "status": "not_evaluated",
+        "quality": "MISSING",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Duplication de Contenu: données insuffisantes pour conclure de façon fiable sur ce critère."
+      },
+      "seo_multi_browser": {
+        "status": "passing",
+        "quality": "PARTIAL",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Compatibilité Multiplateforme: vérification réussie sur les éléments disponibles. Aucune action requise."
+      },
+      "seo_url_structure": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "high",
+        "pages_checked": 1,
+        "constat": "Structure des URLs: vérification réussie. Aucune action requise."
+      },
+      "seo_heading_structure": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "high",
+        "pages_checked": 1,
+        "constat": "La hiérarchie Hn est cohérente sur les pages analysées et la page d'accueil dispose d'un H1 exploitable."
+      },
+      "seo_internal_linking": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "medium",
+        "pages_checked": 1,
+        "constat": "Le maillage contextuel remonte comme suffisant sur les pages analysées (0 lien(s) contextuel(s), 0 lien(s) interne(s) agrégés)."
+      },
+      "seo_external_linking": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Linking Externe: vérification réussie. Aucune action requise."
+      },
+      "seo_h1_quality": {
+        "status": "passing",
+        "quality": "PARTIAL",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Qualité H1 (NLP): vérification réussie sur les éléments disponibles. Aucune action requise."
+      },
+      "seo_meta_nlp": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "medium",
+        "pages_checked": 1,
+        "constat": "Méta Description (NLP): vérification réussie sur les éléments disponibles. Aucune action requise."
+      },
+      "ai_llms_txt": {
+        "status": "not_evaluated",
+        "quality": "MISSING",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Aucun fichier llms.txt exploitable n'a été détecté à https://example.test/llms.txt. Le site reste consultable, mais il ne fournit pas de guide dédié aux moteurs génératifs."
+      },
+      "ai_robots_access": {
+        "status": "warning",
+        "quality": "PARTIAL",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "0 agent(s) IA sont bloqués ou ambiguës dans robots.txt. La politique observée (robots_missing) peut limiter l'exploration générative du contenu public."
+      },
+      "ai_https_ready": {
+        "status": "warning",
+        "quality": "PARTIAL",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "L'accès HTTPS n'est pas confirmé comme fiable. Les crawlers IA peuvent refuser ou dégrader l'exploration si le certificat ou la chaîne TLS pose problème."
+      },
+      "ai_schema_org": {
+        "status": "not_evaluated",
+        "quality": "MISSING",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Aucun JSON-LD Schema.org valide avec type @type concret n'a été détecté sur les 1 page(s) analysée(s). Les moteurs IA devront inférer seuls le contexte métier."
+      },
+      "ai_faq_schema": {
+        "status": "not_evaluated",
+        "quality": "MISSING",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Aucune page FAQ ou FAQPage exploitable n'a été détectée. Le site offre moins de réponses directement réutilisables par les moteurs génératifs."
+      },
+      "ai_raw_content_visible": {
+        "status": "not_evaluated",
+        "quality": "MISSING",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Le contenu principal est visible dans le HTML initial sur 0/1 page(s), sous le seuil V1 de 70%. Une dépendance forte au JavaScript peut réduire l'extraction par certains crawlers IA. Couverture observée: 0.0%."
+      },
+      "ai_heading_questions": {
+        "status": "not_evaluated",
+        "quality": "MISSING",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "0 page(s) seulement contiennent des titres orientés questions-réponses, sous le seuil V1 de 20% ou 5 pages. Couverture observée: 0.0% sur 1 page(s)."
+      },
+      "ux_audience_targeting": {
+        "status": "passing",
+        "quality": "PARTIAL",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Ciblage: vérification réussie sur les éléments disponibles. Aucune action requise."
+      },
+      "ux_social_sharing": {
+        "status": "passing",
+        "quality": "PARTIAL",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Partage Social: vérification réussie sur les éléments disponibles. Aucune action requise."
+      },
+      "ux_design_ergonomics": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "medium",
+        "pages_checked": 1,
+        "constat": "Ergonomie et Design: vérification réussie. Aucune action requise."
+      },
+      "ux_navigation": {
+        "status": "failing",
+        "quality": "VALID",
+        "confidence": "medium",
+        "pages_checked": 1,
+        "constat": "Structure, Navigation et Parcours Client: bug ou recommandation détecté. Vérification manuelle recommandée."
+      },
+      "ux_mobile_friendly": {
+        "status": "not_evaluated",
+        "quality": "MISSING",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Mobile Friendly: données insuffisantes pour conclure de façon fiable sur ce critère."
+      },
+      "content_freshness": {
+        "status": "not_evaluated",
+        "quality": "MISSING",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Fraîcheur du Contenu: données insuffisantes pour conclure de façon fiable sur ce critère."
+      },
+      "content_thin": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "medium",
+        "pages_checked": 1,
+        "constat": "Contenu Fin et Qualité: vérification réussie. Aucune action requise."
+      },
+      "content_key_pages": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Pages Clés: vérification réussie. Aucune action requise."
+      },
+      "content_cannibalization": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "medium",
+        "pages_checked": 1,
+        "constat": "Cannabalisation de Mots-clés: vérification réussie. Aucune action requise."
+      },
+      "content_missing_cta": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "medium",
+        "pages_checked": 1,
+        "constat": "CTA Transactionnels Manquants: vérification réussie. Aucune action requise."
+      },
+      "content_broken_structure": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "medium",
+        "pages_checked": 1,
+        "constat": "Structure Contenu Cassée: vérification réussie. Aucune action requise."
+      },
+      "content_lexical_diversity": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Diversité Lexicale: vérification réussie. Aucune action requise."
+      },
+      "eco_index_score": {
+        "status": "not_evaluated",
+        "quality": "VALID",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Score Écologique et Impact Climatique: données insuffisantes pour conclure de façon fiable sur ce critère."
+      },
+      "rgpd_cookie_consent": {
+        "status": "not_evaluated",
+        "quality": "VALID",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Consentement Cookies: données insuffisantes pour conclure de façon fiable sur ce critère."
+      },
+      "rgpd_privacy_policy": {
+        "status": "failing",
+        "quality": "VALID",
+        "confidence": "high",
+        "pages_checked": 1,
+        "constat": "Politique de confidentialité absente (Art.13/14 RGPD). Affecte 1 page(s). Exposition à sanctions réglementaires. Correction prioritaire requise."
+      },
+      "rgpd_data_retention": {
+        "status": "failing",
+        "quality": "VALID",
+        "confidence": "medium",
+        "pages_checked": 1,
+        "constat": "Durée de Conservation: non-conformité détectée. Affecte 1 page(s). Exposition à sanctions réglementaires. Correction prioritaire requise."
+      },
+      "rgpd_minimization": {
+        "status": "failing",
+        "quality": "VALID",
+        "confidence": "medium",
+        "pages_checked": 1,
+        "constat": "Minimisation des Données: non-conformité détectée. Affecte 1 page(s). Exposition à sanctions réglementaires. Correction prioritaire requise."
+      },
+      "rgpd_legal_notice": {
+        "status": "failing",
+        "quality": "VALID",
+        "confidence": "high",
+        "pages_checked": 1,
+        "constat": "Mentions légales absentes (loi LCEN). Affecte 1 page(s). Exposition à sanctions réglementaires. Correction prioritaire requise."
+      },
+      "rgpd_user_rights": {
+        "status": "failing",
+        "quality": "VALID",
+        "confidence": "high",
+        "pages_checked": 1,
+        "constat": "Droits des personnes non mentionnés (non-conformité Art.13/14 RGPD). Affecte 1 page(s). Exposition à sanctions réglementaires. Correction prioritaire requise."
+      },
+      "rgpd_declared_purpose": {
+        "status": "failing",
+        "quality": "VALID",
+        "confidence": "high",
+        "pages_checked": 1,
+        "constat": "Finalité du traitement non déclarée. Affecte 1 page(s). Exposition à sanctions réglementaires. Correction prioritaire requise."
+      },
+      "rgpd_rights_coverage": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "medium",
+        "pages_checked": 1,
+        "constat": "Couverture des Droits RGPD: vérification réussie. Aucune action requise."
+      },
+      "rgpd_pre_consent_trackers": {
+        "status": "not_evaluated",
+        "quality": "MISSING",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Trackers Avant Consentement: données insuffisantes pour conclure de façon fiable sur ce critère."
+      },
+      "rgpd_privacy_score": {
+        "status": "failing",
+        "quality": "VALID",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Score Politique de Confidentialité: non-conformité détectée. Affecte 1 page(s). Exposition à sanctions réglementaires. Correction prioritaire requise."
+      }
+    }
+  },
+  "missing_summary": {
+    "exception": "UnboundLocalError",
+    "message": "cannot access local variable 'raw_sec' where it is not associated with a value"
+  },
+  "partial_nlp_missing_llms_url": {
+    "exception": "NameError",
+    "message": "name 'base_domain' is not defined"
+  },
+  "one_measured_of_one": {
+    "status": "passing",
+    "evidence": {
+      "detection_source": [
+        "scanner_aggregation"
+      ],
+      "pages_checked": 1,
+      "affected_pages": 0,
+      "execution_status": "completed",
+      "data_quality": "VALID",
+      "raw_content_visible_pages": 1,
+      "rendered_content_used_pages": 0,
+      "raw_content_coverage_pct": 100.0,
+      "raw_content_rows": [
+        {
+          "page_url": "https://example.test/",
+          "raw_content_visible": true,
+          "raw_content_word_count": 120,
+          "main_word_count": null,
+          "rendered_content_used": false,
+          "raw_content_source": "main"
+        }
+      ]
+    },
+    "constat": "Le contenu principal est visible dans le HTML initial sur 1/1 page(s) analysée(s). 0 page(s) ont nécessité un rendu JavaScript complémentaire."
+  },
+  "one_measured_of_ten": {
+    "status": "warning",
+    "evidence": {
+      "detection_source": [
+        "scanner_aggregation"
+      ],
+      "pages_checked": 10,
+      "affected_pages": 9,
+      "execution_status": "completed",
+      "data_quality": "VALID",
+      "raw_content_visible_pages": 1,
+      "rendered_content_used_pages": 0,
+      "raw_content_coverage_pct": 10.0,
+      "raw_content_rows": [
+        {
+          "page_url": "https://example.test/",
+          "raw_content_visible": true,
+          "raw_content_word_count": 120,
+          "main_word_count": null,
+          "rendered_content_used": false,
+          "raw_content_source": "main"
+        }
+      ]
+    },
+    "constat": "Le contenu principal est visible dans le HTML initial sur 1/10 page(s), sous le seuil V1 de 70%. Une dépendance forte au JavaScript peut réduire l'extraction par certains crawlers IA. Couverture observée: 10.0%."
+  },
+  "nlp_probes": {
+    "raw_source": {
+      "selected_rendered_html_as_raw": true,
+      "actual_raw_html": "<div id=\"__next\"></div>"
+    },
+    "llms_html_soft404": {
+      "llms_txt_present": true,
+      "llms_url": "https://example.test/llms.txt",
+      "status_code": 200,
+      "content_type": "text/html",
+      "length": 55,
+      "useful_lines": [
+        "<!doctype html><html><body>Page not found</body></html>"
+      ],
+      "parse_status": "parsed"
+    },
+    "llms_error_cache": {
+      "first": {
+        "llms_txt_present": false,
+        "llms_url": "https://example.test/llms.txt",
+        "status_code": null,
+        "content_type": null,
+        "length": 0,
+        "useful_lines": [],
+        "parse_status": "fetch_error:TimeoutError"
+      },
+      "next_call": {
+        "llms_txt_present": false,
+        "llms_url": "https://example.test/llms.txt",
+        "status_code": null,
+        "content_type": null,
+        "length": 0,
+        "useful_lines": [],
+        "parse_status": "fetch_error:TimeoutError"
+      },
+      "additional_http_calls": 0
+    }
+  },
+  "llms_soft404_final_kpi": {
+    "kpi_id": "ai_llms_txt",
+    "name": "AI Readiness (llms.txt)",
+    "axis": "AI Friendly",
+    "type": "recommendation",
+    "status": "passing",
+    "severity": null,
+    "confidence": "low",
+    "constat": "Le fichier llms.txt est accessible à l'adresse https://example.test/llms.txt et fournit un point d'entrée exploitable pour les moteurs génératifs.",
+    "score": 92,
+    "impact": null,
+    "pages_affected": 0,
+    "pages_affected_urls": [],
+    "data": {
+      "llms_txt_present_pages": 1,
+      "rows": [
+        {
+          "page_url": "https://example.test/",
+          "llms_txt_present": true,
+          "llms_url": "https://example.test/llms.txt",
+          "status_code": 200,
+          "content_type": "text/html",
+          "length": 55,
+          "useful_lines": [
+            "<!doctype html><html><body>Page not found</body></html>"
+          ],
+          "parse_status": "parsed"
+        }
+      ],
+      "execution_status": "completed",
+      "data_quality": "VALID",
+      "failure_reason": null,
+      "confidence": "low",
+      "tested_targets": [],
+      "rejected_candidates": [],
+      "applicability_context": null
+    },
+    "evidence": {
+      "detection_source": [
+        "scanner_aggregation"
+      ],
+      "pages_checked": 1,
+      "affected_pages": 0,
+      "execution_status": "completed",
+      "data_quality": "VALID",
+      "llms_txt_present": true,
+      "llms_txt_present_pages": 1,
+      "llms_rows": [
+        {
+          "page_url": "https://example.test/",
+          "llms_txt_present": true,
+          "llms_url": "https://example.test/llms.txt",
+          "status_code": 200,
+          "content_type": "text/html",
+          "length": 55,
+          "useful_lines": [
+            "<!doctype html><html><body>Page not found</body></html>"
+          ],
+          "parse_status": "parsed"
+        }
+      ],
+      "llms_url": "https://example.test/llms.txt",
+      "llms_parse_status": "parsed",
+      "fetch_failed": false
+    },
+    "evidence_digest": {
+      "quality": "VALID",
+      "summary": "URL testée: https://example.test/llms.txt",
+      "proof_lines": [
+        "URL testée: https://example.test/llms.txt",
+        "Fichier llms.txt: présent",
+        "Résultat de récupération: parsed",
+        "Pages vérifiées: 1"
+      ],
+      "rows": [
+        {
+          "llms_url": "https://example.test/llms.txt",
+          "content_type": "text/html",
+          "length": "55",
+          "parse_status": "parsed",
+          "page_url": "https://example.test/",
+          "llms_txt_present": "oui",
+          "status_code": "200",
+          "useful_lines": "<!doctype html><html><body>Page not found</body></html>"
+        }
+      ],
+      "urls": [
+        "https://example.test/"
+      ],
+      "affected_pages": 0,
+      "csv_columns": [
+        "llms_url",
+        "content_type",
+        "length",
+        "parse_status",
+        "page_url",
+        "llms_txt_present",
+        "status_code",
+        "useful_lines"
+      ],
+      "csv_rows": [
+        {
+          "llms_url": "https://example.test/llms.txt",
+          "content_type": "text/html",
+          "length": "55",
+          "parse_status": "parsed",
+          "page_url": "https://example.test/",
+          "llms_txt_present": "oui",
+          "status_code": "200",
+          "useful_lines": "<!doctype html><html><body>Page not found</body></html>"
+        }
+      ],
+      "top_items": [
+        "llms_url=https://example.test/llms.txt | content_type=text/html | length=55"
+      ],
+      "top_urls": [
+        "https://example.test/"
+      ]
+    },
+    "fix": null
+  },
+  "repository_fixture_baseline": {
+    "pages_scanned": 15,
+    "status_counts": {
+      "passing": 60,
+      "not_evaluated": 11,
+      "warning": 2
+    },
+    "kpis": {
+      "tech_cms_version": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "medium",
+        "pages_checked": 1,
+        "constat": "Le CMS détecté est WordPress 6.4.0 et le statut de support remonté est « supported »."
+      },
+      "tech_modules_versions": {
+        "status": "not_evaluated",
+        "quality": "MISSING",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Version Modules Installés: données insuffisantes pour conclure de façon fiable sur ce critère."
+      },
+      "tech_server_version": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "medium",
+        "pages_checked": 1,
+        "constat": "Le serveur ou runtime détecté est Apache 2.4.63. Aucun signal critique ou haut n'a été remonté dans l'agrégat utilisé pour ce KPI."
+      },
+      "tech_programming_language": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Le langage ou runtime PHP 8.2.0 ne présente aucun signal de risque dans l'agrégat utilisé."
+      },
+      "tech_cve_check": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "high",
+        "pages_checked": 1,
+        "constat": "aucune CVE critique ou haute détectée. Aucune action requise."
+      },
+      "sec_ssl": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "high",
+        "pages_checked": 1,
+        "constat": "certificat SSL valide, expire le 2027-01-01, protocole TLSv1.3, émis par Let's Encrypt. Aucune action requise."
+      },
+      "sec_http_headers": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "high",
+        "pages_checked": 1,
+        "constat": "2 en-têtes de sécurité configurés. Aucune action requise."
+      },
+      "sec_session_cookies": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "high",
+        "pages_checked": 1,
+        "constat": "aucun cookie dépourvu de flags Secure/HttpOnly. Aucune action requise."
+      },
+      "sec_sqli_ddos": {
+        "status": "passing",
+        "quality": "PARTIAL",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "SQL Injection et DDoS: vérification réussie sur les éléments disponibles. Aucune action requise."
+      },
+      "sec_service_exposure": {
+        "status": "not_evaluated",
+        "quality": "MISSING",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Le contrôle d'exposition des services réseau est désactivé. Activez ENABLE_PORT_SCAN pour évaluer ce risque."
+      },
+      "sec_admin_exposed": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "high",
+        "pages_checked": 1,
+        "constat": "Pages Admin Exposées: vérification réussie. Aucune action requise."
+      },
+      "sec_version_disclosure": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "medium",
+        "pages_checked": 1,
+        "constat": "Divulgation de Version CMS: vérification réussie. Aucune action requise."
+      },
+      "sec_robots_disclosure": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "medium",
+        "pages_checked": 1,
+        "constat": "Divulgation d'Information via robots.txt: vérification réussie. Aucune action requise."
+      },
+      "sec_error_pages": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "medium",
+        "pages_checked": 1,
+        "constat": "Fuite d'Information Page d'Erreur: vérification réussie. Aucune action requise."
+      },
+      "sec_sensitive_files": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "high",
+        "pages_checked": 1,
+        "constat": "Fichiers Sensibles Exposés: vérification réussie. Aucune action requise."
+      },
+      "sec_trace_track": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "high",
+        "pages_checked": 1,
+        "constat": "Méthodes HTTP TRACE/TRACK: vérification réussie. Aucune action requise."
+      },
+      "sec_cors_misconfiguration": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "high",
+        "pages_checked": 1,
+        "constat": "Misconfiguration CORS: vérification réussie. Aucune action requise."
+      },
+      "sec_brute_force": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "medium",
+        "pages_checked": 1,
+        "constat": "Protection Brute Force Login: vérification réussie. Aucune action requise."
+      },
+      "sec_file_upload": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "medium",
+        "pages_checked": 1,
+        "constat": "Contrôle d'Extension Upload Fichier: vérification réussie. Aucune action requise."
+      },
+      "sec_js_deps": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "high",
+        "pages_checked": 1,
+        "constat": "Dépendances JS Vulnérables (CVE): vérification réussie. Aucune action requise."
+      },
+      "func_forms": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "high",
+        "pages_checked": 2,
+        "constat": "2 formulaire(s) ont été détectés, 2 testés et 4 réponse(s) exploitable(s) analysée(s), sans bug confirmé."
+      },
+      "func_links": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "high",
+        "pages_checked": 15,
+        "constat": "Aucun lien interne cassé n'a été remonté sur les pages échantillonnées."
+      },
+      "func_buttons": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "high",
+        "pages_checked": 15,
+        "constat": "Aucun bouton sans action exploitable n'a été détecté sur les pages échantillonnées."
+      },
+      "func_features": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "medium",
+        "pages_checked": 15,
+        "constat": "Fonctionnalités: vérification réussie. Aucune action requise."
+      },
+      "func_search": {
+        "status": "not_evaluated",
+        "quality": "MISSING",
+        "confidence": "low",
+        "pages_checked": 15,
+        "constat": "Fonctionnement du Moteur de Recherche Interne: données insuffisantes pour conclure de façon fiable sur ce critère."
+      },
+      "perf_desktop_speed": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "high",
+        "pages_checked": 1,
+        "constat": "Temps de Chargement Desktop: vérification réussie. Aucune action requise."
+      },
+      "perf_mobile_speed": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "high",
+        "pages_checked": 1,
+        "constat": "Temps de Chargement Mobile: vérification réussie. Aucune action requise."
+      },
+      "perf_image_optim": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "medium",
+        "pages_checked": 15,
+        "constat": "Optimisation des Images: vérification réussie. Aucune action requise."
+      },
+      "perf_cache": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "medium",
+        "pages_checked": 15,
+        "constat": "Gestion de Cache: vérification réussie. Aucune action requise."
+      },
+      "perf_compression": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "medium",
+        "pages_checked": 15,
+        "constat": "Utilisation de Compression: vérification réussie. Aucune action requise."
+      },
+      "perf_console_errors": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "high",
+        "pages_checked": 15,
+        "constat": "Erreurs Console JavaScript: vérification réussie. Aucune action requise."
+      },
+      "seo_alt_tags": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "high",
+        "pages_checked": 15,
+        "constat": "Les images échantillonnées disposent d'un attribut ALT exploitable dans l'agrégat SEO."
+      },
+      "seo_meta_tags": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "high",
+        "pages_checked": 15,
+        "constat": "Les pages analysées disposent de titres et de meta descriptions exploitables dans l'agrégat SEO."
+      },
+      "seo_sitemap": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "high",
+        "pages_checked": 1,
+        "constat": "Sitemap: vérification réussie. Aucune action requise."
+      },
+      "seo_robots_txt": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "high",
+        "pages_checked": 1,
+        "constat": "Robot Txt: vérification réussie. Aucune action requise."
+      },
+      "seo_duplication": {
+        "status": "not_evaluated",
+        "quality": "MISSING",
+        "confidence": "low",
+        "pages_checked": 15,
+        "constat": "Duplication de Contenu: données insuffisantes pour conclure de façon fiable sur ce critère."
+      },
+      "seo_multi_browser": {
+        "status": "not_evaluated",
+        "quality": "MISSING",
+        "confidence": "low",
+        "pages_checked": 15,
+        "constat": "Compatibilité Multiplateforme: données insuffisantes pour conclure de façon fiable sur ce critère."
+      },
+      "seo_url_structure": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "high",
+        "pages_checked": 15,
+        "constat": "Structure des URLs: vérification réussie. Aucune action requise."
+      },
+      "seo_heading_structure": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "high",
+        "pages_checked": 15,
+        "constat": "La hiérarchie Hn est cohérente sur les pages analysées et la page d'accueil dispose d'un H1 exploitable."
+      },
+      "seo_internal_linking": {
+        "status": "passing",
+        "quality": "PARTIAL",
+        "confidence": "low",
+        "pages_checked": 15,
+        "constat": "Le maillage contextuel remonte comme suffisant sur les pages analysées (0 lien(s) contextuel(s), 50 lien(s) interne(s) agrégés)."
+      },
+      "seo_external_linking": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "low",
+        "pages_checked": 15,
+        "constat": "Linking Externe: vérification réussie. Aucune action requise."
+      },
+      "seo_h1_quality": {
+        "status": "passing",
+        "quality": "PARTIAL",
+        "confidence": "low",
+        "pages_checked": 15,
+        "constat": "Qualité H1 (NLP): vérification réussie sur les éléments disponibles. Aucune action requise."
+      },
+      "seo_meta_nlp": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "medium",
+        "pages_checked": 1,
+        "constat": "Méta Description (NLP): vérification réussie sur les éléments disponibles. Aucune action requise."
+      },
+      "ai_llms_txt": {
+        "status": "not_evaluated",
+        "quality": "MISSING",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Aucun fichier llms.txt exploitable n'a été détecté à https://example.com/llms.txt. Le site reste consultable, mais il ne fournit pas de guide dédié aux moteurs génératifs."
+      },
+      "ai_robots_access": {
+        "status": "warning",
+        "quality": "PARTIAL",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Aucun blocage des principaux agents IA n'a été détecté dans robots.txt, mais aucune règle IA explicite n'a été trouvée. Le signal reste donc partiel."
+      },
+      "ai_https_ready": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "low",
+        "pages_checked": 15,
+        "constat": "L'accès HTTPS est valide pour les crawlers et moteurs IA. Certificat valide jusqu'au 2027-01-01. Protocole: TLSv1.3."
+      },
+      "ai_schema_org": {
+        "status": "not_evaluated",
+        "quality": "MISSING",
+        "confidence": "low",
+        "pages_checked": 15,
+        "constat": "Aucun JSON-LD Schema.org valide avec type @type concret n'a été détecté sur les 15 page(s) analysée(s). Les moteurs IA devront inférer seuls le contexte métier."
+      },
+      "ai_faq_schema": {
+        "status": "not_evaluated",
+        "quality": "MISSING",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Aucune page FAQ ou FAQPage exploitable n'a été détectée. Le site offre moins de réponses directement réutilisables par les moteurs génératifs."
+      },
+      "ai_raw_content_visible": {
+        "status": "not_evaluated",
+        "quality": "MISSING",
+        "confidence": "low",
+        "pages_checked": 15,
+        "constat": "Le contenu principal est visible dans le HTML initial sur 0/15 page(s), sous le seuil V1 de 70%. Une dépendance forte au JavaScript peut réduire l'extraction par certains crawlers IA. Couverture observée: 0.0%."
+      },
+      "ai_heading_questions": {
+        "status": "not_evaluated",
+        "quality": "MISSING",
+        "confidence": "low",
+        "pages_checked": 15,
+        "constat": "0 page(s) seulement contiennent des titres orientés questions-réponses, sous le seuil V1 de 20% ou 5 pages. Couverture observée: 0.0% sur 15 page(s)."
+      },
+      "ux_audience_targeting": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "low",
+        "pages_checked": 15,
+        "constat": "Ciblage: vérification réussie. Aucune action requise."
+      },
+      "ux_social_sharing": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "medium",
+        "pages_checked": 15,
+        "constat": "Partage Social: vérification réussie. Aucune action requise."
+      },
+      "ux_design_ergonomics": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "medium",
+        "pages_checked": 15,
+        "constat": "Ergonomie et Design: vérification réussie. Aucune action requise."
+      },
+      "ux_navigation": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "medium",
+        "pages_checked": 15,
+        "constat": "Structure, Navigation et Parcours Client: vérification réussie. Aucune action requise."
+      },
+      "ux_mobile_friendly": {
+        "status": "not_evaluated",
+        "quality": "MISSING",
+        "confidence": "low",
+        "pages_checked": 15,
+        "constat": "Mobile Friendly: données insuffisantes pour conclure de façon fiable sur ce critère."
+      },
+      "content_freshness": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "medium",
+        "pages_checked": 1,
+        "constat": "Fraîcheur du Contenu: vérification réussie. Aucune action requise."
+      },
+      "content_thin": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "medium",
+        "pages_checked": 15,
+        "constat": "Contenu Fin et Qualité: vérification réussie. Aucune action requise."
+      },
+      "content_key_pages": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "low",
+        "pages_checked": 15,
+        "constat": "Pages Clés: vérification réussie. Aucune action requise."
+      },
+      "content_cannibalization": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "medium",
+        "pages_checked": 15,
+        "constat": "Cannabalisation de Mots-clés: vérification réussie. Aucune action requise."
+      },
+      "content_missing_cta": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "medium",
+        "pages_checked": 15,
+        "constat": "CTA Transactionnels Manquants: vérification réussie. Aucune action requise."
+      },
+      "content_broken_structure": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "medium",
+        "pages_checked": 15,
+        "constat": "Structure Contenu Cassée: vérification réussie. Aucune action requise."
+      },
+      "content_lexical_diversity": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "low",
+        "pages_checked": 15,
+        "constat": "Diversité Lexicale: vérification réussie. Aucune action requise."
+      },
+      "eco_index_score": {
+        "status": "warning",
+        "quality": "VALID",
+        "confidence": "medium",
+        "pages_checked": 15,
+        "constat": "Score Écologique et Impact Climatique: point d'optimisation identifié. Affecte 15 page(s). Gain potentiel sur l'expérience utilisateur."
+      },
+      "rgpd_cookie_consent": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Consentement Cookies: vérification réussie. Aucune action requise."
+      },
+      "rgpd_privacy_policy": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "high",
+        "pages_checked": 1,
+        "constat": "politique de confidentialité présente. Aucune action requise."
+      },
+      "rgpd_data_retention": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "medium",
+        "pages_checked": 15,
+        "constat": "Durée de Conservation: vérification réussie. Aucune action requise."
+      },
+      "rgpd_minimization": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "medium",
+        "pages_checked": 15,
+        "constat": "Minimisation des Données: vérification réussie. Aucune action requise."
+      },
+      "rgpd_legal_notice": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "high",
+        "pages_checked": 1,
+        "constat": "mentions légales présentes. Aucune action requise."
+      },
+      "rgpd_user_rights": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "high",
+        "pages_checked": 1,
+        "constat": "droits RGPD Art.13/14 mentionnés. Aucune action requise."
+      },
+      "rgpd_declared_purpose": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "high",
+        "pages_checked": 1,
+        "constat": "Finalité du Traitement: vérification réussie. Aucune action requise."
+      },
+      "rgpd_rights_coverage": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "medium",
+        "pages_checked": 15,
+        "constat": "Couverture des Droits RGPD: vérification réussie. Aucune action requise."
+      },
+      "rgpd_pre_consent_trackers": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "medium",
+        "pages_checked": 15,
+        "constat": "Trackers Avant Consentement: vérification réussie. Aucune action requise."
+      },
+      "rgpd_privacy_score": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "low",
+        "pages_checked": 15,
+        "constat": "Score Politique de Confidentialité: vérification réussie. Aucune action requise."
+      }
+    }
+  },
+  "repository_fixture_nlp_aggregates_removed": {
+    "pages_scanned": 15,
+    "status_counts": {
+      "passing": 53,
+      "not_evaluated": 16,
+      "warning": 2,
+      "failing": 2
+    },
+    "kpis": {
+      "tech_cms_version": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "medium",
+        "pages_checked": 1,
+        "constat": "Le CMS détecté est WordPress 6.4.0 et le statut de support remonté est « supported »."
+      },
+      "tech_modules_versions": {
+        "status": "not_evaluated",
+        "quality": "MISSING",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Version Modules Installés: données insuffisantes pour conclure de façon fiable sur ce critère."
+      },
+      "tech_server_version": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "medium",
+        "pages_checked": 1,
+        "constat": "Le serveur ou runtime détecté est Apache 2.4.63. Aucun signal critique ou haut n'a été remonté dans l'agrégat utilisé pour ce KPI."
+      },
+      "tech_programming_language": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Le langage ou runtime PHP 8.2.0 ne présente aucun signal de risque dans l'agrégat utilisé."
+      },
+      "tech_cve_check": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "high",
+        "pages_checked": 1,
+        "constat": "aucune CVE critique ou haute détectée. Aucune action requise."
+      },
+      "sec_ssl": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "high",
+        "pages_checked": 1,
+        "constat": "certificat SSL valide, expire le 2027-01-01, protocole TLSv1.3, émis par Let's Encrypt. Aucune action requise."
+      },
+      "sec_http_headers": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "high",
+        "pages_checked": 1,
+        "constat": "2 en-têtes de sécurité configurés. Aucune action requise."
+      },
+      "sec_session_cookies": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "high",
+        "pages_checked": 1,
+        "constat": "aucun cookie dépourvu de flags Secure/HttpOnly. Aucune action requise."
+      },
+      "sec_sqli_ddos": {
+        "status": "passing",
+        "quality": "PARTIAL",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "SQL Injection et DDoS: vérification réussie sur les éléments disponibles. Aucune action requise."
+      },
+      "sec_service_exposure": {
+        "status": "not_evaluated",
+        "quality": "MISSING",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Le contrôle d'exposition des services réseau est désactivé. Activez ENABLE_PORT_SCAN pour évaluer ce risque."
+      },
+      "sec_admin_exposed": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "high",
+        "pages_checked": 1,
+        "constat": "Pages Admin Exposées: vérification réussie. Aucune action requise."
+      },
+      "sec_version_disclosure": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "medium",
+        "pages_checked": 1,
+        "constat": "Divulgation de Version CMS: vérification réussie. Aucune action requise."
+      },
+      "sec_robots_disclosure": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "medium",
+        "pages_checked": 1,
+        "constat": "Divulgation d'Information via robots.txt: vérification réussie. Aucune action requise."
+      },
+      "sec_error_pages": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "medium",
+        "pages_checked": 1,
+        "constat": "Fuite d'Information Page d'Erreur: vérification réussie. Aucune action requise."
+      },
+      "sec_sensitive_files": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "high",
+        "pages_checked": 1,
+        "constat": "Fichiers Sensibles Exposés: vérification réussie. Aucune action requise."
+      },
+      "sec_trace_track": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "high",
+        "pages_checked": 1,
+        "constat": "Méthodes HTTP TRACE/TRACK: vérification réussie. Aucune action requise."
+      },
+      "sec_cors_misconfiguration": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "high",
+        "pages_checked": 1,
+        "constat": "Misconfiguration CORS: vérification réussie. Aucune action requise."
+      },
+      "sec_brute_force": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "medium",
+        "pages_checked": 1,
+        "constat": "Protection Brute Force Login: vérification réussie. Aucune action requise."
+      },
+      "sec_file_upload": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "medium",
+        "pages_checked": 1,
+        "constat": "Contrôle d'Extension Upload Fichier: vérification réussie. Aucune action requise."
+      },
+      "sec_js_deps": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "high",
+        "pages_checked": 1,
+        "constat": "Dépendances JS Vulnérables (CVE): vérification réussie. Aucune action requise."
+      },
+      "func_forms": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "high",
+        "pages_checked": 2,
+        "constat": "2 formulaire(s) ont été détectés, 2 testés et 4 réponse(s) exploitable(s) analysée(s), sans bug confirmé."
+      },
+      "func_links": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "high",
+        "pages_checked": 15,
+        "constat": "Aucun lien interne cassé n'a été remonté sur les pages échantillonnées."
+      },
+      "func_buttons": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "high",
+        "pages_checked": 15,
+        "constat": "Aucun bouton sans action exploitable n'a été détecté sur les pages échantillonnées."
+      },
+      "func_features": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "medium",
+        "pages_checked": 15,
+        "constat": "Fonctionnalités: vérification réussie. Aucune action requise."
+      },
+      "func_search": {
+        "status": "not_evaluated",
+        "quality": "MISSING",
+        "confidence": "low",
+        "pages_checked": 15,
+        "constat": "Fonctionnement du Moteur de Recherche Interne: données insuffisantes pour conclure de façon fiable sur ce critère."
+      },
+      "perf_desktop_speed": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "high",
+        "pages_checked": 1,
+        "constat": "Temps de Chargement Desktop: vérification réussie. Aucune action requise."
+      },
+      "perf_mobile_speed": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "high",
+        "pages_checked": 1,
+        "constat": "Temps de Chargement Mobile: vérification réussie. Aucune action requise."
+      },
+      "perf_image_optim": {
+        "status": "not_evaluated",
+        "quality": "MISSING",
+        "confidence": "low",
+        "pages_checked": 15,
+        "constat": "Optimisation des Images: données insuffisantes pour conclure de façon fiable sur ce critère."
+      },
+      "perf_cache": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "medium",
+        "pages_checked": 15,
+        "constat": "Gestion de Cache: vérification réussie. Aucune action requise."
+      },
+      "perf_compression": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "medium",
+        "pages_checked": 15,
+        "constat": "Utilisation de Compression: vérification réussie. Aucune action requise."
+      },
+      "perf_console_errors": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "high",
+        "pages_checked": 15,
+        "constat": "Erreurs Console JavaScript: vérification réussie. Aucune action requise."
+      },
+      "seo_alt_tags": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "high",
+        "pages_checked": 15,
+        "constat": "Les images échantillonnées disposent d'un attribut ALT exploitable dans l'agrégat SEO."
+      },
+      "seo_meta_tags": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "high",
+        "pages_checked": 15,
+        "constat": "Les pages analysées disposent de titres et de meta descriptions exploitables dans l'agrégat SEO."
+      },
+      "seo_sitemap": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "high",
+        "pages_checked": 1,
+        "constat": "Sitemap: vérification réussie. Aucune action requise."
+      },
+      "seo_robots_txt": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "high",
+        "pages_checked": 1,
+        "constat": "Robot Txt: vérification réussie. Aucune action requise."
+      },
+      "seo_duplication": {
+        "status": "not_evaluated",
+        "quality": "MISSING",
+        "confidence": "low",
+        "pages_checked": 15,
+        "constat": "Duplication de Contenu: données insuffisantes pour conclure de façon fiable sur ce critère."
+      },
+      "seo_multi_browser": {
+        "status": "not_evaluated",
+        "quality": "MISSING",
+        "confidence": "low",
+        "pages_checked": 15,
+        "constat": "Compatibilité Multiplateforme: données insuffisantes pour conclure de façon fiable sur ce critère."
+      },
+      "seo_url_structure": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "high",
+        "pages_checked": 15,
+        "constat": "Structure des URLs: vérification réussie. Aucune action requise."
+      },
+      "seo_heading_structure": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "high",
+        "pages_checked": 15,
+        "constat": "La hiérarchie Hn est cohérente sur les pages analysées et la page d'accueil dispose d'un H1 exploitable."
+      },
+      "seo_internal_linking": {
+        "status": "passing",
+        "quality": "PARTIAL",
+        "confidence": "low",
+        "pages_checked": 15,
+        "constat": "Le maillage contextuel remonte comme suffisant sur les pages analysées (0 lien(s) contextuel(s), 50 lien(s) interne(s) agrégés)."
+      },
+      "seo_external_linking": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "low",
+        "pages_checked": 15,
+        "constat": "Linking Externe: vérification réussie. Aucune action requise."
+      },
+      "seo_h1_quality": {
+        "status": "passing",
+        "quality": "PARTIAL",
+        "confidence": "low",
+        "pages_checked": 15,
+        "constat": "Qualité H1 (NLP): vérification réussie sur les éléments disponibles. Aucune action requise."
+      },
+      "seo_meta_nlp": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "medium",
+        "pages_checked": 1,
+        "constat": "Méta Description (NLP): vérification réussie sur les éléments disponibles. Aucune action requise."
+      },
+      "ai_llms_txt": {
+        "status": "not_evaluated",
+        "quality": "MISSING",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Aucun fichier llms.txt exploitable n'a été détecté à https://example.com/llms.txt. Le site reste consultable, mais il ne fournit pas de guide dédié aux moteurs génératifs."
+      },
+      "ai_robots_access": {
+        "status": "warning",
+        "quality": "PARTIAL",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Aucun blocage des principaux agents IA n'a été détecté dans robots.txt, mais aucune règle IA explicite n'a été trouvée. Le signal reste donc partiel."
+      },
+      "ai_https_ready": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "low",
+        "pages_checked": 15,
+        "constat": "L'accès HTTPS est valide pour les crawlers et moteurs IA. Certificat valide jusqu'au 2027-01-01. Protocole: TLSv1.3."
+      },
+      "ai_schema_org": {
+        "status": "not_evaluated",
+        "quality": "MISSING",
+        "confidence": "low",
+        "pages_checked": 15,
+        "constat": "Aucun JSON-LD Schema.org valide avec type @type concret n'a été détecté sur les 15 page(s) analysée(s). Les moteurs IA devront inférer seuls le contexte métier."
+      },
+      "ai_faq_schema": {
+        "status": "not_evaluated",
+        "quality": "MISSING",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Aucune page FAQ ou FAQPage exploitable n'a été détectée. Le site offre moins de réponses directement réutilisables par les moteurs génératifs."
+      },
+      "ai_raw_content_visible": {
+        "status": "not_evaluated",
+        "quality": "MISSING",
+        "confidence": "low",
+        "pages_checked": 15,
+        "constat": "Le contenu principal est visible dans le HTML initial sur 0/15 page(s), sous le seuil V1 de 70%. Une dépendance forte au JavaScript peut réduire l'extraction par certains crawlers IA. Couverture observée: 0.0%."
+      },
+      "ai_heading_questions": {
+        "status": "not_evaluated",
+        "quality": "MISSING",
+        "confidence": "low",
+        "pages_checked": 15,
+        "constat": "0 page(s) seulement contiennent des titres orientés questions-réponses, sous le seuil V1 de 20% ou 5 pages. Couverture observée: 0.0% sur 15 page(s)."
+      },
+      "ux_audience_targeting": {
+        "status": "passing",
+        "quality": "PARTIAL",
+        "confidence": "low",
+        "pages_checked": 15,
+        "constat": "Ciblage: vérification réussie sur les éléments disponibles. Aucune action requise."
+      },
+      "ux_social_sharing": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "medium",
+        "pages_checked": 15,
+        "constat": "Partage Social: vérification réussie. Aucune action requise."
+      },
+      "ux_design_ergonomics": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "medium",
+        "pages_checked": 15,
+        "constat": "Ergonomie et Design: vérification réussie. Aucune action requise."
+      },
+      "ux_navigation": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "medium",
+        "pages_checked": 15,
+        "constat": "Structure, Navigation et Parcours Client: vérification réussie. Aucune action requise."
+      },
+      "ux_mobile_friendly": {
+        "status": "not_evaluated",
+        "quality": "MISSING",
+        "confidence": "low",
+        "pages_checked": 15,
+        "constat": "Mobile Friendly: données insuffisantes pour conclure de façon fiable sur ce critère."
+      },
+      "content_freshness": {
+        "status": "not_evaluated",
+        "quality": "MISSING",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Fraîcheur du Contenu: données insuffisantes pour conclure de façon fiable sur ce critère."
+      },
+      "content_thin": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "medium",
+        "pages_checked": 15,
+        "constat": "Contenu Fin et Qualité: vérification réussie. Aucune action requise."
+      },
+      "content_key_pages": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "low",
+        "pages_checked": 15,
+        "constat": "Pages Clés: vérification réussie. Aucune action requise."
+      },
+      "content_cannibalization": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "medium",
+        "pages_checked": 15,
+        "constat": "Cannabalisation de Mots-clés: vérification réussie. Aucune action requise."
+      },
+      "content_missing_cta": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "medium",
+        "pages_checked": 15,
+        "constat": "CTA Transactionnels Manquants: vérification réussie. Aucune action requise."
+      },
+      "content_broken_structure": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "medium",
+        "pages_checked": 15,
+        "constat": "Structure Contenu Cassée: vérification réussie. Aucune action requise."
+      },
+      "content_lexical_diversity": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "low",
+        "pages_checked": 15,
+        "constat": "Diversité Lexicale: vérification réussie. Aucune action requise."
+      },
+      "eco_index_score": {
+        "status": "warning",
+        "quality": "VALID",
+        "confidence": "medium",
+        "pages_checked": 15,
+        "constat": "Score Écologique et Impact Climatique: point d'optimisation identifié. Affecte 15 page(s). Gain potentiel sur l'expérience utilisateur."
+      },
+      "rgpd_cookie_consent": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "low",
+        "pages_checked": 1,
+        "constat": "Consentement Cookies: vérification réussie. Aucune action requise."
+      },
+      "rgpd_privacy_policy": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "high",
+        "pages_checked": 1,
+        "constat": "politique de confidentialité présente. Aucune action requise."
+      },
+      "rgpd_data_retention": {
+        "status": "failing",
+        "quality": "VALID",
+        "confidence": "medium",
+        "pages_checked": 1,
+        "constat": "Durée de Conservation: non-conformité détectée. Affecte 1 page(s). Exposition à sanctions réglementaires. Correction prioritaire requise."
+      },
+      "rgpd_minimization": {
+        "status": "failing",
+        "quality": "VALID",
+        "confidence": "medium",
+        "pages_checked": 1,
+        "constat": "Minimisation des Données: non-conformité détectée. Affecte 1 page(s). Exposition à sanctions réglementaires. Correction prioritaire requise."
+      },
+      "rgpd_legal_notice": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "high",
+        "pages_checked": 1,
+        "constat": "mentions légales présentes. Aucune action requise."
+      },
+      "rgpd_user_rights": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "high",
+        "pages_checked": 1,
+        "constat": "droits RGPD Art.13/14 mentionnés. Aucune action requise."
+      },
+      "rgpd_declared_purpose": {
+        "status": "passing",
+        "quality": "VALID",
+        "confidence": "high",
+        "pages_checked": 1,
+        "constat": "Finalité du Traitement: vérification réussie. Aucune action requise."
+      },
+      "rgpd_rights_coverage": {
+        "status": "not_evaluated",
+        "quality": "MISSING",
+        "confidence": "low",
+        "pages_checked": 15,
+        "constat": "Couverture des Droits RGPD: données insuffisantes pour conclure de façon fiable sur ce critère."
+      },
+      "rgpd_pre_consent_trackers": {
+        "status": "not_evaluated",
+        "quality": "MISSING",
+        "confidence": "low",
+        "pages_checked": 15,
+        "constat": "Trackers Avant Consentement: données insuffisantes pour conclure de façon fiable sur ce critère."
+      },
+      "rgpd_privacy_score": {
+        "status": "not_evaluated",
+        "quality": "MISSING",
+        "confidence": "low",
+        "pages_checked": 15,
+        "constat": "Score Politique de Confidentialité: données insuffisantes pour conclure de façon fiable sur ce critère."
+      }
+    }
+  }
+}

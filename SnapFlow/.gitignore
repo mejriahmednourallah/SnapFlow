@@ -72,3 +72,11 @@ supabase/.temp/
 # And keep sales demo config
 !docker-compose.sales-demo.yml
 .gocache
+
+# Browser sessions, generated study data and local credentials stay private.
+/.playwright-cli/
+/output/
+**/.local-login.json
+*.private.*
+*.dpapi
+*.fernet
