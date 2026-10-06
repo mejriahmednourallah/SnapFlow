@@ -114,6 +114,15 @@ never aim it at VPS Docker. That environment was removed after proof.
 
 ## Remaining VPS acceptance
 
+Oct 6 preparation update: explicit VPS configuration and the scoped Apache
+repair now pass local tests; see [VPS_RUNBOOK.md](../../../deploy/production/VPS_RUNBOOK.md).
+Three configuration checks (including Compose validation), three Linux scoped
+edit/rollback checks, four fake-Docker cleanup checks and four real Apache
+mode/vhost cases pass. The latter also verify WebSocket upgrade, HTTPS scheme,
+protected terminal Digest authentication and ACME/terminal redirect exemptions.
+SMTP was deliberately deferred by the user. These are local preparation results;
+real VPS challenge validation, renewal, cleanup and startup remain pending.
+
 - Refresh exact ownership/protected Wetty/vhost configuration before scoped
   cleanup; ensure compatible client Buildx for sequential VPS builds.
 - Repair both Apache ACME routes/expired shared certificate; preserve both

@@ -1,9 +1,20 @@
 # Production Supabase rehearsal and VPS rebuild
 
-Updated 2026-10-05. Local production-style restore/deployment now tested; see
+Updated 2026-10-06. Local production-style restore/deployment now tested; see
 [PRODUCTION_REHEARSAL_RESULTS.md](PRODUCTION_REHEARSAL_RESULTS.md). Public Apache
 TLS repair, VPS cleanup and VPS rebuild have not run. The earlier CLI-managed
 local stack remains functional evidence for a different deployment workflow.
+
+The Oct 6 Apache snapshot is reviewed in
+[APACHE_VPS_REVIEW.md](APACHE_VPS_REVIEW.md). It confirms the protected Wetty
+Digest-auth route, the Location proxy ordering defect, occupied host port 18080,
+the expired shared certificate and the still-running legacy stacks. A VPS
+configuration profile and scoped Apache repair are now implemented and locally
+validated; see [VPS_RUNBOOK.md](../../../deploy/production/VPS_RUNBOOK.md).
+The VPS profile requires an HTTPS origin, omits rehearsal Apache/Mailpit and
+does not publish the aggregator. SMTP is deferred at the user's request.
+Certificate repair/cleanup commands are ready for the user to run through Wetty;
+their actual VPS results remain pending.
 
 ## Agreed decisions
 
@@ -191,9 +202,10 @@ Source/env files, Apache, certificates, host services and unknown containers are
 untouched. Old target images are removed without force only when no retained
 container uses them; only exact unused project networks are removed. Cache and
 dangling-image cleanup follow. Bash syntax and four fake-Docker scope/abort
-tests pass locally; no VPS cleanup result has been received yet. Upload the
-standalone script, run it from the existing SSH session and retain its before/
-after output. The old application will be down pending the new deployment.
+tests pass locally; no VPS cleanup result has been received yet. Extract the
+standalone script from the fetched Git release and run it from Wetty, retaining
+its before/after output. The old application will be down pending the new
+deployment.
 
 Release distribution: commit/push the implementation to `origin/main` first.
 On the VPS, fetch and extract `SnapFlow/deploy/production/clean-vps.sh` from the

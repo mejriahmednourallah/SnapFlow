@@ -1,7 +1,8 @@
-"""Isolated production-Compose rehearsal. Private runtime files stay outside Git.
+"""Pinned production-Compose configuration, restore and local rehearsal.
 
 Requires Python with PyYAML and cryptography, Docker and Compose. This does not
-connect to or modify Cloud or the VPS. Export key is accepted through stdin only.
+modify Cloud. VPS configuration uses a separate private runtime and host Apache.
+Export key is accepted through stdin only; SMTP can be explicitly deferred.
 """
 import argparse
 import base64
@@ -19,6 +20,7 @@ import sys
 import tarfile
 import time
 import urllib.request
+from urllib.parse import urlsplit
 
 import yaml
 
@@ -98,9 +100,27 @@ def token(role, secret):
     return (message + b'.' + base64.urlsafe_b64encode(hmac.new(secret.encode(), message, hashlib.sha256).digest()).rstrip(b'=')).decode()
 
 
-def configure(runtime):
+def configure(runtime, profile='rehearsal', public_origin=None, skip_smtp=False):
     upstream = runtime / 'upstream'
     private = runtime / 'runtime.env'
+    descriptor = runtime/'deployment.json'
+    previous = json.loads(descriptor.read_text()) if descriptor.exists() else {'profile':'rehearsal'}
+    if private.exists() and previous['profile'] != profile:
+        raise ValueError('Use a separate private runtime for VPS; do not convert a running rehearsal')
+    public = public_origin or 'http://127.0.0.1:18080'
+    if profile == 'vps':
+        if public_origin is None or not skip_smtp:
+            raise ValueError('VPS requires --public-origin and explicit --skip-smtp until real SMTP is configured')
+        parsed = urlsplit(public)
+        if (parsed.scheme != 'https' or not parsed.hostname or parsed.username or parsed.password
+                or parsed.port not in (None,443) or parsed.path not in ('','/') or parsed.query or parsed.fragment
+                or parsed.hostname in ('localhost','127.0.0.1')):
+            raise ValueError('VPS public origin must be an HTTPS hostname without a path or credentials')
+        public = public.rstrip('/')
+    project = 'snapflow-production' if profile == 'vps' else 'snapflow-rehearsal'
+    network = project+'-bridge'
+    if os.name == 'posix':
+        os.chmod(runtime, 0o700)
     reused = private.exists()
     if reused:
         values = env_file(private)
@@ -116,20 +136,26 @@ def configure(runtime):
         values['SERVICE_ROLE_KEY'] = token('service_role', values['JWT_SECRET'])
         values['DB_PASS'] = secrets.token_hex(24)
         values['REDMINE_LOGIN_RATE_LIMIT_SALT'] = secrets.token_hex(32)
-    public = 'http://127.0.0.1:18080'
     values.update(SUPABASE_PUBLIC_URL=public, API_EXTERNAL_URL=public+'/auth/v1', SITE_URL=public,
-                  ADDITIONAL_REDIRECT_URLS=public+'/**', POSTGRES_HOST='supabase-db', POOLER_TENANT_ID='snapflow-rehearsal',
-                  SMTP_HOST='mail', SMTP_PORT='1025', SMTP_USER='', SMTP_PASS='',
-                  SMTP_ADMIN_EMAIL='rehearsal@snapflow.local', SMTP_SENDER_NAME='SnapFlow Rehearsal',
+                  ADDITIONAL_REDIRECT_URLS=public+'/**', POSTGRES_HOST='supabase-db', POOLER_TENANT_ID=project,
                   ENABLE_PHONE_SIGNUP='false', ENABLE_PHONE_AUTOCONFIRM='false', OPENAI_API_KEY='',
                   VITE_SUPABASE_URL=public, VITE_SUPABASE_PUBLISHABLE_KEY=values['ANON_KEY'],
                   FORM_EXECUTOR_DATABASE_URL=f"postgresql://postgres:{values['POSTGRES_PASSWORD']}@supabase-db:5432/postgres",
                   FORM_EXECUTOR_SUPABASE_URL='http://supabase-gateway:8000',
                   SUPABASE_SERVICE_ROLE_KEY=values['SERVICE_ROLE_KEY'])
+    if profile == 'vps':
+        # User deliberately deferred SMTP. Do not silently auto-confirm accounts.
+        values.update(SMTP_HOST='', SMTP_PORT='587', SMTP_USER='', SMTP_PASS='',
+                      SMTP_ADMIN_EMAIL='', SMTP_SENDER_NAME='SnapFlow', ENABLE_EMAIL_AUTOCONFIRM='false')
+    else:
+        values.update(SMTP_HOST='mail', SMTP_PORT='1025', SMTP_USER='', SMTP_PASS='',
+                      SMTP_ADMIN_EMAIL='rehearsal@snapflow.local', SMTP_SENDER_NAME='SnapFlow Rehearsal')
     verified = next((runtime/'import').rglob('verified-external-secrets.private.json'), None)
     if verified:
         values.update(json.loads(verified.read_text()))
     private.write_text('\n'.join(f'{key}={value}' for key,value in values.items())+'\n', encoding='utf-8')
+    if os.name == 'posix':
+        os.chmod(private, 0o600)
     sb = yaml.safe_load((upstream / 'docker-compose.yml').read_text(encoding='utf-8'))
     sb.pop('name', None)
     sb['services']['auth']['image'] = AUTH_IMAGE
@@ -174,10 +200,11 @@ def configure(runtime):
         dependencies = service.get('depends_on', {})
         if 'db' in dependencies:
             dependencies['supabase-db'] = dependencies.pop('db')
-    sb['services']['mail'] = dict(image='axllent/mailpit:v1.30.2', restart='unless-stopped',
-                                  ports=['127.0.0.1:18025:8025'], labels={'snapflow.rehearsal':'production'})
+    if profile == 'rehearsal':
+        sb['services']['mail'] = dict(image='axllent/mailpit:v1.30.2', restart='unless-stopped',
+                                      ports=['127.0.0.1:18025:8025'], labels={'snapflow.rehearsal':'production'})
     sb.setdefault('volumes', {}).update({'supabase-data':{}, 'storage-data':{}})
-    sb['networks'] = {'default': {}, 'bridge': {'external':True, 'name':'snapflow-rehearsal-bridge'}}
+    sb['networks'] = {'default': {}, 'bridge': {'external':True, 'name':network}}
     functions = upstream / 'volumes/functions'
     exported = runtime/'import/supabase/functions'
     if exported.exists():
@@ -223,27 +250,32 @@ def configure(runtime):
         service.pop('ports',None)
     snap['services']['frontend']['ports'] = ['127.0.0.1:13000:3000']
     snap['services']['frontend']['networks'] = ['default', 'bridge']
-    snap['services']['aggregator']['ports'] = ['127.0.0.1:18081:8080']
+    if profile == 'rehearsal':
+        snap['services']['aggregator']['ports'] = ['127.0.0.1:18081:8080']
     for name in ('aggregator', 'v3-form-executor'):
         snap['services'][name]['networks'] = ['default','bridge']
-    acme = runtime/'acme'
-    acme.mkdir(exist_ok=True)
-    (acme/'owned-probe').write_text('SNAPFLOW_ACME_REHEARSAL\n',encoding='ascii')
-    snap['services']['apache'] = dict(image='httpd:2.4.65-bookworm',
-        ports=['127.0.0.1:18080:80'], networks=['bridge'],
-        volumes=[(ROOT/'deploy/production/apache-rehearsal.conf').as_posix()+':/usr/local/apache2/conf/httpd.conf:ro',acme.as_posix()+':/acme:ro'],
-        labels={'snapflow.rehearsal':'production'}, restart='unless-stopped')
+    if profile == 'rehearsal':
+        acme = runtime/'acme'
+        acme.mkdir(exist_ok=True)
+        (acme/'owned-probe').write_text('SNAPFLOW_ACME_REHEARSAL\n',encoding='ascii')
+        snap['services']['apache'] = dict(image='httpd:2.4.65-bookworm',
+            ports=['127.0.0.1:18080:80'], networks=['bridge'],
+            volumes=[(ROOT/'deploy/production/apache-rehearsal.conf').as_posix()+':/usr/local/apache2/conf/httpd.conf:ro',acme.as_posix()+':/acme:ro'],
+            labels={'snapflow.rehearsal':'production'}, restart='unless-stopped')
     snap['services']['fixture'] = dict(image='snapflow/v3-python-fastapi-base:latest',
         command=['python','/fixture.py'], networks={'default':{'aliases':['preprod-fixture']}},
         volumes=[(ROOT/'V3-Microservices/benchmarks/preprod_fixture.py').as_posix()+':/fixture.py:ro'],
         profiles=['fixture'], labels={'snapflow.rehearsal':'production'})
-    snap['networks'] = {'default':{},'bridge':{'external':True,'name':'snapflow-rehearsal-bridge'}}
+    snap['networks'] = {'default':{},'bridge':{'external':True,'name':network}}
     (runtime/'snapflow.compose.yml').write_text(yaml.safe_dump(snap, sort_keys=False), encoding='utf-8')
-    print(json.dumps(dict(configured=True, public_origin=public, credentials_reused=reused, secrets_printed=False)))
+    dump(descriptor, {'profile':profile,'project':project,'network':network,'public_origin':public,'smtp_deferred':profile=='vps'})
+    print(json.dumps(dict(configured=True, profile=profile, public_origin=public, credentials_reused=reused, secrets_printed=False)))
 
 
 def compose(runtime, stack, args, **kwargs):
-    return subprocess.run(['docker','compose','-p',f'snapflow-rehearsal-{stack}', '--env-file',str(runtime/'runtime.env'), '-f',str(runtime/f'{stack}.compose.yml'),*args],check=True,**kwargs)
+    descriptor = runtime/'deployment.json'
+    project = json.loads(descriptor.read_text())['project'] if descriptor.exists() else 'snapflow-rehearsal'
+    return subprocess.run(['docker','compose','-p',f'{project}-{stack}', '--env-file',str(runtime/'runtime.env'), '-f',str(runtime/f'{stack}.compose.yml'),*args],check=True,**kwargs)
 
 
 def restore(runtime):
@@ -300,13 +332,16 @@ def main():
     parser.add_argument('--runtime',type=Path,required=True)
     parser.add_argument('--export',type=Path)
     parser.add_argument('--stack',choices=['supabase','snapflow'])
+    parser.add_argument('--profile',choices=['rehearsal','vps'],default='rehearsal')
+    parser.add_argument('--public-origin')
+    parser.add_argument('--skip-smtp',action='store_true')
     options,args=parser.parse_known_args()
     runtime=options.runtime.resolve()
     assert not runtime.is_relative_to(ROOT), 'Private runtime must remain outside checkout'
     runtime.mkdir(parents=True,exist_ok=True)
     if options.action=='fetch': fetch(runtime)
     elif options.action=='decrypt': decrypt(runtime,options.export)
-    elif options.action=='configure': configure(runtime)
+    elif options.action=='configure': configure(runtime, options.profile, options.public_origin, options.skip_smtp)
     elif options.action=='restore': restore(runtime)
     elif options.action=='prepare': prepare(runtime)
     else: compose(runtime,options.stack,args[1:] if args and args[0]=='--' else args)
