@@ -6,6 +6,14 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
+# Production self-hosted Supabase uses its own private runtime and Compose files.
+# Dispatch before the legacy parser so no old env, port or reset path is used.
+for arg in "$@"; do
+  if [ "$arg" = --vps ]; then
+    exec python3 "$SCRIPT_DIR/../deploy/production/vps.py" "$@"
+  fi
+done
+
 LOCAL=false
 ENV_FILE=".env.preprod"
 COMPOSE_PROJECT=""
@@ -24,6 +32,7 @@ usage() {
 Usage: ./run-all.sh [--local] [--no-cache] [--rebuild-base] [--force-recreate] [--down] [--no-obscura]
 
 Options:
+  --vps                    Use the production VPS launcher; see --vps --help.
   --local                  Use .env.local and the snapflow-local-preprod compose project.
   --no-cache, --no-cache-build
                            Rebuild service images without Docker cache. Does not rebuild base images.

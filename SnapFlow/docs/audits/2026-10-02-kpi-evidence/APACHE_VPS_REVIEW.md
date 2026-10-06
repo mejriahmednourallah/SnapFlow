@@ -9,6 +9,14 @@ now implemented and tested locally. See the commands and exact validation scope
 in [VPS_RUNBOOK.md](../../../deploy/production/VPS_RUNBOOK.md). SMTP is explicitly
 deferred at the user's request. The first live VPS result is recorded below.
 
+VPS launcher update (Oct 6): `run-all.sh --vps` now selects the private production
+configuration with explicit build, Supabase bootstrap, import, SnapFlow start
+and status phases. It does not activate Apache or touch Wetty's configuration.
+See the runbook's launcher commands and validation boundary. The user's latest
+output confirms release `386f0a2` was pulled, Wetty running with zero restarts,
+and only 7.7 GB available before further cache cleanup. Legacy containers/data
+remain; the real replacement build and startup have not yet been established.
+
 Live repair update (Oct 6): the user ran release `265598c`. Both vhosts passed
 syntax/reload with protected files unchanged; the frontend hostname passed exact
 challenge-byte and missing-file checks. The API hostname returned HTTP 403.

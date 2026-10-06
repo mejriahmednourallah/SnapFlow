@@ -5,6 +5,78 @@ The user explicitly deferred SMTP. Password login for imported users remains
 the target; delivery/confirmation/reset-email acceptance is pending. No automatic
 email confirmation is enabled to conceal the missing SMTP service.
 
+## Repeatable VPS launcher
+
+`V3-Microservices/run-all.sh --vps` now delegates to `deploy/production/vps.py`
+before any legacy preprod environment or Compose path is selected. `--local`
+and the existing preprod path keep their existing behavior. The VPS path rejects
+legacy options such as `--down`, `--local` and `--obscura` rather than guessing.
+It uses an isolated Python environment under the private runtime, requiring
+`python3-venv` on Debian. It installs PyYAML/cryptography there if missing; it
+does not run sudo, reset a database, prune volumes or change Apache.
+
+From the SnapFlow checkout in Wetty:
+
+```bash
+# One-time prerequisite if venv is not installed:
+sudo apt-get install -y python3-venv
+
+# First command: configuration + sequential image builds/downloads only.
+bash V3-Microservices/run-all.sh --vps --action build --skip-smtp
+
+# After build succeeds: start production Supabase and wait for bootstrap.
+bash V3-Microservices/run-all.sh --vps --action supabase
+
+# First import: paste the export key into the hidden prompt (never into chat).
+bash V3-Microservices/run-all.sh --vps --action import
+
+# After verified restore: prepare schemas, migrate evidence, start SnapFlow.
+bash V3-Microservices/run-all.sh --vps --action start
+bash V3-Microservices/run-all.sh --vps --action status
+```
+
+Build is the default action. SMTP deferral requires `--skip-smtp` for build.
+The default private directory is `$HOME/.local/share/snapflow-vps`; override with
+`--runtime /absolute/private/path`. The default origin is
+`https://snapflow.medianet.space`; override build with `--public-origin`.
+Never run the old local Supabase CLI reset/seed script on this destination.
+
+The first VPS build rebuilds all four separated Python bases because an old
+`latest` tag alone does not prove compatible inputs. Subsequent builds reuse
+bases only when the private build-input manifest and current image IDs match.
+`--rebuild-base` forces rebuilding; `--no-cache` bypasses service build cache
+and also applies to a base rebuild when one is required. Service builds are
+sequential. Supabase and the audit PostgreSQL images are downloaded as part of
+build. Obscura remains disabled until its separate acceptance.
+
+Long command output streams to Wetty and a private per-phase log. Build cache
+and unused dangling images are cleaned before and after build, including after
+failure. Tagged candidates/rollback images, every container and every data
+volume are retained by that cleanup. A failed command prevents later phases.
+Keep Wetty open while running this foreground command.
+
+The production bridge is created with `snapflow.deployment=snapflow-production`;
+an existing bridge without that label is refused. Wetty identity, uptime,
+restart count, mounts and networks are compared before/after phases. Mount
+order is normalized without omitting any values. This does not establish the
+cause of the earlier legacy cleanup fingerprint failure or bypass its guard.
+
+Import refuses replay of an existing verified marker, requires empty destination
+Auth and stopped SnapFlow workers, accepts the key only through a hidden terminal
+prompt/stdin, reuses destination signing keys and installs exported integrations.
+It then runs the existing validated restore/preparation actions. Startup requires
+a valid restore marker and refuses active audits before service recreation. It
+prepares Supabase and runs the evidence migration transaction before workers.
+Apache activation and real public application/scan tests remain separate.
+
+Validation: thirteen orchestration tests pass, including build failure/cache
+cleanup, production routing, guarded import/start order, active-audit refusal,
+key transport and Wetty state comparison. Linux Bash dispatch, legacy help and
+the existing three legacy launcher-flow cases also pass using an existing
+isolated base image. Disposable containers are removed and build cache is 0 B.
+These tests mock Docker
+operations; they are not a completed VPS build/import or capacity acceptance.
+
 ## Release validation
 
 - VPS and rehearsal profiles: three checks pass, including credential reuse,
