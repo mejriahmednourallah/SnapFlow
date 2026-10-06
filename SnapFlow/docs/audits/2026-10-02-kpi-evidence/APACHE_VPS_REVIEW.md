@@ -85,6 +85,26 @@ rollback. The old failed VPS attempt did not retain its differing field, so
 the exact historical cause remains unconfirmed. The read-only `check-wetty`
 action supplies safe diagnostics before repeating activation.
 
+## Successful live stack activation (Oct 6, release `8917257`)
+
+User attachment `13ee4d83` confirms the read-only Wetty check reported no
+runtime/file changes, Apache stack activation passed with protected files
+unchanged, both hostnames passed exact challenge/missing-file probes, and
+frontend HTTPS returned 200. All twenty replacement containers and Wetty
+were running; the NLP worker's final status has no Compose health check.
+
+Host memory was 7.6 GiB total, 3.9 GiB used and **3.7 GiB available**; disk
+had **23 GB available**, 68% utilization, and no swap. Docker samples total
+about 1,473 MiB for SnapFlow, 1,191 MiB for Supabase and 92 MiB for Wetty.
+These are idle observations, not warm-model or scan peak measurements.
+
+Independent public Windows checks returned `TLS_VERIFY=0` on all five routes:
+frontend 200, unauthenticated Auth health/REST/private audit function 401, and
+seed-users 403. No API key, password or bearer token was sent. Public login,
+authenticated data access/RLS, Realtime, completed audits and persisted report
+reloads remain to be tested. Capacity/default/engine/model promotions remain
+pending repeated scan-load and independently judged KPI evidence.
+
 ## Earlier Apache discovery snapshot
 
 - Apache **2.4.68**, configuration **Syntax OK**; proxy, HTTP proxy, WebSocket,
@@ -175,6 +195,7 @@ allowlist. Apache's TLS vhost must forward the HTTPS scheme. See
 The ACME routing patch, both challenge checks and certificate renewal have
 passed on the VPS. New-stack bootstrap, import and service startup have now
 passed; legacy resource removal remains incomplete after its guard stopped
-cleanup. Final Apache stack activation and application acceptance remain pending.
+cleanup. Final Apache stack activation has passed; authenticated application
+acceptance and scan capacity remain pending.
 The old public `/api/` mapping is not proof of a working new Supabase-to-
 microservices connection.

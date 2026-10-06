@@ -84,9 +84,13 @@ checks. The first Cloud import passed with twelve users and thirty-one public
 tables; destination credentials were reused, all three application migrations
 were prepared and imported schedules were disabled. The subsequent SnapFlow
 start phase reported all nine services healthy and `Services ready`.
-Final Apache route activation, public login/RLS/Realtime/audit acceptance and
-resource measurements with the full stack running remain pending. Container
-health alone does not establish application correctness or scan capacity.
+Final Apache route activation subsequently passed on release `8917257`.
+Wetty's read-only check reported no file/runtime changes, both ACME probes
+passed, and public frontend HTTPS returned 200. All twenty replacement
+containers and Wetty were running. The final status lists the NLP worker as
+running without a Compose health check; an actual scan must verify enrichment.
+Public login/RLS/Realtime/audit acceptance and peak-load capacity remain pending.
+Container startup and public HTTP responses alone do not establish them.
 
 ## Failed first bootstrap: Linux file permissions
 
@@ -339,6 +343,35 @@ names, protected filenames and a serialization-only count. It refuses actual
 changes. No route, credential, mount path, address or snapshot value is printed.
 Pull the fix, run this check, then retry stack activation; do not bypass the guard.
 
-Then validate public login/RLS/Realtime, Edge-to-aggregator audits, Form Executor
+## Live routing and idle resource baseline (Oct 6)
+
+User attachment `13ee4d83` confirms stack activation, protected files unchanged,
+exact challenge bytes/missing 404 for both names and frontend HTTPS 200.
+The five-observation Wetty check reported no changes; no serialization-only
+difference was observed in that particular sample. The original failed
+activation's cause remains unconfirmed despite the corrected guard's local
+reproduction. No container rebuild was needed.
+
+| Full stack idle observation | Value |
+|---|---|
+| Host RAM total / available | 7.6 GiB / 3.7 GiB |
+| Host RAM used / cache | 3.9 GiB / 3.7 GiB |
+| Root filesystem available / utilization | 23 GB / 68% |
+| SnapFlow containers combined (sampled Docker statistics) | About 1,473 MiB |
+| Supabase containers combined | About 1,191 MiB |
+| Wetty | About 92 MiB |
+| Swap | None |
+
+These are idle/startup observations, including an NLP worker at about 87 MiB.
+They do not measure loaded-model or scan peaks. Keep both databases and all
+required services running during acceptance; available host memory must stay
+at least 1 GiB during repeated peak-load tests before promoting capacity.
+
+Independent public checks from the Windows PC returned strict TLS verification
+success (`TLS_VERIFY=0`): frontend 200, Auth health/REST/private audit function
+401 without credentials, and the prohibited seed function 403. These verify
+public response/routing behavior, not authenticated Auth, RLS or scan completion.
+
+Next validate public login/RLS/Realtime, Edge-to-aggregator audits, Form Executor
 and report reloads. The loopback socket precheck is not an application health
 test. No 500-page, model or engine promotion follows from routing tests alone.
