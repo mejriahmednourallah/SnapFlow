@@ -1,0 +1,13 @@
+{
+  "project_ref": "wagctsvpmnleqzqjhqjq",
+  "auth_users": 12,
+  "public_tables": 31,
+  "cloud_functions": 27,
+  "storage_files_exported": false,
+  "encrypted_bundle": "migration-bundle.tar.gz.fernet",
+  "encrypted_bytes": 4490764,
+  "bundle_sha256": "3ccdd931289a33eb4dd0d9eb351ffec20e20a0ee08a449abc13159f340599edb",
+  "encryption": "Fernet",
+  "export_date": "2026-10-05",
+  "key_in_git": false
+}

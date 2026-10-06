@@ -146,9 +146,21 @@ ownership checks finish before any container is stopped.
 
 ## 3. New private VPS configuration (after pull)
 
+The October 6 cleanup stopped all thirteen approved legacy containers, then
+aborted at the Wetty runtime fingerprint check before removal. No reclaimed
+space or checkout pull has been established. The subsequent user diagnostics
+show Wetty running since July 8 with zero restarts, no OOM and its expected
+network; the differing fingerprint field remains unidentified. Do not bypass
+the cleanup guard. Check free disk space before building the separate projects.
+
+The verified Cloud export is now carried in Git as an encrypted bundle under
+`deploy/production/exports/20261005-cloud`. Follow that directory's README to
+transfer only its decryption key privately and stage the import through Wetty.
+Neither raw SQL nor keys belong in this checkout.
+
 Use a separate private runtime, for example `$HOME/.local/share/snapflow-vps`.
 The Python environment needs PyYAML and cryptography. Fetch the pinned upstream
-configuration, transfer/decrypt the verified export privately, then configure:
+configuration, decrypt the verified export into the private runtime, then configure:
 
 ```bash
 python3 deploy/production/rehearse.py fetch --runtime "$HOME/.local/share/snapflow-vps"

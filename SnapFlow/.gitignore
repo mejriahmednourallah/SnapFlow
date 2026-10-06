@@ -80,3 +80,5 @@ supabase/.temp/
 *.private.*
 *.dpapi
 *.fernet
+# Deliberately published encrypted migration; its key remains outside Git.
+!/deploy/production/exports/20261005-cloud/migration-bundle.tar.gz.fernet

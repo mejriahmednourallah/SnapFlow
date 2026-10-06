@@ -1,2 +1,3 @@
 # Keep deployment scripts executable by Bash after Windows checkouts/transfers.
 *.sh text eol=lf
+*.fernet binary
