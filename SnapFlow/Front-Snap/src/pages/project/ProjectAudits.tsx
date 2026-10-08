@@ -1,4 +1,8 @@
 import { useEffect, useState } from 'react';
+import { useQueries, useQuery } from '@tanstack/react-query';
+import { auditReportKey, useAuditSummaries } from '@/hooks/useAuditSummaries';
+import { fetchAuditReport, type AuditListRow } from '@/services/auditListService';
+import { queryClient } from '@/lib/queryClient';
 import { useNavigate, useOutletContext } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
@@ -19,28 +23,20 @@ import { format } from 'date-fns';
 import { fr } from 'date-fns/locale';
 import type { ProjectContext } from './ProjectShell';
 
-interface AuditRow {
-  id: string;
-  project_id: string;
-  job_id?: string | null;
-  status: string;
-  created_at: string;
-  updated_at: string;
-  archived_at: string | null;
-  report_data: any;
-  error_message: string | null;
-}
+type AuditRow = AuditListRow;
+type ComparisonAudit = AuditRow & { report_data: unknown };
 
 // ══════════════════════════════════════════════════════════════════════════════
 
 const ProjectAudits = () => {
   const { projectId, project } = useOutletContext<ProjectContext>();
   const navigate = useNavigate();
-  const { user, isAdmin } = useAuth();
+  const { user, isAdmin, userRole } = useAuth();
   const { toast } = useToast();
 
-  const [audits, setAudits] = useState<AuditRow[]>([]);
-  const [loadingData, setLoadingData] = useState(true);
+  const summaries = useAuditSummaries({ projectId });
+  const audits = summaries.data;
+  const loadingData = summaries.isPending;
   const [dateStartFilter, setDateStartFilter] = useState('');
   const [dateEndFilter, setDateEndFilter] = useState('');
   const [scoreMinFilter, setScoreMinFilter] = useState('');
@@ -50,21 +46,31 @@ const ProjectAudits = () => {
   const [staleAuditWarning, setStaleAuditWarning] = useState<AuditRow | null>(null);
   const [redmineHomepage, setRedmineHomepage] = useState<string | null>(null);
   const [loadingRedmineHomepage, setLoadingRedmineHomepage] = useState(false);
-  const [canLaunchAudit, setCanLaunchAudit] = useState(true);
+  const permission = useQuery({
+    queryKey: ['assignment', user?.id, userRole, projectId, 'launch'],
+    enabled: !!user && !isAdmin,
+    queryFn: async ({ signal }) => {
+      const { data, error } = await supabase.from('project_assignments').select('access_level')
+        .eq('project_id', projectId).eq('user_id', user!.id).abortSignal(signal).maybeSingle();
+      if (error) throw error;
+      return data?.access_level === 'full';
+    },
+  });
+  const canLaunchAudit = isAdmin || permission.data === true;
 
   const redmineIdentifier = useRedmineIdentifier(project?.redmine_url || project?.url);
 
   // Fetch Redmine homepage for audit target resolution
   useEffect(() => {
     setRedmineHomepage(null);
-    if (!redmineIdentifier) {
+    if (!redmineIdentifier || !isRedmineProjectUrl(project?.url)) {
       setLoadingRedmineHomepage(false);
       return;
     }
 
     let cancelled = false;
     setLoadingRedmineHomepage(true);
-    fetchProjectDetail(redmineIdentifier)
+    fetchProjectDetail(redmineIdentifier, user?.id)
       .then(async detail => {
         if (cancelled) return;
         const homepage = detail?.homepage?.trim() ?? null;
@@ -76,12 +82,13 @@ const ProjectAudits = () => {
             .eq('id', projectId);
         }
       })
+      .catch(() => { if (!cancelled) setRedmineHomepage(null); })
       .finally(() => {
         if (!cancelled) setLoadingRedmineHomepage(false);
       });
 
     return () => { cancelled = true; };
-  }, [redmineIdentifier, projectId, project?.url]);
+  }, [redmineIdentifier, projectId, project?.url, user?.id]);
 
   // ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -101,24 +108,9 @@ const ProjectAudits = () => {
   // ── Data fetching ────────────────────────────────────────────────────────
 
   const fetchData = async () => {
-    if (!projectId) return;
-    const [{ data }, { data: assignment }] = await Promise.all([
-      supabase.from('audits').select('*').eq('project_id', projectId).order('created_at', { ascending: false }),
-      isAdmin
-        ? Promise.resolve({ data: null } as any)
-        : supabase
-            .from('project_assignments')
-            .select('access_level')
-            .eq('project_id', projectId)
-            .eq('user_id', user?.id || '')
-            .maybeSingle(),
-    ]);
-    setAudits((data as AuditRow[]) || []);
-    setCanLaunchAudit(isAdmin || (assignment as any)?.access_level === 'full');
-    setLoadingData(false);
+    await Promise.all(['audit-list', 'audit-report', 'project-list', 'assignment'].map(key =>
+      queryClient.invalidateQueries({ queryKey: [key, user?.id] })));
   };
-
-  useEffect(() => { if (user) fetchData(); }, [user, projectId, isAdmin]);
 
   // Stale audit check
   useEffect(() => { setStaleAuditWarning(getStaleAudit()); }, [audits]);
@@ -236,11 +228,7 @@ const ProjectAudits = () => {
 
   // ── Derived ──────────────────────────────────────────────────────────────
 
-  const getAuditScore = (audit: AuditRow): number | null =>
-    getAuditScoreFromAny(audit.report_data, audit.id, {
-      url: project?.url ?? '',
-      site_name: project?.site_name ?? 'Site',
-    });
+  const getAuditScore = (audit: AuditRow) => audit.score;
 
   const hasReportFilters = Boolean(dateStartFilter || dateEndFilter || scoreMinFilter || scoreMaxFilter);
   const resetReportFilters = () => {
@@ -267,14 +255,24 @@ const ProjectAudits = () => {
   });
   const archivedAudits = filteredAudits.filter(a => a.archived_at);
   const activeAudits = filteredAudits.filter(a => !a.archived_at && a.status === 'completed');
-  const comparisonAudits = audits.filter(a => selectedForCompare.includes(a.id) && a.report_data)
-    .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+  const selectedRows = activeTab === 'compare' && user
+    ? audits.filter(a => selectedForCompare.includes(a.id) && a.has_report)
+      .sort((a, b) => a.created_at.localeCompare(b.created_at)) : [];
+  const comparison = useQueries({ queries: selectedRows.map(row => ({
+    queryKey: auditReportKey(user!.id, row),
+    queryFn: ({ signal }: { signal: AbortSignal }) => fetchAuditReport(row, signal),
+  })) });
+  const comparisonAudits: ComparisonAudit[] = selectedRows.flatMap((row, index) =>
+    comparison[index].data !== undefined ? [{ ...row, report_data: comparison[index].data }] : []);
+  const comparisonError = comparison.find(result => result.error)?.error;
 
   if (!project) return null;
 
   // ═══════════════════════════════════════════════════════════════════════
   return (
     <div>
+      {summaries.scoreError && <Button variant="outline" onClick={fetchData}>Certains scores sont indisponibles. Réessayer</Button>}
+      {permission.error && <Button variant="outline" onClick={() => permission.refetch()}>Impossible de vérifier vos droits. Réessayer</Button>}
       {/* ── Stale audit warning ─────────────────────────────────── */}
       {staleAuditWarning && (
         <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 flex items-start justify-between gap-3 mb-6">
@@ -395,7 +393,9 @@ const ProjectAudits = () => {
               Comparaison de {comparisonAudits.length} rapport{comparisonAudits.length > 1 ? 's' : ''}
             </span>
           </div>
-          <ComparisonView audits={comparisonAudits} project={project} />
+          {comparisonError ? <Button onClick={fetchData}>Impossible de charger la comparaison. Actualiser</Button>
+            : comparison.some(result => result.isPending) ? <p>Chargement des rapports sélectionnés…</p>
+            : <ComparisonView audits={comparisonAudits} project={project} />}
         </div>
       ) : (
         <div className="space-y-6">
@@ -403,7 +403,7 @@ const ProjectAudits = () => {
             <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-3">
               Rapports actifs ({activeAudits.length})
             </h3>
-            {loadingData ? (
+            {summaries.error ? <Button onClick={fetchData}>Impossible de charger les rapports. Réessayer</Button> : loadingData ? (
               <div className="glass-card p-8 text-center text-muted-foreground">Chargement…</div>
             ) : activeAudits.length === 0 ? (
               <div className="glass-card p-8 text-center text-muted-foreground">
@@ -472,16 +472,7 @@ interface AuditCardProps {
 }
 
 const AuditCard = ({ audit, project, onView, onArchive, onDelete, isArchived, isSelectedForCompare, onToggleCompare }: AuditCardProps) => {
-  const computedScore = getAuditScoreFromAny(audit.report_data, audit.id, {
-    url: project?.url ?? '',
-    site_name: project?.site_name ?? 'Site',
-  });
-  const score = computedScore;
-  const normalized = normalizeAuditForRead(audit.report_data, audit.id, {
-    url: project?.url ?? '',
-    site_name: project?.site_name ?? 'Site',
-  });
-  const axes = normalized?.axes ?? [];
+  const score = audit.score;
 
   return (
     <div className="glass-card p-4 flex items-center gap-4">
@@ -512,9 +503,10 @@ const AuditCard = ({ audit, project, onView, onArchive, onDelete, isArchived, is
             <span className={`text-sm font-bold ${score >= 70 ? 'text-emerald-400' : score >= 50 ? 'text-yellow-400' : 'text-red-400'}`}>
               {score}/100
             </span>
-            <span className="text-xs text-muted-foreground ml-2">{axes.length} axes</span>
+            <span className="text-xs text-muted-foreground ml-2">{audit.axis_count ?? 0} axes</span>
           </div>
         )}
+        {audit.requires_report && <p className="text-xs text-muted-foreground">Chargement du score…</p>}
       </div>
       <div className="flex items-center gap-2 flex-shrink-0">
         {audit.status === 'completed' && (
@@ -539,7 +531,7 @@ const AuditCard = ({ audit, project, onView, onArchive, onDelete, isArchived, is
 
 // ══════════════════════════════════════════════════════════════════════════════
 
-const ComparisonView = ({ audits, project }: { audits: AuditRow[]; project: { url: string; site_name: string } | null }) => {
+const ComparisonView = ({ audits, project }: { audits: ComparisonAudit[]; project: { url: string; site_name: string } | null }) => {
   const globalData = audits.map(a => ({
     date: format(new Date(a.created_at), 'dd/MM/yyyy', { locale: fr }),
     fullDate: a.created_at,

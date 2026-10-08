@@ -47,8 +47,8 @@ describe('tickets 1-4 clients and project grouping', () => {
   });
 
   it('shows client context on project details and keeps function project creation compatible with client_id', () => {
-    expect(projectShell).toContain("from('clients')");
-    expect(projectShell).toContain("client?.name === 'A classer' ? null");
+    expect(projectShell).toContain('clients(name)');
+    expect(projectShell).toContain("clientName === 'A classer' ? null");
     expect(projectShell).toContain('client_name');
     expect(projectFiche).toContain('Client');
     expect(projectFiche).toContain('{project.client_name &&');

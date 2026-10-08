@@ -1,49 +1,16 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useAuth } from '@/hooks/useAuth';
-import { supabase } from '@/integrations/supabase/client';
+import { useAuditSummaries } from '@/hooks/useAuditSummaries';
 import { Button } from '@/components/ui/button';
 import { FileBarChart, Eye, Calendar, Globe } from 'lucide-react';
-import { getAuditScoreFromAny } from '@/lib/auditReadUtils';
 import { formatDateTime } from '@/lib/dateFormat';
 
-interface AuditWithProject {
-  id: string;
-  project_id: string;
-  status: string;
-  created_at: string;
-  archived_at: string | null;
-  report_data: any;
-  site_name?: string;
-  url?: string;
-}
-
 const ReportsPage = () => {
-  const { user, isAdmin } = useAuth();
   const navigate = useNavigate();
-  const [audits, setAudits] = useState<AuditWithProject[]>([]);
-  const [loading, setLoading] = useState(true);
+  const summaries = useAuditSummaries({ completedOnly: true });
+  const audits = summaries.data;
+  const loading = summaries.isPending;
   const [filterProject, setFilterProject] = useState('');
-
-  useEffect(() => {
-    if (!user) return;
-    const fetch = async () => {
-      const { data } = await supabase
-        .from('audits')
-        .select('*, projects(site_name, url)')
-        .eq('status', 'completed')
-        .order('created_at', { ascending: false });
-
-      const mapped = (data || []).map((a: any) => ({
-        ...a,
-        site_name: a.projects?.site_name,
-        url: a.projects?.url,
-      }));
-      setAudits(mapped);
-      setLoading(false);
-    };
-    fetch();
-  }, [user]);
 
   const projects = [...new Map(audits.map(a => [a.project_id, { id: a.project_id, name: a.site_name || '—' }])).values()];
   const filtered = filterProject ? audits.filter(a => a.project_id === filterProject) : audits;
@@ -77,7 +44,10 @@ const ReportsPage = () => {
       </div>
 
       {/* List */}
-      {loading ? (
+      {summaries.scoreError && <Button variant="outline" onClick={() => { void summaries.refetchScores(); }}>Certains scores sont indisponibles. Réessayer</Button>}
+      {summaries.error ? (
+        <Button variant="outline" onClick={() => summaries.refetch()}>Impossible de charger les rapports. Réessayer</Button>
+      ) : loading ? (
         <div className="glass-card p-8 text-center text-muted-foreground">Chargement…</div>
       ) : filtered.length === 0 ? (
         <div className="glass-card p-8 text-center text-muted-foreground">
@@ -86,11 +56,7 @@ const ReportsPage = () => {
       ) : (
         <div className="space-y-2">
           {filtered.map(audit => {
-            const rd = audit.report_data as any;
-            const score = getAuditScoreFromAny(rd, audit.id, {
-              url: audit.url ?? '',
-              site_name: audit.site_name ?? 'Site',
-            });
+            const score = audit.score;
             return (
               <div key={audit.id} className="glass-card p-4 flex flex-col sm:flex-row sm:items-center gap-3">
                 <div className={`w-3 h-3 rounded-full flex-shrink-0 ${score !== null ? (score >= 70 ? 'bg-emerald-500' : score >= 50 ? 'bg-yellow-500' : 'bg-red-500') : 'bg-muted'}`} />
@@ -102,6 +68,7 @@ const ReportsPage = () => {
                         {score}/100
                       </span>
                     )}
+                    {audit.requires_report && <span className="text-xs text-muted-foreground">{summaries.scoreError ? 'Score indisponible' : 'Chargement du score…'}</span>}
                     {audit.archived_at && (
                       <span className="text-xs bg-muted text-muted-foreground px-2 py-0.5 rounded-full">Archivé</span>
                     )}

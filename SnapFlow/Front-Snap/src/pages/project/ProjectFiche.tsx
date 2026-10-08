@@ -31,7 +31,7 @@ interface RedmineProjectDetail {
 const ProjectFiche = () => {
   const { projectId, project, setProjectLogoUrl } = useOutletContext<ProjectContext>();
   const { toast } = useToast();
-  const { isAdmin, userRole } = useAuth();
+  const { user, isAdmin, userRole } = useAuth();
 
   const [showProjectCard, setShowProjectCard] = useState(true);
   const [redmineDetail, setRedmineDetail] = useState<RedmineProjectDetail | null>(null);
@@ -39,7 +39,8 @@ const ProjectFiche = () => {
   const [logoUrlInput, setLogoUrlInput] = useState('');
   const [isSavingLogo, setIsSavingLogo] = useState(false);
 
-  const { assignedUser } = useProjectAssignments(projectId);
+  const { assignedUser, loading: loadingAssignment, error: assignmentError } = useProjectAssignments(projectId);
+  const [redmineError, setRedmineError] = useState(false);
   const redmineIdentifier = useRedmineIdentifier(project?.redmine_url || project?.url);
 
   // Init logo input when project loads
@@ -49,10 +50,14 @@ const ProjectFiche = () => {
 
   // Fetch Redmine detail
   useEffect(() => {
+    let cancelled = false;
+    setRedmineDetail(null);
+    setRedmineError(false);
     if (!redmineIdentifier) { setLoadingCard(false); return; }
     setLoadingCard(true);
-    fetchProjectDetail(redmineIdentifier)
+    fetchProjectDetail(redmineIdentifier, user?.id)
       .then(async detail => {
+        if (cancelled) return;
         setRedmineDetail(detail);
         const homepage = detail?.homepage?.trim();
         if (homepage && project?.url && isRedmineProjectUrl(project.url)) {
@@ -62,8 +67,10 @@ const ProjectFiche = () => {
             .eq('id', projectId);
         }
       })
-      .finally(() => setLoadingCard(false));
-  }, [redmineIdentifier, projectId, project?.url, project?.redmine_url]);
+      .catch(() => { if (!cancelled) setRedmineError(true); })
+      .finally(() => { if (!cancelled) setLoadingCard(false); });
+    return () => { cancelled = true; };
+  }, [redmineIdentifier, projectId, project?.url, project?.redmine_url, user?.id]);
 
   const resolveLogoTargetUrl = (): string => {
     if (!project) return '';
@@ -115,11 +122,12 @@ const ProjectFiche = () => {
 
       {showProjectCard && (
         <div className="px-4 pb-4 space-y-4">
-          {loadingCard ? (
+          {loadingCard && (
             <div className="text-sm text-muted-foreground flex items-center gap-2">
               <Loader2 className="w-3.5 h-3.5 animate-spin" /> Chargement…
             </div>
-          ) : (
+          )}
+          {redmineError && <p className="text-sm text-muted-foreground">Les informations Redmine sont indisponibles.</p>}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {/* ── Left column: project info ───────────────────── */}
               <div className="space-y-3">
@@ -150,7 +158,7 @@ const ProjectFiche = () => {
                         });
                         const appAssignee = assignedUser ? (assignedUser.full_name || assignedUser.email) : null;
                         const displayAssignee = redmineAccountName || accountField?.value || appAssignee;
-                        return displayAssignee || <span className="text-muted-foreground italic">Non assigné</span>;
+                        return displayAssignee || (loadingAssignment || loadingCard ? 'Chargement…' : <span className="text-muted-foreground italic">{assignmentError || redmineError ? 'Indisponible' : 'Non assigné'}</span>);
                       })()}
                     </p>
                     {assignedUser?.full_name && !redmineDetail?.memberships?.some(m =>
@@ -214,7 +222,6 @@ const ProjectFiche = () => {
                 }}
               />
             </div>
-          )}
         </div>
       )}
     </div>

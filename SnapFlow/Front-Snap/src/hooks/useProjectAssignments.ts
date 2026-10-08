@@ -1,4 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { useAuth } from '@/hooks/useAuth';
+import { fetchProjectDetail } from '@/services/redmineService';
 import { supabase } from '@/integrations/supabase/client';
 
 export interface AssignedUser {
@@ -9,6 +11,7 @@ export interface AssignedUser {
 export interface UseProjectAssignmentsReturn {
   assignedUser: AssignedUser | null;
   loading: boolean;
+  error: Error | null;
 }
 
 /**
@@ -16,111 +19,44 @@ export interface UseProjectAssignmentsReturn {
  * Replaces duplicated assignment-lookup logic in AdminProjects.tsx and ProjectDetail.tsx.
  */
 export function useProjectAssignments(projectId: string | null | undefined): UseProjectAssignmentsReturn {
-  const [assignedUser, setAssignedUser] = useState<AssignedUser | null>(null);
-  const [loading, setLoading] = useState(false);
-
-  useEffect(() => {
-    if (!projectId) return;
-
-    let cancelled = false;
-    setLoading(true);
-
-    const fetch = async () => {
-      // 1) Supabase assignment
-      const { data: assignments } = await supabase
-        .from('project_assignments')
-        .select('user_id')
-        .eq('project_id', projectId)
-        .limit(1);
-
-      if (cancelled) return;
-      if (assignments && assignments.length > 0) {
-        const { data: profile } = await supabase
-          .from('profiles')
-          .select('full_name, email')
-          .eq('id', assignments[0].user_id)
-          .single();
-
-        if (!cancelled) {
-          setAssignedUser(profile || null);
-          setLoading(false);
-        }
-        return;
+  const { user, userRole } = useAuth();
+  const query = useQuery({
+    queryKey: ['assignment', user?.id, userRole, projectId, 'display'],
+    enabled: !!user && !!projectId,
+    queryFn: async ({ signal }): Promise<AssignedUser | null> => {
+      const { data: assignments, error: assignmentError } = await supabase.from('project_assignments')
+        .select('user_id').eq('project_id', projectId!).limit(1).abortSignal(signal);
+      if (assignmentError) throw assignmentError;
+      if (assignments?.length) {
+        const { data, error } = await supabase.from('profiles').select('full_name, email')
+          .eq('id', assignments[0].user_id).abortSignal(signal).maybeSingle();
+        if (error) throw error;
+        return data;
       }
-
-      // 2) Fallback: Redmine "Account" membership or custom field
-      const { data: projectRow } = await supabase
-        .from('projects')
-        .select('url, redmine_url')
-        .eq('id', projectId)
-        .single();
-
-      const projectUrl = projectRow?.redmine_url || projectRow?.url;
-      if (!projectUrl) {
-        if (!cancelled) setLoading(false);
-        return;
-      }
-
-      const redmineIdentifier = (() => {
-        try {
-          const url = new URL(projectUrl);
-          const match = url.pathname.match(/\/projects\/([^/]+)/);
-          if (match) return match[1];
-        } catch {
-          /* noop */
-        }
-        return null;
-      })();
-
-      if (!redmineIdentifier) {
-        if (!cancelled) setLoading(false);
-        return;
-      }
-
-      const { data: redmineDetail } = await supabase.functions.invoke('fetch-redmine', {
-        body: { type: 'project_detail', project_identifier: redmineIdentifier },
-      });
-
-      const project = redmineDetail?.project;
-      const accountMember = project?.memberships?.find((m: any) =>
-        m.roles?.some((r: any) => r.name?.toLowerCase()?.includes('account') || r.id === 9 || r.id === 10)
-      );
-      const customField = project?.custom_fields?.find((f: any) => {
-        const n = (f.name || '').toLowerCase();
-        return n.includes('account') || n.includes('compte') || n.includes('charg');
-      });
-
-      const displayName: string | null =
-        accountMember?.user?.name ||
-        (typeof customField?.value === 'string' ? customField.value : null) ||
-        null;
-      const displayEmail: string | null =
-        typeof customField?.value === 'string' && customField.value.includes('@')
-          ? customField.value
-          : null;
-
-      if (displayName) {
-        // Try to map to a profile by full name OR email
-        const { data: profileMatch } = await supabase
-          .from('profiles')
-          .select('full_name, email')
-          .or(`full_name.ilike.${displayName},email.ilike.${displayEmail ?? displayName}`);
-
-        const profile = profileMatch && profileMatch.length > 0 ? profileMatch[0] : { full_name: displayName, email: displayEmail ?? '' };
-
-        if (!cancelled) {
-          setAssignedUser(profile);
-          setLoading(false);
-        }
-        return;
-      }
-
-      if (!cancelled) setLoading(false);
-    };
-
-    fetch();
-    return () => { cancelled = true; };
-  }, [projectId]);
-
-  return { assignedUser, loading };
+      const { data: row, error } = await supabase.from('projects').select('url, redmine_url')
+        .eq('id', projectId!).abortSignal(signal).maybeSingle();
+      if (error) throw error;
+      const rawUrl = row?.redmine_url || row?.url;
+      if (!rawUrl) return null;
+      let identifier: string | undefined;
+      try { identifier = new URL(rawUrl).pathname.match(/\/projects\/([^/]+)/)?.[1]; } catch { return null; }
+      if (!identifier) return null;
+      const detail = await fetchProjectDetail(identifier, user!.id);
+      signal.throwIfAborted();
+      const member = detail?.memberships?.find(m => m.roles?.some(r =>
+        r.name?.toLowerCase().includes('account') || r.id === 9 || r.id === 10));
+      const field = detail?.custom_fields?.find(f => /account|compte|charg/i.test(f.name ?? ''));
+      const name = member?.user?.name || (typeof field?.value === 'string' ? field.value : null);
+      if (!name) return null;
+      const email = typeof field?.value === 'string' && field.value.includes('@') ? field.value : '';
+      // Equality queries avoid interpolating Redmine values into PostgREST filters.
+      const matches = await Promise.all([
+        supabase.from('profiles').select('full_name, email').ilike('full_name', name).limit(1).abortSignal(signal),
+        supabase.from('profiles').select('full_name, email').ilike('email', email || name).limit(1).abortSignal(signal),
+      ]);
+      for (const result of matches) if (result.error) throw result.error;
+      return matches[0].data?.[0] ?? matches[1].data?.[0] ?? { full_name: name, email };
+    },
+  });
+  return { assignedUser: query.data ?? null, loading: !!projectId && !!user && query.isPending, error: query.error };
 }

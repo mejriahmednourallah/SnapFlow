@@ -1,3 +1,4 @@
+import { loadProjectAccountData } from '../_shared/redmineProjectRequests.ts';
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
@@ -309,19 +310,19 @@ serve(async (req) => {
 
     // Helper to fetch project account information from Redmine
     // Returns: { memberships, customFields, accountMembers, accountFields }
-    const fetchProjectAccountInfo = async (identifier: string) => {
+    const fetchProjectAccountInfo = async (identifier: string, existingProject?: Promise<any>) => {
       try {
         console.log("[fetchProjectAccountInfo] Fetching for identifier:", identifier);
 
-        const projRes = await fetch(
-          `${REDMINE_BASE}/projects/${identifier}.json?key=${REDMINE_KEY}&include=custom_fields`
+        const [projData, membersData] = await loadProjectAccountData(
+          async () => safeJson(await fetch(
+            `${REDMINE_BASE}/projects/${identifier}.json?key=${REDMINE_KEY}&include=custom_fields`
+          ), { project: null }),
+          async () => safeJson(await fetch(
+            `${REDMINE_BASE}/projects/${identifier}/memberships.json?key=${REDMINE_KEY}&limit=100`
+          ), { memberships: [] }),
+          existingProject,
         );
-        const projData = await safeJson(projRes, { project: null });
-
-        const membersRes = await fetch(
-          `${REDMINE_BASE}/projects/${identifier}/memberships.json?key=${REDMINE_KEY}&limit=100`
-        );
-        const membersData = await safeJson(membersRes, { memberships: [] });
 
         if (!projData.project) {
           console.warn("[fetchProjectAccountInfo] Project not found for identifier:", identifier);
@@ -1810,14 +1811,13 @@ serve(async (req) => {
     if (type === "project_detail") {
       const { project_identifier } = body;
 
-      // Fetch project details
-      const projectRes = await fetch(
+      const projectRequest = (async () => safeJson(await fetch(
         `${REDMINE_BASE}/projects/${project_identifier}.json?key=${REDMINE_KEY}&include=trackers,enabled_modules,issue_custom_fields,custom_fields`
-      );
-      const projectData = await safeJson(projectRes, { project: null });
-
-      // Use shared helper so all pages see consistent account membership/custom field data.
-      const { memberships, accountMembers, accountFields } = await fetchProjectAccountInfo(project_identifier);
+      ), { project: null }))();
+      const [projectData, { memberships, accountMembers, accountFields }] = await Promise.all([
+        projectRequest,
+        fetchProjectAccountInfo(project_identifier, projectRequest),
+      ]);
 
       // Merge memberships into the project object
       if (projectData.project) {

@@ -31,6 +31,8 @@ class VPSPhases(unittest.TestCase):
         self.running_db = False
         self.active = 0
         self.failed_service = None
+        self.failed_start = None
+        self.workflow_active = 0
         self.network_owner = 'snapflow-production'
         self.mounts = [{'Destination': '/b', 'Source': '/private/b'},
                        {'Destination': '/a', 'Source': '/private/a'}]
@@ -50,6 +52,10 @@ class VPSPhases(unittest.TestCase):
                                          networks={'wetty_default': {'EndpointID': 'unchanged'}})).encode()
             elif args[:3] == ['docker', 'image', 'inspect']:
                 stdout = ('owned-' + args[3]).encode()
+            elif args[:2] == ['docker', 'inspect'] and args[2].endswith('-frontend-1'):
+                stdout = json.dumps(dict(image='sha256:previous', reference='snapflow/frontend:candidate',
+                    labels={'com.docker.compose.project':'snapflow-production-snapflow',
+                            'com.docker.compose.service':'frontend'})).encode()
             elif args[:2] == ['docker', 'inspect']:
                 stdout = json.dumps(dict(id='owned-db', labels={'com.docker.compose.project':'snapflow-production-supabase',
                     'com.docker.compose.service':'supabase-db'}, mounts=[{'Destination':'/var/lib/postgresql/data',
@@ -66,6 +72,9 @@ class VPSPhases(unittest.TestCase):
                 tail = args[args.index('--') + 1:]
                 if tail[:1] == ['build'] and tail[-1] == self.failed_service:
                     raise subprocess.CalledProcessError(17, args)
+                if tail[:1] == ['up'] and tail[-1] == self.failed_start:
+                    self.failed_start = None
+                    raise subprocess.CalledProcessError(18, args)
                 if tail[:1] == ['ps'] and tail[-1] == 'db' and self.running_db:
                     stdout = b'running-db'
                 if 'auth.users' in ' '.join(tail):
@@ -76,6 +85,8 @@ class VPSPhases(unittest.TestCase):
                     stdout = b't\n'
                 if 'COUNT(*)' in kwargs.get('input', b'').decode():
                     stdout = str(self.active).encode()
+                if 'workflow_results' in ' '.join(tail):
+                    stdout = str(self.workflow_active).encode()
             return subprocess.CompletedProcess(args, 0, stdout=stdout, stderr=b'')
 
         self.run_patch = patch.object(self.launcher, 'run', side_effect=run)
@@ -231,6 +242,66 @@ class VPSPhases(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'separate VPS runtime'):
             self.launcher.execute()
         self.assertFalse(any('configure' in args or 'fetch' in args for args, _ in self.calls))
+
+    def prepare_app_update(self):
+        self.options.action = 'app-update'
+        (self.runtime / 'import-complete.json').write_text(json.dumps(self.import_marker))
+        path = self.runtime / 'upstream/volumes/functions/fetch-redmine/index.ts'
+        path.parent.mkdir(parents=True)
+        path.write_text('previous Redmine function')
+        return path
+
+    def test_app_update_builds_only_frontend_and_migrates_before_activation(self):
+        self.prepare_app_update()
+        self.launcher.execute()
+        calls = self.compose_calls()
+        self.assertEqual([args for args, _ in calls if args[0] == 'build'], [['build','frontend']])
+        self.assertEqual([args[-1] for args, _ in calls if args[0] == 'up'], ['functions','frontend'])
+        migration = next(i for i, (args, _) in enumerate(calls) if '--single-transaction' in args)
+        startup = next(i for i, (args, _) in enumerate(calls) if args[0] == 'up')
+        self.assertLess(migration, startup)
+        self.assertFalse(any(args[0] in ('stop','down') for args, _ in calls))
+        self.assertFalse(any('prepare' in args or 'configure' in args for args, _ in self.calls))
+        self.assertTrue(any(args[:3] == ['docker','builder','prune'] for args, _ in self.calls))
+
+    def test_app_update_rolls_back_code_and_image_after_activation_failure(self):
+        path = self.prepare_app_update()
+        self.failed_start = 'frontend'
+        with self.assertRaises(subprocess.CalledProcessError):
+            self.launcher.execute()
+        self.assertEqual(path.read_text(), 'previous Redmine function')
+        self.assertFalse((path.parents[1] / '_shared/redmineProjectRequests.ts').exists())
+        self.assertIn(['docker','tag','sha256:previous','snapflow/frontend:candidate'], [args for args, _ in self.calls])
+        self.assertTrue(any(args[:3] == ['docker','builder','prune'] for args, _ in self.calls))
+
+    def test_app_update_refuses_active_work_before_building(self):
+        self.prepare_app_update()
+        self.workflow_active = 1
+        with self.assertRaisesRegex(ValueError, 'workflows'):
+            self.launcher.execute()
+        self.assertFalse(any(args[0] in ('build','up') for args, _ in self.compose_calls()))
+
+    def test_app_update_build_failure_keeps_runtime_code(self):
+        path = self.prepare_app_update()
+        self.failed_service = 'frontend'
+        with self.assertRaises(subprocess.CalledProcessError):
+            self.launcher.execute()
+        self.assertEqual(path.read_text(), 'previous Redmine function')
+        self.assertFalse(any(args[0] == 'up' for args, _ in self.compose_calls()))
+
+    def test_app_update_rechecks_audits_after_the_build(self):
+        path = self.prepare_app_update()
+        original = self.launcher.compose
+        def compose(stack, *args, **kwargs):
+            result = original(stack, *args, **kwargs)
+            if args[0] == 'build':
+                self.active = 1
+            return result
+        with patch.object(self.launcher, 'compose', side_effect=compose):
+            with self.assertRaisesRegex(ValueError, 'audit is running'):
+                self.launcher.execute()
+        self.assertEqual(path.read_text(), 'previous Redmine function')
+        self.assertFalse(any(args[0] == 'up' for args, _ in self.compose_calls()))
 
 
 if __name__ == '__main__':

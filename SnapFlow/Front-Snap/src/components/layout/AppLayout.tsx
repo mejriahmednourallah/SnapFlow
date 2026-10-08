@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { useNavigate, Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
+import { useProjectDataChanges } from '@/hooks/useProjectDataChanges';
 import { SidebarProvider, SidebarTrigger } from '@/components/ui/sidebar';
 import { AppSidebar } from './AppSidebar';
 import { Breadcrumbs } from './Breadcrumbs';
@@ -11,6 +12,7 @@ import { LogOut } from 'lucide-react';
 import snapflowLogo from '@/assets/snapflow-logo.png';
 
 const AppLayout = () => {
+  useProjectDataChanges();
   const { user, loading, isAdmin, userRole, displayName, signOut } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();

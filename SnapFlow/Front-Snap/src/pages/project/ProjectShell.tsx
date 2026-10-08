@@ -1,4 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { queryClient } from '@/lib/queryClient';
 import { Outlet, useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/integrations/supabase/client';
@@ -49,10 +51,24 @@ const ProjectShell = () => {
   const { id: projectId } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const location = useLocation();
-  const { user, loading } = useAuth();
+  const { user, userRole, loading } = useAuth();
 
-  const [project, setProject] = useState<ProjectInfo | null>(null);
-  const [loadingProject, setLoadingProject] = useState(true);
+  const projectKey = ['project', user?.id, userRole, projectId];
+  const projectQuery = useQuery({
+    queryKey: projectKey,
+    enabled: !!projectId && !!user && !loading,
+    queryFn: async ({ signal }): Promise<ProjectInfo | null> => {
+      const { data, error } = await supabase.from('projects')
+        .select('id, site_name, url, redmine_url, client_id, logo_url, clients(name)')
+        .eq('id', projectId!).abortSignal(signal).maybeSingle();
+      if (error) throw error;
+      if (!data) return null;
+      const clientName = (data.clients as { name?: string } | null)?.name ?? null;
+      return { ...data, client_name: clientName === 'A classer' ? null : clientName };
+    },
+  });
+  const project = projectQuery.data ?? null;
+  const loadingProject = projectQuery.isPending;
 
   // Active tab derived from URL
   const activeTab = resolveTabFromPath(location.pathname);
@@ -62,31 +78,6 @@ const ProjectShell = () => {
     if (!loading && !user) navigate('/auth');
   }, [user, loading, navigate]);
 
-  // Fetch project
-  useEffect(() => {
-    if (!projectId) return;
-    setLoadingProject(true);
-
-    const loadProject = async () => {
-      const { data } = await supabase.from('projects').select('*').eq('id', projectId).single();
-      if (!data) {
-        setProject(null);
-        return;
-      }
-
-      let clientName: string | null = null;
-      const clientId = (data as any).client_id as string | null | undefined;
-      if (clientId) {
-        const { data: client } = await supabase.from('clients').select('name').eq('id', clientId).maybeSingle();
-        clientName = client?.name === 'A classer' ? null : client?.name ?? null;
-      }
-
-      setProject({ ...(data as ProjectInfo), client_name: clientName });
-    };
-
-    loadProject().finally(() => setLoadingProject(false));
-  }, [projectId]);
-
   // Navigate to correct sub-route on tab change
   const handleTabChange = (tabId: string) => {
     const tab = TABS.find(t => t.id === tabId);
@@ -95,7 +86,8 @@ const ProjectShell = () => {
   };
 
   const setProjectLogoUrl = (logoUrl: string | null) => {
-    setProject(prev => prev ? { ...prev, logo_url: logoUrl } : prev);
+    queryClient.setQueryData<ProjectInfo | null>(projectKey, prev => prev ? { ...prev, logo_url: logoUrl } : prev);
+    void queryClient.invalidateQueries({ queryKey: ['project-list', user?.id] });
   };
 
   const context: ProjectContext = { projectId: projectId!, project, loadingProject, setProjectLogoUrl };
@@ -111,7 +103,7 @@ const ProjectShell = () => {
           <ArrowLeft className="w-4 h-4" />
         </button>
         <div>
-          <h1 className="text-xl font-bold">{project?.site_name ?? 'Chargement…'}</h1>
+          <h1 className="text-xl font-bold">{project?.site_name ?? (projectQuery.error ? 'Projet indisponible' : loadingProject ? 'Chargement…' : 'Projet introuvable')}</h1>
           {project && (
             <a
               href={project.url}
@@ -150,7 +142,7 @@ const ProjectShell = () => {
       </div>
 
       {/* ── Child page ────────────────────────────────────────────────── */}
-      <Outlet context={context} />
+      {projectQuery.error ? <button onClick={() => projectQuery.refetch()}>Impossible de charger le projet. Réessayer</button> : <Outlet context={context} />}
     </div>
   );
 };

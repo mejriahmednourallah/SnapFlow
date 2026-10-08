@@ -344,6 +344,7 @@ def prepare(runtime):
         '20261005010000_explicit_application_api_grants.sql',
         '20261005020000_restore_auth_profile_trigger.sql',
         '20261005030000_service_rpc_permissions.sql',
+        '20261008010000_compact_audit_lists.sql',
     ]
     payload=b'BEGIN;\n'+b'\n'.join((ROOT/'Front-Snap/supabase/migrations'/name).read_bytes() for name in migrations)
     # Never dispatch imported schedules to live customer targets in rehearsal.

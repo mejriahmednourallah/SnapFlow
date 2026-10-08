@@ -290,11 +290,95 @@ class VPSLauncher:
         self.run(['df', '-h', '/'])
         self.run(['free', '-h'])
 
+    def assert_no_active_workflows(self):
+        queued = self.compose('supabase', 'exec', '-T', 'supabase-db', 'psql', '-X',
+            '-U', 'supabase_admin', '-d', 'postgres', '-Atc',
+            "SELECT count(*) FROM public.workflow_results WHERE status IN ('queued','running');", capture=True).stdout.strip()
+        if queued != b'0':
+            raise ValueError('Wait for queued/running workflows before refreshing Edge functions')
+
+    def app_update(self):
+        """Deploy only the project-loading RPC, frontend and changed Redmine code."""
+        descriptor = self.descriptor()
+        self.verify_import()
+        self.assert_no_active_audit()
+        self.assert_no_active_workflows()
+        container = descriptor['project'] + '-snapflow-frontend-1'
+        before = json.loads(self.run(['docker', 'inspect', container, '--format',
+            '{"image":{{json .Image}},"reference":{{json .Config.Image}},"labels":{{json .Config.Labels}}}'], capture=True).stdout)
+        if (before['labels'].get('com.docker.compose.project') != descriptor['project'] + '-snapflow'
+                or before['labels'].get('com.docker.compose.service') != 'frontend'):
+            raise ValueError('Unexpected frontend ownership')
+        functions = self.runtime / 'upstream/volumes/functions'
+        relatives = ('fetch-redmine/index.ts', '_shared/redmineProjectRequests.ts')
+        saved = {}
+        for relative in relatives:
+            target = functions / relative
+            if target.is_symlink() or functions.resolve() not in target.resolve().parents:
+                raise ValueError('Unexpected Edge function path')
+            saved[relative] = target.read_bytes() if target.exists() else None
+        if saved['fetch-redmine/index.ts'] is None:
+            raise ValueError('Existing Redmine function is required for an incremental update')
+        rollback = self.runtime / ('app-rollback-' + datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S-%f'))
+        rollback.mkdir(mode=0o700)
+        for relative, content in saved.items():
+            if content is not None:
+                target = rollback / relative
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(content)
+        tag = 'snapflow/frontend-rollback:' + rollback.name.removeprefix('app-rollback-')
+        self.run(['docker', 'tag', before['image'], tag])
+        (rollback / 'images.json').write_text(json.dumps(dict(frontend=before, rollback_tag=tag)))
+        args = ['build'] + (['--no-cache'] if self.options.no_cache else []) + ['frontend']
+        self.compose('snapflow', *args)
+        self.assert_no_active_audit()
+        self.assert_no_active_workflows()
+        migration = ROOT / 'Front-Snap/supabase/migrations/20261008010000_compact_audit_lists.sql'
+        self.compose('supabase', 'exec', '-T', 'supabase-db', 'psql', '-X', '--single-transaction',
+            '-v', 'ON_ERROR_STOP=1', '-U', 'supabase_admin', '-d', 'postgres',
+            input=migration.read_bytes(), capture=True)
+
+        def write_code(relative, content):
+            target = functions / relative
+            target.parent.mkdir(parents=True, exist_ok=True, mode=0o755)
+            temporary = target.with_name(target.name + '.snapflow-update')
+            if temporary.is_symlink():
+                raise ValueError('Unexpected staging path')
+            temporary.write_bytes(content)
+            temporary.chmod(0o644)
+            temporary.replace(target)
+
+        try:
+            # Publish the new import first, then atomically replace its consumer.
+            for relative in reversed(relatives):
+                write_code(relative, (ROOT / 'Front-Snap/supabase/functions' / relative).read_bytes())
+            self.compose('supabase', 'up', '-d', '--no-deps', '--force-recreate', '--wait',
+                         '--wait-timeout', '90', 'functions')
+            self.compose('snapflow', 'up', '-d', '--no-deps', '--force-recreate', '--wait',
+                         '--wait-timeout', '90', 'frontend')
+        except BaseException:
+            # The additive RPC can remain; older frontend code does not use it.
+            try:
+                for relative, content in saved.items():
+                    if content is not None:
+                        write_code(relative, content)
+                    else:
+                        (functions / relative).unlink(missing_ok=True)
+                self.run(['docker', 'tag', before['image'], before['reference']])
+                for stack, service in (('supabase', 'functions'), ('snapflow', 'frontend')):
+                    self.compose(stack, 'up', '-d', '--no-deps', '--force-recreate', '--wait',
+                                 '--wait-timeout', '90', service)
+            except Exception as error:
+                print('App rollback needs inspection: ' + str(error), file=sys.stderr)
+            raise
+        print('Project-loading update ready; rollback retained at ' + str(rollback) +
+              '. Authenticated public acceptance remains required.', flush=True)
+
     def execute(self):
         before = self.wetty_snapshot()
         failed = False
         try:
-            action = {'import': 'import_cloud', 'repair-bootstrap': 'repair_bootstrap'}.get(self.options.action, self.options.action)
+            action = {'import': 'import_cloud', 'repair-bootstrap': 'repair_bootstrap', 'app-update': 'app_update'}.get(self.options.action, self.options.action)
             getattr(self, action)()
         except BaseException:
             failed = True
@@ -302,7 +386,7 @@ class VPSLauncher:
         finally:
             # Attempt both cleanup and protection checks, preserving the original error.
             errors = []
-            if self.options.action == 'build':
+            if self.options.action in ('build', 'app-update'):
                 try:
                     self.cleanup_cache()
                 except Exception as error:
@@ -320,7 +404,7 @@ class VPSLauncher:
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--vps', action='store_true')
-    parser.add_argument('--action', choices=('build', 'supabase', 'import', 'start', 'status', 'repair-bootstrap'), default='build')
+    parser.add_argument('--action', choices=('build', 'supabase', 'import', 'start', 'status', 'repair-bootstrap', 'app-update'), default='build')
     parser.add_argument('--runtime', type=Path, default=Path.home() / '.local/share/snapflow-vps')
     parser.add_argument('--public-origin', default='https://snapflow.medianet.space')
     parser.add_argument('--skip-smtp', action='store_true', help='Explicitly defer SMTP for VPS configuration')

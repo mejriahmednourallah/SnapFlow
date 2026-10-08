@@ -138,13 +138,26 @@ export async function fetchIssueFilters(): Promise<{ statuses: FilterOption[]; t
   };
 }
 
-/** Fetch detailed project information from Redmine. */
-export async function fetchProjectDetail(projectIdentifier: string): Promise<RedmineProjectDetail | null> {
-  const { data, error } = await supabase.functions.invoke('fetch-redmine', {
-    body: { type: 'project_detail', project_identifier: projectIdentifier },
-  });
-  if (error) return null;
-  return data?.project || null;
+const projectDetailFlights = new Map<string, Promise<RedmineProjectDetail | null>>();
+
+/** Share overlapping reads only; later visits still read live Redmine data. */
+export function fetchProjectDetail(projectIdentifier: string, userId?: string): Promise<RedmineProjectDetail | null> {
+  const key = userId ? JSON.stringify([userId, projectIdentifier]) : null;
+  const existing = key ? projectDetailFlights.get(key) : null;
+  if (existing) return existing;
+  const request = (async () => {
+    const { data, error } = await supabase.functions.invoke('fetch-redmine', {
+      body: { type: 'project_detail', project_identifier: projectIdentifier },
+    });
+    if (error) throw error;
+    if (data?.error) throw new Error(data.error);
+    return data?.project || null;
+  })();
+  if (key) {
+    projectDetailFlights.set(key, request);
+    void request.then(() => projectDetailFlights.delete(key), () => projectDetailFlights.delete(key));
+  }
+  return request;
 }
 
 /** Fetch all Redmine users. */

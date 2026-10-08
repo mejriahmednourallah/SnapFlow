@@ -1,0 +1,12 @@
+[
+  {"name":"null report","report":null,"score":null,"axes":null,"legacy":false},
+  {"name":"category counts precede axis findings","report":{"siteName":"Site","globalScore":90,"axes":[{"findings":[{"status":"pass"}]}],"passingKpis":[{}],"bugs":[{}],"recommendations":[{}],"compliance":[]},"score":33,"axes":1,"legacy":false},
+  {"name":"axis fallback excludes unmeasured statuses","report":{"siteName":"Site","globalScore":90,"axes":[{"findings":[{"status":"pass"},{"status":"fail"},{"status":"not_available"},{"status":"not_measured"},{"status":"warning"}]}]},"score":50,"axes":1,"legacy":false},
+  {"name":"explicit status wins over type","report":{"siteName":"Site","globalScore":90,"axes":[{"findings":[{"status":"pass","type":"bug"},{"type":"pass"},{"type":"bug"},{"type":"recommendation"}]}]},"score":67,"axes":1,"legacy":false},
+  {"name":"unmeasured global fallback","report":{"siteName":"Site","globalScore":42,"axes":[{"findings":[{"status":"not_available","displayScorePct":70}]}]},"score":42,"axes":1,"legacy":false},
+  {"name":"empty axes fallback","report":{"siteName":"Site","globalScore":72,"axes":[]},"score":72,"axes":0,"legacy":false},
+  {"name":"round half upward","report":{"siteName":"Site","globalScore":0,"axes":[],"passingKpis":[{}],"bugs":[{},{},{},{},{},{},{}]},"score":13,"axes":0,"legacy":false},
+  {"name":"multiple axes with type fallback","report":{"siteName":"Site","globalScore":0,"axes":[{"findings":[{"type":"pass"}]},{"findings":[{"type":"bug"},{"type":"pass"}]}]},"score":67,"axes":2,"legacy":false},
+  {"name":"legacy raw response","report":{"axes":{"SEO":{"score":70,"findings":[]}}},"score":null,"axes":null,"legacy":true},
+  {"name":"legacy invalid mapped axes","report":{"siteName":"Site","globalScore":0,"axes":[{"score":70}]},"score":null,"axes":null,"legacy":true}
+]

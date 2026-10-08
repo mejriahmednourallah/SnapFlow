@@ -1,4 +1,4 @@
-﻿import { useEffect, useState, useMemo } from 'react';
+import { useState, useMemo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/integrations/supabase/client';
@@ -7,7 +7,10 @@ import { Input } from '@/components/ui/input';
 import { Globe, Plus, Download, Users, ArrowLeft, Trash2, Eye, Filter, ArrowUpDown, CalendarClock, ShieldAlert, Search } from 'lucide-react';
 import { RefreshCw } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import { getAuditScoreFromAny } from '@/lib/auditReadUtils';
+import { useQuery } from '@tanstack/react-query';
+import { useAuditSummaries } from '@/hooks/useAuditSummaries';
+import type { AuditListRow } from '@/services/auditListService';
+import { queryClient } from '@/lib/queryClient';
 import { formatDate } from '@/lib/dateFormat';
 import { getProfileDisplayName } from '@/lib/userDisplay';
 import {
@@ -38,13 +41,6 @@ interface Client {
 interface Assignment {
   project_id: string;
   user_id: string;
-}
-
-interface AuditSummary {
-  project_id: string;
-  score: number | null;
-  created_at: string;
-  status?: string;
 }
 
 interface ScheduleSummary {
@@ -124,13 +120,9 @@ const AdminProjects = () => {
   const filterUserId = searchParams.get('user');
   const { toast } = useToast();
 
-  const [profiles, setProfiles] = useState<Profile[]>([]);
-  const [clients, setClients] = useState<Client[]>([]);
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [assignments, setAssignments] = useState<Assignment[]>([]);
-  const [latestAudits, setLatestAudits] = useState<AuditSummary[]>([]);
-  const [nextSchedules, setNextSchedules] = useState<ScheduleSummary[]>([]);
-  const [loadingData, setLoadingData] = useState(true);
+  const auditSummaries = useAuditSummaries({ latestPerProject: true });
+  const latestAudits = auditSummaries.data;
+
   const [syncingBulk, setSyncingBulk] = useState(false);
 
   // Filters & sorting
@@ -156,69 +148,44 @@ const AdminProjects = () => {
   const [syncingMyRedmine, setSyncingMyRedmine] = useState(false);
   const [redmineSearch, setRedmineSearch] = useState('');
 
-  const fetchData = async () => {
-    const [profilesRes, redmineIdentitiesRes, clientsRes, projectsRes, assignmentsRes, auditsRes, schedulesRes] = await Promise.all([
-      supabase.from('profiles').select('id, email, full_name'),
-      supabase.from('redmine_user_identities').select('user_id, redmine_login, redmine_display_name'),
-      supabase.from('clients').select('id, name').order('name'),
-      supabase.from('projects').select('*'),
-      supabase.from('project_assignments').select('*'),
-      supabase.from('audits').select('project_id, report_data, created_at, status').order('created_at', { ascending: false }),
-      supabase.from('report_schedules').select('project_id, next_run_at, report_type').eq('is_active', true).order('next_run_at', { ascending: true }),
-    ]);
-    const identitiesByUser = new Map((redmineIdentitiesRes.data || []).map((identity: any) => [identity.user_id, identity]));
-    setProfiles((profilesRes.data || []).map((profile: any) => ({
-      ...profile,
-      redmine_login: identitiesByUser.get(profile.id)?.redmine_login ?? null,
-      redmine_display_name: identitiesByUser.get(profile.id)?.redmine_display_name ?? null,
-    })));
-    setClients((clientsRes.data || []) as Client[]);
-    setProjects(projectsRes.data || []);
-    setAssignments(assignmentsRes.data || []);
-
-    // Extract latest audit per project (prefer completed, else most recent with data)
-    const auditMap = new Map<string, AuditSummary>();
-    for (const a of (auditsRes.data || [])) {
-      const existing = auditMap.get(a.project_id);
-      const rd = a.report_data as any;
-      const summary: AuditSummary = {
-        project_id: a.project_id,
-        score: getAuditScoreFromAny(rd, a.project_id, {
-          url: projectsRes.data?.find((p: any) => p.id === a.project_id)?.url ?? '',
-          site_name: projectsRes.data?.find((p: any) => p.id === a.project_id)?.site_name ?? 'Site',
-        }),
-        created_at: a.created_at,
-        status: a.status,
+  const metadata = useQuery({
+    queryKey: ['project-list', user?.id, userRole],
+    enabled: !!user,
+    queryFn: async ({ signal }) => {
+      const results = await Promise.all([
+        supabase.from('profiles').select('id, email, full_name').abortSignal(signal),
+        supabase.from('redmine_user_identities').select('user_id, redmine_login, redmine_display_name').abortSignal(signal),
+        supabase.from('clients').select('id, name').order('name').abortSignal(signal),
+        supabase.from('projects').select('id, url, site_name, redmine_url').abortSignal(signal),
+        supabase.from('project_assignments').select('project_id, user_id').abortSignal(signal),
+        supabase.from('report_schedules').select('project_id, next_run_at, report_type').eq('is_active', true).order('next_run_at').abortSignal(signal),
+      ]);
+      for (const result of results) if (result.error) throw result.error;
+      const [profiles, identities, clients, projects, assignments, schedules] = results;
+      const byUser = new Map((identities.data ?? []).map((identity: any) => [identity.user_id, identity]));
+      const next = new Map<string, ScheduleSummary>();
+      for (const schedule of schedules.data ?? []) {
+        if (!next.has(schedule.project_id)) next.set(schedule.project_id, schedule as ScheduleSummary);
+      }
+      return {
+        profiles: (profiles.data ?? []).map((profile: any) => ({ ...profile,
+          redmine_login: byUser.get(profile.id)?.redmine_login ?? null,
+          redmine_display_name: byUser.get(profile.id)?.redmine_display_name ?? null })),
+        clients: clients.data as Client[], projects: projects.data as Project[],
+        assignments: assignments.data as Assignment[], schedules: [...next.values()],
       };
-
-      if (!existing) {
-        auditMap.set(a.project_id, summary);
-        continue;
-      }
-
-      const existingIsCompleted = existing.status === 'completed';
-      const currentIsCompleted = a.status === 'completed';
-      if (!existingIsCompleted && currentIsCompleted) {
-        auditMap.set(a.project_id, summary);
-      }
-    }
-    setLatestAudits(Array.from(auditMap.values()));
-
-    // Extract next schedule per project
-    const schedMap = new Map<string, ScheduleSummary>();
-    for (const s of (schedulesRes.data || [])) {
-      if (!schedMap.has(s.project_id)) {
-        schedMap.set(s.project_id, s as ScheduleSummary);
-      }
-    }
-    setNextSchedules(Array.from(schedMap.values()));
-
-    setLoadingData(false);
+    },
+  });
+  const loadingData = metadata.isPending;
+  const profiles = metadata.data?.profiles ?? [];
+  const clients = metadata.data?.clients ?? [];
+  const projects = metadata.data?.projects ?? [];
+  const assignments = metadata.data?.assignments ?? [];
+  const nextSchedules = metadata.data?.schedules ?? [];
+  const fetchData = async () => {
+    await Promise.all(['project-list', 'project', 'assignment', 'audit-list', 'audit-report'].map(key =>
+      queryClient.invalidateQueries({ queryKey: [key, user?.id] })));
   };
-
-  useEffect(() => {
-    if (user) fetchData();
-  }, [user, isAdmin, filterUserId]);
 
   const getAssignedUsers = (projectId: string) => {
     return assignments
@@ -227,7 +194,7 @@ const AdminProjects = () => {
       .filter(Boolean) as Profile[];
   };
 
-  const getLatestAudit = (projectId: string): AuditSummary | undefined => {
+  const getLatestAudit = (projectId: string): AuditListRow | undefined => {
     return latestAudits.find(a => a.project_id === projectId);
   };
 
@@ -296,7 +263,8 @@ const AdminProjects = () => {
       .select('id, name')
       .single();
     if (error) throw error;
-    setClients(prev => [...prev, client as Client]);
+    queryClient.setQueryData(['project-list', user?.id, userRole], (previous: typeof metadata.data) =>
+      previous ? { ...previous, clients: [...previous.clients, client as Client] } : previous);
     return client!.id;
   };
 
@@ -535,6 +503,7 @@ const AdminProjects = () => {
       }
 
       const assigneeId = filterUserId || redmineAssignee;
+      const clientId = await ensureHoldingClient();
 
       for (const rid of selectedRedmine) {
         const rp = redmineProjects.find((p) => p.id === rid);
@@ -550,6 +519,7 @@ const AdminProjects = () => {
             redmine_url: redmineUrl,
             redmine_identifier: rp.identifier,
             site_name: rp.name,
+            client_id: clientId,
             audit_url_needs_review: !rp.homepage,
           })
           .select()
@@ -657,6 +627,8 @@ const AdminProjects = () => {
         </div>
       </div>
 
+      {metadata.error && <Button variant="outline" onClick={() => metadata.refetch()}>Impossible de charger les projets. Réessayer</Button>}
+      {(auditSummaries.error || auditSummaries.scoreError) && <Button variant="outline" onClick={fetchData}>Impossible de charger les scores. Réessayer</Button>}
       {/* Filters & Sorting bar */}
       <div className="glass-card p-4">
         <div className="flex items-center gap-2 mb-3">
@@ -843,6 +815,7 @@ const AdminProjects = () => {
       )}
 
       {/* Projects grid */}
+      {loadingData && <p className="text-sm text-muted-foreground">Chargement des projets…</p>}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {filteredAndSortedProjects.map(project => {
           const assignedUsers = getAssignedUsers(project.id);
@@ -877,8 +850,9 @@ const AdminProjects = () => {
                 </div>
               )}
               {!latestAudit && (
-                <span className="text-xs text-muted-foreground italic">Aucun audit</span>
+                <span className="text-xs text-muted-foreground italic">{auditSummaries.isPending ? 'Chargement des audits…' : auditSummaries.error ? 'Audits indisponibles' : 'Aucun audit'}</span>
               )}
+              {latestAudit?.requires_report && <span className="text-xs text-muted-foreground">{auditSummaries.scoreError ? 'Score indisponible' : 'Chargement du score…'}</span>}
 
               {/* Next scheduled report */}
               {nextSched && (

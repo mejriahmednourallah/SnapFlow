@@ -1,6 +1,8 @@
 import { useState, useEffect, createContext, useContext, type ReactNode } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import type { User, Session } from '@supabase/supabase-js';
+import { useQuery } from '@tanstack/react-query';
+import { queryClient } from '@/lib/queryClient';
 import { getUserDisplayName } from '@/lib/userDisplay';
 
 interface AuthContextType {
@@ -26,55 +28,52 @@ const AuthContext = createContext<AuthContextType>({
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [session, setSession] = useState<Session | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [userRole, setUserRole] = useState<string | null>(null);
+  const [loadingSession, setLoadingSession] = useState(true);
+  const role = useQuery({
+    queryKey: ['user-role', user?.id],
+    enabled: !!user,
+    queryFn: async ({ signal }) => {
+      const { data, error } = await supabase.from('user_roles').select('role')
+        .eq('user_id', user!.id).abortSignal(signal).maybeSingle();
+      if (error) throw error;
+      return data?.role ?? null;
+    },
+  });
+  const userRole = user ? role.data ?? null : null;
+  const loading = loadingSession || (!!user && role.isPending);
 
   useEffect(() => {
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session);
-      setUser(session?.user ?? null);
-      if (session?.user) {
-        // Fetch role after auth state change
-        setTimeout(() => fetchRole(session.user.id), 0);
-      } else {
-        setUserRole(null);
-        setLoading(false);
+    let disposed = false;
+    let eventReceived = false;
+    let currentUserId: string | null = null;
+    const applySession = (next: Session | null) => {
+      if (disposed) return;
+      const nextId = next?.user.id ?? null;
+      if (currentUserId !== nextId) {
+        // Cancel old reads and remove all data from the previous account.
+        queryClient.clear();
+        currentUserId = nextId;
       }
+      setSession(next);
+      setUser(next?.user ?? null);
+      setLoadingSession(false);
+    };
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, next) => {
+      eventReceived = true;
+      applySession(next);
     });
-
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setUser(session?.user ?? null);
-      if (session?.user) {
-        fetchRole(session.user.id);
-      } else {
-        setLoading(false);
-      }
-    });
-
-    return () => subscription.unsubscribe();
+    void supabase.auth.getSession().then(({ data: { session: next } }) => {
+      if (!eventReceived) applySession(next);
+    }).catch(() => { if (!eventReceived) applySession(null); });
+    return () => { disposed = true; subscription.unsubscribe(); };
   }, []);
 
-  const fetchRole = async (userId: string) => {
-    try {
-      const { data } = await supabase
-        .from('user_roles')
-        .select('role')
-        .eq('user_id', userId)
-        .maybeSingle();
-      setUserRole(data?.role ?? null);
-    } catch {
-      setUserRole(null);
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const signOut = async () => {
-    await supabase.auth.signOut();
+    const { error } = await supabase.auth.signOut();
+    if (error) throw error;
+    queryClient.clear();
     setUser(null);
     setSession(null);
-    setUserRole(null);
   };
 
   return (

@@ -92,7 +92,38 @@ running without a Compose health check; an actual scan must verify enrichment.
 Public login/RLS/Realtime/audit acceptance and peak-load capacity remain pending.
 Container startup and public HTTP responses alone do not establish them.
 
-## Failed first bootstrap: Linux file permissions
+## Focused application update (Oct 8)
+
+For an already imported/running deployment, the project-loading repair has its
+own incremental phase. From the SnapFlow checkout in Wetty, pull the tested
+release and run:
+
+```bash
+git pull --ff-only origin main
+bash V3-Microservices/run-all.sh --vps --action app-update
+bash V3-Microservices/run-all.sh --vps --action status
+```
+
+Wait for active audits and queued/running workflows first. This phase retains
+the existing private configuration/keys, builds only the frontend, applies
+`20261008010000_compact_audit_lists.sql` in a transaction, atomically updates
+the two changed Redmine source files and recreates only functions/frontend.
+It leaves databases, scanner/NLP/form workers, Apache and Wetty running.
+It does not rerun import or disable schedules through `prepare`.
+The previous frontend image and function files are retained in a private
+`app-rollback-*` directory; activation failure attempts code/image restoration.
+Unused build cache/dangling images are cleaned even after failure; tagged
+rollback images and data volumes remain. Twenty mocked launcher tests pass;
+this incremental phase still needs live VPS acceptance.
+
+Hard-refresh once after success. Validate signed-in project lists, project
+details, score filters, archive/delete, selected comparisons and report
+reloads. Check assigned-user permissions and account switching, and measure
+cold/repeat page loads. The imported local snapshot shows about 99.3% less
+serialized audit data for project lists, including the selected legacy fallback;
+it does not establish a production load-time percentage.
+
+## Failed first bootstrap: Linux file permissions (details)
 
 The Oct 6 VPS diagnostics confirmed all seven mounted SQL inputs were 0600,
 owned by UID/GID 1002. The pinned PostgreSQL image initializes as UID 100;

@@ -643,6 +643,15 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      get_audit_list: {
+        Args: { p_project_id?: string; p_latest_per_project?: boolean; p_completed_only?: boolean }
+        Returns: {
+          id: string; project_id: string; job_id: string | null; status: string;
+          created_at: string; updated_at: string; archived_at: string | null;
+          error_message: string | null; site_name: string; url: string;
+          score: number | null; axis_count: number | null; has_report: boolean; requires_report: boolean;
+        }[]
+      }
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["app_role"]
